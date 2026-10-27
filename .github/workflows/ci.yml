@@ -36,9 +36,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        wp: ['6.6', 'latest']
+        include:
+          - wp: '6.6'
+            core: 'WordPress/WordPress#6.6'
+          - wp: latest
+            core: ''
     env:
-      WP_ENV_CORE: ${{ matrix.wp == 'latest' && '' || format('WordPress/WordPress#{0}', matrix.wp) }}
+      WP_ENV_CORE: ${{ matrix.core }}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
