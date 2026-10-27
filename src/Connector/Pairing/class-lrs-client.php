@@ -108,7 +108,7 @@ final class Lrs_Client {
 	 */
 	public static function to_response( $res ): Lrs_Response {
 		if ( is_wp_error( $res ) ) {
-			return new Lrs_Response( 0, array(), '' );
+			return new Lrs_Response( 0, array(), '', (string) $res->get_error_code(), $res->get_error_message() );
 		}
 		$headers = wp_remote_retrieve_headers( $res );
 		if ( is_object( $headers ) && method_exists( $headers, 'getAll' ) ) {

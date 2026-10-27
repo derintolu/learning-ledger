@@ -28,12 +28,16 @@ class Pairing_Test extends WP_UnitTestCase {
 	/** @var string */
 	private string $notify_public_b64 = '';
 
+	/** @var string|null api_base the fake /about returns; null means the requested host. */
+	private ?string $api_base = null;
+
 	public function set_up(): void {
 		parent::set_up();
 		delete_option( Connector_Settings::OPTION );
 		delete_option( Connector_Secret::OPTION );
 		delete_option( Connector_Keys::OPTION );
 		$this->requests          = array();
+		$this->api_base          = null;
 		$this->notify_public_b64 = base64_encode( Ed25519::keypair()['public'] );
 		add_filter( 'pre_http_request', array( $this, 'fake_http' ), 10, 3 );
 		( new Pairing_Module() )->register();
@@ -50,12 +54,14 @@ class Pairing_Test extends WP_UnitTestCase {
 			'url'  => $url,
 			'args' => $args,
 		);
-		if ( self::LRS . 'about' === $url ) {
-			$body = array(
+		if ( str_ends_with( $url, '/about' ) ) {
+			$p        = wp_parse_url( $url );
+			$api_base = $this->api_base ?? $p['scheme'] . '://' . $p['host'] . ( isset( $p['port'] ) ? ':' . $p['port'] : '' ) . '/wp-json/learning-ledger/v1/';
+			$body     = array(
 				'version'    => array( '1.0.3', '2.0.0' ),
 				'extensions' => array(
 					self::EXT => array(
-						'api_base'      => 'https://lrs.example.test/wp-json/learning-ledger/v1/',
+						'api_base'      => $api_base,
 						'notifications' => array(
 							'kid'        => 'notify-kid-1',
 							'public_key' => $this->notify_public_b64,
@@ -210,6 +216,90 @@ class Pairing_Test extends WP_UnitTestCase {
 			time()
 		);
 		$this->assertSame( $id, $verified );
+	}
+
+	public function test_connect_rejects_foreign_api_base() {
+		foreach ( array( 'https://evil.example.test/wp-json/learning-ledger/v1/', 'http://lrs.example.test/wp-json/learning-ledger/v1/', 'https://lrs.example.test:8443/wp-json/learning-ledger/v1/' ) as $foreign ) {
+			$this->api_base = $foreign;
+			try {
+				$this->connect();
+				$this->fail( 'connect accepted api_base ' . $foreign );
+			} catch ( \InvalidArgumentException $e ) {
+				$this->assertStringContainsString( 'api_base', $e->getMessage() );
+			}
+		}
+		$this->assertFalse( get_option( Connector_Settings::OPTION ), 'no settings written' );
+		$this->assertFalse( get_option( Connector_Secret::OPTION ), 'no secret written' );
+		$this->assertFalse( get_option( Connector_Keys::OPTION ), 'no signing key written' );
+
+		$this->api_base = 'https://lrs.example.test:443/wp-json/learning-ledger/v1/';
+		$this->connect();
+		$this->assertSame( 'https://lrs.example.test:443/wp-json/learning-ledger/v1/', Connector_Settings::get()['api_base'], 'default port is the same origin' );
+	}
+
+	public function test_api_base_may_be_on_the_loopback_of_the_same_lrs() {
+		$this->connect();
+		Pairing_Command::apply_setting( 'loopback-url', 'http://127.0.0.1:8080/xapi' );
+		$this->api_base = 'http://127.0.0.1:8080/wp-json/learning-ledger/v1/';
+		$this->connect();
+		$this->assertSame( 'http://127.0.0.1:8080/wp-json/learning-ledger/v1/', Connector_Settings::get()['api_base'] );
+		$this->assertSame( 'http://127.0.0.1:8080/xapi/', Connector_Settings::get()['loopback_url'] );
+	}
+
+	public function test_repair_to_another_lrs_clears_loopback() {
+		$this->connect();
+		Pairing_Command::apply_setting( 'loopback-url', 'http://127.0.0.1:8080/xapi' );
+		$this->connect();
+		$this->assertSame( 'http://127.0.0.1:8080/xapi/', Connector_Settings::get()['loopback_url'], 'same LRS keeps its loopback' );
+
+		Pairing_Command::pair( 'https://other-lrs.example.test/xapi/', 'connector-site' );
+		$s = Connector_Settings::get();
+		$this->assertSame( 'https://other-lrs.example.test/xapi/', $s['lrs_url'] );
+		$this->assertSame( '', $s['loopback_url'] );
+	}
+
+	public function test_unreadable_secret_fails_loudly_until_regenerated() {
+		$this->connect();
+		$old_hash = Connector_Secret::sha256_hex();
+		update_option( Connector_Secret::OPTION, base64_encode( random_bytes( 64 ) ), false );
+
+		$this->assertNull( Connector_Secret::get() );
+		$this->assertSame( 'unreadable', Connector_Secret::source() );
+		$status = apply_filters( 'learning_ledger/status', array(), true );
+		$this->assertSame( 'unreadable', $status['connector']['secret_source'] );
+		$this->assertFalse( $status['connector']['paired'] );
+		$this->assertNull( $status['connector']['secret_sha256'] );
+
+		$garbage  = get_option( Connector_Secret::OPTION );
+		$requests = count( $this->requests );
+		try {
+			$this->connect();
+			$this->fail( 'connect replaced an unreadable secret without --regenerate-secret' );
+		} catch ( \RuntimeException $e ) {
+			$this->assertStringContainsString( '--regenerate-secret', $e->getMessage() );
+		}
+		$this->assertSame( $garbage, get_option( Connector_Secret::OPTION ), 'the stored value is left alone' );
+		$this->assertCount( $requests, $this->requests, 'fails before contacting the LRS' );
+
+		try {
+			Connector_Secret::generate();
+			$this->fail( 'generate() replaced an unreadable secret' );
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( $garbage, get_option( Connector_Secret::OPTION ) );
+		}
+
+		Pairing_Command::pair( self::LRS, 'connector-site', true );
+		$this->assertSame( 'option', Connector_Secret::source() );
+		$this->assertNotNull( Connector_Secret::sha256_hex() );
+		$this->assertNotSame( $old_hash, Connector_Secret::sha256_hex() );
+	}
+
+	public function test_plain_http_to_remote_host_is_detected() {
+		$this->assertTrue( Pairing_Command::is_plain_http_to_remote( 'http://lrs.example.test/xapi/' ) );
+		$this->assertFalse( Pairing_Command::is_plain_http_to_remote( 'https://lrs.example.test/xapi/' ) );
+		$this->assertFalse( Pairing_Command::is_plain_http_to_remote( 'http://localhost:8888/xapi/' ) );
+		$this->assertFalse( Pairing_Command::is_plain_http_to_remote( 'http://127.0.0.1/xapi/' ) );
+		$this->assertFalse( Pairing_Command::is_plain_http_to_remote( 'http://[::1]/xapi/' ) );
 	}
 
 	public function test_set_changes_settings() {

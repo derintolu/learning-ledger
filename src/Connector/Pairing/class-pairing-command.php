@@ -39,14 +39,21 @@ final class Pairing_Command {
 	 * --client=<id>
 	 * : The client id the LRS admin will register for this connector.
 	 *
+	 * [--regenerate-secret]
+	 * : Replace a stored secret that can no longer be opened. Its new hash must be registered on the LRS again.
+	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Named arguments.
 	 *
 	 * @return void
 	 */
 	public function connect( array $args, array $assoc_args ): void {
+		$lrs = (string) ( $assoc_args['lrs'] ?? '' );
+		if ( self::is_plain_http_to_remote( $lrs ) ) {
+			\WP_CLI::warning( 'The LRS URL uses plain http to a non-local host; the connector credential would travel unencrypted.' );
+		}
 		try {
-			self::pair( (string) ( $assoc_args['lrs'] ?? '' ), (string) ( $assoc_args['client'] ?? '' ) );
+			self::pair( $lrs, (string) ( $assoc_args['client'] ?? '' ), ! empty( $assoc_args['regenerate-secret'] ) );
 		} catch ( \Exception $e ) {
 			\WP_CLI::error( $e->getMessage() );
 		}
@@ -88,20 +95,30 @@ final class Pairing_Command {
 	/**
 	 * Fetch `<lrs>about`, pin the notification key, generate the secret if absent and store settings.
 	 *
-	 * @param string $lrs    Public xAPI base.
-	 * @param string $client Client id.
+	 * Nothing is written unless every check passes.
+	 *
+	 * @param string  $lrs               Public xAPI base.
+	 * @param string  $client            Client id.
+	 * @param boolean $regenerate_secret Replace a stored secret that cannot be opened.
 	 *
 	 * @return void
 	 *
 	 * @throws Invalid_Input On bad arguments or an unusable `/about`.
-	 * @throws \RuntimeException When the LRS cannot be reached.
+	 * @throws \RuntimeException When the LRS cannot be reached or the stored secret cannot be opened.
 	 */
-	public static function pair( string $lrs, string $client ): void {
+	public static function pair( string $lrs, string $client, bool $regenerate_secret = false ): void {
 		$lrs    = self::http_url( $lrs, 'lrs' );
 		$client = trim( $client );
 		if ( '' === $client || sanitize_text_field( $client ) !== $client || strlen( $client ) > 191 || str_contains( $client, ':' ) ) {
 			throw new Invalid_Input( 'The client id is missing or invalid.', 'invalid', 'client' );
 		}
+		if ( Connector_Secret::UNREADABLE === Connector_Secret::source() && ! $regenerate_secret ) {
+			throw new \RuntimeException( Connector_Secret::UNREADABLE_MESSAGE );
+		}
+
+		// A loopback belongs to the LRS it was set for; re-pairing elsewhere drops it.
+		$current  = Connector_Settings::get();
+		$loopback = $current['lrs_url'] === $lrs ? $current['loopback_url'] : '';
 
 		$res = Lrs_Client::to_response(
 			wp_remote_get(
@@ -114,7 +131,7 @@ final class Pairing_Command {
 			)
 		);
 		if ( 0 === $res->status ) {
-			throw new \RuntimeException( 'The LRS could not be reached.' );
+			throw new \RuntimeException( 'The LRS could not be reached: ' . $res->error_message );
 		}
 		if ( 200 !== $res->status ) {
 			throw new \RuntimeException( sprintf( 'The LRS answered /about with HTTP %d.', $res->status ) );
@@ -129,8 +146,13 @@ final class Pairing_Command {
 		}
 
 		$api_base = self::http_url( is_string( $ext['api_base'] ?? null ) ? $ext['api_base'] : '', 'api_base' );
-		$kid      = $ext['notifications']['kid'] ?? null;
-		$public   = $ext['notifications']['public_key'] ?? null;
+		// The credential is sent to api_base, so it must be the LRS itself.
+		$origin = self::origin( $api_base );
+		if ( self::origin( $lrs ) !== $origin && ( '' === $loopback || self::origin( $loopback ) !== $origin ) ) {
+			throw new Invalid_Input( 'The LRS /about api_base is not on the LRS host (scheme, host and port must match).', 'invalid', 'api_base' );
+		}
+		$kid    = $ext['notifications']['kid'] ?? null;
+		$public = $ext['notifications']['public_key'] ?? null;
 		if ( ! is_string( $kid ) || '' === $kid || sanitize_text_field( $kid ) !== $kid ) {
 			throw new Invalid_Input( 'The LRS /about has no notification key id.', 'invalid', 'notifications.kid' );
 		}
@@ -139,11 +161,12 @@ final class Pairing_Command {
 			throw new Invalid_Input( 'The LRS /about has no valid notification public key.', 'invalid', 'notifications.public_key' );
 		}
 
-		Connector_Secret::generate();
+		Connector_Secret::generate( $regenerate_secret );
 		Connector_Keys::key_id();
 		Connector_Settings::update(
 			array(
 				'lrs_url'           => $lrs,
+				'loopback_url'      => $loopback,
 				'client_id'         => $client,
 				'api_base'          => $api_base,
 				'notify_kid'        => $kid,
@@ -184,6 +207,35 @@ final class Pairing_Command {
 				$parsed = '' === trim( $value ) ? '' : self::http_url( $value, 'value' );
 		}
 		Connector_Settings::update( array( self::SETTINGS[ $name ] => $parsed ) );
+	}
+
+	/**
+	 * Whether a URL is plain http to a host other than this machine.
+	 *
+	 * @param string $url URL.
+	 *
+	 * @return boolean
+	 */
+	public static function is_plain_http_to_remote( string $url ): bool {
+		if ( 'http' !== strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) ) ) {
+			return false;
+		}
+		$host = strtolower( trim( (string) wp_parse_url( $url, PHP_URL_HOST ), '[]' ) );
+		return ! ( 'localhost' === $host || str_ends_with( $host, '.localhost' ) || '::1' === $host || str_starts_with( $host, '127.' ) );
+	}
+
+	/**
+	 * Scheme, host and effective port of a URL.
+	 *
+	 * @param string $url URL.
+	 *
+	 * @return string
+	 */
+	private static function origin( string $url ): string {
+		$parts  = wp_parse_url( $url );
+		$scheme = strtolower( (string) ( $parts['scheme'] ?? '' ) );
+		$port   = isset( $parts['port'] ) ? (int) $parts['port'] : ( 'https' === $scheme ? 443 : 80 );
+		return $scheme . '://' . strtolower( (string) ( $parts['host'] ?? '' ) ) . ':' . $port;
 	}
 
 	/**

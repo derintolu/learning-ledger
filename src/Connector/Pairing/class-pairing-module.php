@@ -48,7 +48,7 @@ final class Pairing_Module implements Module {
 		}
 
 		$fields = array(
-			'paired'             => '' !== $settings['lrs_url'] && '' !== $settings['client_id'] && null !== $source,
+			'paired'             => '' !== $settings['lrs_url'] && '' !== $settings['client_id'] && null !== Connector_Secret::get(),
 			'lrs_url'            => $settings['lrs_url'],
 			'client_id'          => $settings['client_id'],
 			'secret_source'      => $source,

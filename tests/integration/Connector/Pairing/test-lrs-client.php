@@ -142,6 +142,8 @@ class Lrs_Client_Test extends WP_UnitTestCase {
 		$res = ( new Lrs_Client() )->xapi( 'GET', 'statements' );
 		$this->assertSame( 0, $res->status );
 		$this->assertNull( $res->json() );
+		$this->assertSame( 'http_request_failed', $res->error_code );
+		$this->assertSame( 'cURL error 7: refused', $res->error_message );
 	}
 
 	public function test_unpaired_client_refuses_to_send() {

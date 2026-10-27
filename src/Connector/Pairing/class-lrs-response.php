@@ -35,16 +35,34 @@ final class Lrs_Response {
 	public readonly string $body;
 
 	/**
+	 * Transport error code when status is 0, else ''.
+	 *
+	 * @var string
+	 */
+	public readonly string $error_code;
+
+	/**
+	 * Transport error message when status is 0, else ''.
+	 *
+	 * @var string
+	 */
+	public readonly string $error_message;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param integer $status  HTTP status.
-	 * @param array   $headers Headers.
-	 * @param string  $body    Raw body.
+	 * @param integer $status        HTTP status.
+	 * @param array   $headers       Headers.
+	 * @param string  $body          Raw body.
+	 * @param string  $error_code    Transport error code.
+	 * @param string  $error_message Transport error message.
 	 */
-	public function __construct( int $status, array $headers, string $body ) {
-		$this->status  = $status;
-		$this->headers = array_change_key_case( $headers, CASE_LOWER );
-		$this->body    = $body;
+	public function __construct( int $status, array $headers, string $body, string $error_code = '', string $error_message = '' ) {
+		$this->status        = $status;
+		$this->headers       = array_change_key_case( $headers, CASE_LOWER );
+		$this->body          = $body;
+		$this->error_code    = $error_code;
+		$this->error_message = $error_message;
 	}
 
 	/**
