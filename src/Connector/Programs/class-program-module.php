@@ -147,7 +147,7 @@ final class Program_Module implements Module {
 			'_lledger_course_iri',
 			array(
 				'type'              => 'string',
-				'sanitize_callback' => static fn( $v ) => esc_url_raw( (string) $v ),
+				'sanitize_callback' => array( self::class, 'sanitize_url' ),
 			)
 		);
 		$reg(
@@ -190,14 +190,14 @@ final class Program_Module implements Module {
 			'_lledger_course_server_url',
 			array(
 				'type'              => 'string',
-				'sanitize_callback' => static fn( $v ) => esc_url_raw( (string) $v ),
+				'sanitize_callback' => array( self::class, 'sanitize_url' ),
 			)
 		);
 		$reg(
 			'_lledger_au_url_template',
 			array(
 				'type'              => 'string',
-				'sanitize_callback' => static fn( $v ) => str_contains( (string) $v, '{key}' ) ? esc_url_raw( (string) $v, array( 'http', 'https' ) ) : '',
+				'sanitize_callback' => array( self::class, 'sanitize_au_url_template' ),
 			)
 		);
 		$reg(
@@ -266,5 +266,36 @@ final class Program_Module implements Module {
 			return '';
 		}
 		return trailingslashit( $url );
+	}
+
+	/**
+	 * Sanitizes an http(s) URL; empty when it is not one.
+	 *
+	 * @param mixed $value Raw value.
+	 *
+	 * @return string
+	 */
+	public static function sanitize_url( mixed $value ): string {
+		return esc_url_raw( (string) $value, array( 'http', 'https' ) );
+	}
+
+	/**
+	 * Sanitizes an AU URL template: an http(s) URL once `{key}` is replaced, stored with `{key}` intact.
+	 *
+	 * @param mixed $value Raw value.
+	 *
+	 * @return string
+	 */
+	public static function sanitize_au_url_template( mixed $value ): string {
+		$value = (string) $value;
+		if ( ! str_contains( $value, '{key}' ) ) {
+			return '';
+		}
+		$dummy = 'lledgerkeyplaceholder';
+		$url   = esc_url_raw( str_replace( '{key}', $dummy, $value ), array( 'http', 'https' ) );
+		if ( '' === $url || ! str_contains( $url, $dummy ) ) {
+			return '';
+		}
+		return str_replace( $dummy, '{key}', $url );
 	}
 }
