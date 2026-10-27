@@ -1,0 +1,25 @@
+W3C Data Integrity EdDSA Cryptosuites v1.0 (Recommendation, 15 May 2025),
+Appendix B.1 "Representation: eddsa-rdfc-2022".
+
+Section:   https://www.w3.org/TR/2025/REC-vc-di-eddsa-20250515/#representation-eddsa-rdfc-2022
+Files:     https://github.com/w3c/vc-di-eddsa/tree/13e7070534d1ba1c2987cb26bfb1535e0f15bb72/TestVectors
+Retrieved: 2026-10-27
+Licence:   W3C Software and Document License
+
+Copied unmodified (renamed) from TestVectors/ at that commit; the values
+match the Recommendation's examples (numbers checked where given):
+  key-pair.json               keyPair.json                            (Example 7)
+  unsigned-credential.json    unsigned.json                           (Example 8)
+  canonical-document.nq       eddsa-rdfc-2022/canonDocDataInt.txt
+  document-hash.txt           eddsa-rdfc-2022/docHashDataInt.txt      (Example 10)
+  proof-options.json          eddsa-rdfc-2022/proofConfigDataInt.json
+  canonical-proof.nq          eddsa-rdfc-2022/proofCanonDataInt.txt
+  proof-hash.txt              eddsa-rdfc-2022/proofHashDataInt.txt
+  combined-hash.txt           eddsa-rdfc-2022/combinedHashDataInt.txt (Example 14)
+  proof-value.txt             eddsa-rdfc-2022/sigBTC58DataInt.txt
+  signed-credential.json      eddsa-rdfc-2022/signedDataInt.json      (Example 17)
+
+Test-only JSON-LD context (served by LearningLedger\Tests\Fixture_Context_Loader,
+never bundled in resources/jsonld/):
+  credentials-examples-v2.jsonld  https://www.w3.org/ns/credentials/examples/v2
+                                  (fetched 2026-10-27, unmodified)

@@ -8,6 +8,7 @@
 namespace LearningLedger\Badges\Canon;
 
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Vendor\Accredify\JsonLd\Contracts\DocumentLoader;
 use LearningLedger\Vendor\Accredify\JsonLd\Exceptions\DataLossException;
 use LearningLedger\Vendor\Accredify\JsonLd\Exceptions\JsonLdException;
 use LearningLedger\Vendor\Accredify\JsonLd\JsonLdOptions;
@@ -20,6 +21,41 @@ use LearningLedger\Vendor\Accredify\RdfCanonicalize\RDFC10;
 class Canonicalizer {
 
 	/**
+	 * RDFC-1.0 deep-iteration limit for input from outside the site.
+	 *
+	 * Admits the W3C rdf-canon "computable given defined limits" poison graphs
+	 * (test044c-test046c need 42) and stops the clique graph test074c.
+	 */
+	public const UNTRUSTED_MAX_DEEP_ITERATIONS = 100;
+
+	/**
+	 * JSON-LD document loader.
+	 *
+	 * @var DocumentLoader
+	 */
+	private DocumentLoader $loader;
+
+	/**
+	 * RDFC-1.0 deep-iteration limit per blank node.
+	 *
+	 * @var int
+	 */
+	private int $max_deep_iterations;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param DocumentLoader|null $loader              Context loader; defaults to the bundled Context_Loader.
+	 * @param integer             $max_deep_iterations RDFC-1.0 deep-iteration limit per blank node. Leave
+	 *                                                 unbounded for documents this site built; pass
+	 *                                                 UNTRUSTED_MAX_DEEP_ITERATIONS for anything received.
+	 */
+	public function __construct( ?DocumentLoader $loader = null, int $max_deep_iterations = PHP_INT_MAX ) {
+		$this->loader              = $loader ?? new Context_Loader();
+		$this->max_deep_iterations = $max_deep_iterations;
+	}
+
+	/**
 	 * Canonicalise a JSON-LD document.
 	 *
 	 * Expansion runs in safe mode against the bundled contexts only, so any
@@ -29,13 +65,14 @@ class Canonicalizer {
 	 *
 	 * @return string Canonical N-Quads.
 	 *
-	 * @throws Invalid_Input Code undefined_term when data would be dropped,
+	 * @throws Invalid_Input Code canon_limit when the deep-iteration limit is exceeded,
+	 *                       undefined_term when data would be dropped,
 	 *                       context_not_bundled for an unknown context URL,
 	 *                       invalid for any other JSON-LD error.
 	 */
 	public function canonicalize( array $document ): string {
 		try {
-			$nquads = ( new JsonLdProcessor( new Context_Loader() ) )
+			$nquads = ( new JsonLdProcessor( $this->loader ) )
 				->toRdf( $document, new JsonLdOptions( safe: true ) )
 				->toNQuads();
 		} catch ( DataLossException $e ) {
@@ -58,8 +95,18 @@ class Canonicalizer {
 	 * @param string $nquads N-Quads.
 	 *
 	 * @return string Canonical N-Quads.
+	 *
+	 * @throws Invalid_Input Code canon_limit when the deep-iteration limit is exceeded.
+	 * @throws \Exception    Any other canonicalisation error, unchanged.
 	 */
 	public function canonicalize_nquads( string $nquads ): string {
-		return implode( '', ( new RDFC10() )->canonicalize( $nquads ) );
+		try {
+			return implode( '', ( new RDFC10( array(), $this->max_deep_iterations ) )->canonicalize( $nquads ) );
+		} catch ( \Exception $e ) {
+			if ( str_starts_with( $e->getMessage(), 'Maximum deep iterations' ) ) {
+				throw new Invalid_Input( 'RDF canonicalization exceeded its work limit.', 'canon_limit' );
+			}
+			throw $e;
+		}
 	}
 }

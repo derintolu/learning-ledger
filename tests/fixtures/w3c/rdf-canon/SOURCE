@@ -9,6 +9,9 @@ Contents, copied unmodified from tests/ at that commit:
   manifest.jsonld                  the full manifest
   rdfc10/testNNN-in.nq             action of every rdfc:RDFC10EvalTest entry
   rdfc10/testNNN-rdfc10.nq         result of every rdfc:RDFC10EvalTest entry
+  rdfc10/test074-in.nq             input of rdfc:RDFC10NegativeEvalTest #test074c
+                                   (poison clique graph; used by the eddsa-rdfc-2022
+                                   verification limit test)
 
-Not vendored: rdfc:RDFC10MapTest results (*-rdfc10map.json) and the
-rdfc:RDFC10NegativeEvalTest input; they are outside this suite's scope.
+Not vendored: rdfc:RDFC10MapTest results (*-rdfc10map.json); they are
+outside this suite's scope.
