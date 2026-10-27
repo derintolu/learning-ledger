@@ -47,7 +47,7 @@ final class Client_Repository {
 	);
 
 	/**
-	 * Find a client (revoked and expired ones included).
+	 * Find a client by its exact id (revoked and expired ones included).
 	 *
 	 * @param string $id Client id.
 	 *
@@ -60,7 +60,9 @@ final class Client_Repository {
 		}
 		global $wpdb;
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE id = %s', Tables::name( 'clients' ), $id ), ARRAY_A );
-		if ( ! $row ) {
+		// The id column's collation is case-insensitive; only an exact match is the same client,
+		// so a cached copy is always keyed by the canonical id that flush() deletes.
+		if ( ! $row || $row['id'] !== $id ) {
 			return null;
 		}
 		$client = self::hydrate( $row );

@@ -214,10 +214,36 @@ class Authenticator_Test extends WP_UnitTestCase {
 	}
 
 	public function test_child_guard_follows_parent_switch() {
-		$c      = Client_Factory::create( array( Scopes::TOKENS_MINT ), array( 'guard_enabled' => false ) );
+		$c      = Client_Factory::create( array( Scopes::TOKENS_MINT, Scopes::STATEMENTS_WRITE ), array( 'guard_enabled' => false ) );
 		$minted = $this->mint_child( $c );
 		$p      = $this->auth( self::request( array( 'Authorization' => self::basic( $minted['key'], $minted['secret'] ) ) ) );
 		$this->assertFalse( $p->guard_enabled() );
+		$this->assertTrue( $p->can( Scopes::STATEMENTS_WRITE ) );
+	}
+
+	public function test_child_scopes_capped_by_parent() {
+		$c      = Client_Factory::create( array( Scopes::TOKENS_MINT, Scopes::STATEMENTS_READ_MINE ) );
+		$minted = $this->mint_child( $c );
+		$p      = $this->auth( self::request( array( 'Authorization' => self::basic( $minted['key'], $minted['secret'] ) ) ) );
+
+		$this->assertTrue( $p->is_child() );
+		$this->assertTrue( $p->can( Scopes::STATEMENTS_READ_MINE ) );
+		$this->assertFalse( $p->can( Scopes::STATEMENTS_WRITE ) );
+		$this->assertFalse( $p->can( Scopes::STATE ) );
+		$this->assertFalse( $p->can( Scopes::PROFILE ) );
+		$this->assertFalse( $p->can( Scopes::TOKENS_MINT ) );
+	}
+
+	public function test_client_id_must_match_exactly() {
+		$c = Client_Factory::create( array( Scopes::STATEMENTS_READ ) );
+		$this->assertNull( ( new Client_Repository() )->find( strtoupper( $c['id'] ) ) );
+		$this->assertSame( 401, $this->expect_error( self::request( array( 'Authorization' => self::basic( strtoupper( $c['id'] ), $c['secret'] ) ) ) )->status() );
+
+		// Nothing is cached under the other-case key, so revoking the canonical id takes effect at once.
+		$this->assertSame( $c['id'], ( new Client_Repository() )->find( $c['id'] )->id );
+		$this->assertFalse( wp_cache_get( 'id:' . strtoupper( $c['id'] ), Client_Repository::CACHE_GROUP ) );
+		( new Client_Repository() )->revoke( $c['id'] );
+		$this->assertSame( 401, $this->expect_error( self::request( array( 'Authorization' => self::basic( $c['id'], $c['secret'] ) ) ) )->status() );
 	}
 
 	public function test_expired_and_revoked_token_401() {

@@ -88,15 +88,15 @@ final class Authenticator {
 			throw new Xapi_Error( 401, self::MISSING_MESSAGE, array( 'WWW-Authenticate' => self::REALM ) );
 		}
 
-		$principal = $this->verify( $credential[0], $credential[1] );
-		if ( null === $principal ) {
+		$verified = $this->verify( $credential[0], $credential[1] );
+		if ( null === $verified ) {
 			$this->failures->hit( $ip );
 			throw new Xapi_Error( 401, self::INVALID_MESSAGE, array( 'WWW-Authenticate' => self::REALM ) );
 		}
 
-		$client  = $this->clients->find( $principal->client_id() );
-		$classes = Rate_Limiter::classes();
-		$class   = array_key_exists( $client->rate_class, $classes ) ? $classes[ $client->rate_class ] : $classes['default'];
+		list( $principal, $client ) = $verified;
+		$classes                    = Rate_Limiter::classes();
+		$class                      = array_key_exists( $client->rate_class, $classes ) ? $classes[ $client->rate_class ] : $classes['default'];
 		if ( null !== $class && ! $this->limiter->consume( 'client:' . $principal->authority_key(), (float) $class[0], (int) $class[1] ) ) {
 			throw new Xapi_Error( 429, 'Rate limit exceeded.', array( 'Retry-After' => '1' ) );
 		}
@@ -145,9 +145,9 @@ final class Authenticator {
 	 * @param string $user     Username (client id or token key).
 	 * @param string $password Secret.
 	 *
-	 * @return Principal|null
+	 * @return array{0:Principal,1:Client}|null The principal and the client whose rate class applies.
 	 */
-	private function verify( string $user, string $password ): ?Principal {
+	private function verify( string $user, string $password ): ?array {
 		$now = Clock::now();
 		if ( '' === $user || '' === $password ) {
 			return null;
@@ -166,7 +166,7 @@ final class Authenticator {
 			if ( null === $parent_client || ! $parent_client->is_active( $now ) ) {
 				return null;
 			}
-			return Principal::for_token( $parent_client, $token );
+			return array( Principal::for_token( $parent_client, $token ), $parent_client );
 		}
 
 		$client = $this->clients->find( $user );
@@ -177,6 +177,6 @@ final class Authenticator {
 		if ( ! $client->secret_matches( $password ) || ! $client->is_active( $now ) ) {
 			return null;
 		}
-		return Principal::for_client( $client );
+		return array( Principal::for_client( $client ), $client );
 	}
 }

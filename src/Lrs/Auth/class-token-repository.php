@@ -35,6 +35,7 @@ final class Token_Repository {
 	 *
 	 * @return array{key:string,secret:string,expires_at:string} The secret is returned once and never stored.
 	 * @throws Invalid_Input On invalid input, or when the parent may not mint this token.
+	 * @throws \RuntimeException When the row cannot be stored.
 	 */
 	public function mint( Client $parent_client, Token_Spec $s ): array {
 		$now = Clock::now();
@@ -70,7 +71,7 @@ final class Token_Repository {
 		$expires = $now->modify( '+' . min( $s->ttl, self::MAX_TTL ) . ' seconds' );
 
 		global $wpdb;
-		$wpdb->insert(
+		$ok = $wpdb->insert(
 			Tables::name( 'tokens' ),
 			array(
 				'token_key'     => $key,
@@ -88,6 +89,9 @@ final class Token_Repository {
 				'created_at'    => Timestamp::to_db( $now ),
 			)
 		);
+		if ( false === $ok ) {
+			throw new \RuntimeException( 'Could not store the token.' );
+		}
 		Origin_Index::flush();
 
 		return array(

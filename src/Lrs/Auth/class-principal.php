@@ -15,7 +15,7 @@ use LearningLedger\Xapi\Agent_Identity;
 final class Principal {
 
 	/**
-	 * What a child token can do, whatever its parent holds. Profiles are read-only (can_write_profile()).
+	 * The most a child token can do, further capped by what its parent holds. Profiles are read-only (can_write_profile()).
 	 *
 	 * @var string[]
 	 */
@@ -105,7 +105,7 @@ final class Principal {
 			return in_array( $scope, Scopes::XAPI, true );
 		}
 		if ( null !== $this->token ) {
-			return in_array( $scope, self::CHILD_SCOPES, true );
+			return in_array( $scope, self::CHILD_SCOPES, true ) && $this->client->holds( $scope );
 		}
 		return $this->client->holds( $scope );
 	}

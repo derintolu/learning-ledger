@@ -26,11 +26,11 @@ final class Auth_Hooks implements Module {
 	/**
 	 * False for requests to Client_Route_Auth::PATHS.
 	 *
-	 * @param boolean $is_api_request Core's value.
+	 * @param mixed $is_api_request Core's value (a bool, unless another filter changed it).
 	 *
-	 * @return boolean
+	 * @return mixed
 	 */
-	public function filter_api_request( bool $is_api_request ): bool {
+	public function filter_api_request( mixed $is_api_request ): mixed {
 		return self::is_client_route( $_SERVER ) ? false : $is_api_request;
 	}
 
