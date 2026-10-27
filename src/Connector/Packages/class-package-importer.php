@@ -28,8 +28,6 @@ use LearningLedger\Util\Json;
  */
 final class Package_Importer {
 
-	private const HASH_META = '_lledger_import_hash';
-
 	/**
 	 * Adapter to use instead of the loaded one (tests).
 	 *
@@ -45,6 +43,13 @@ final class Package_Importer {
 	private Program_Repository $repo;
 
 	/**
+	 * Shared program and hash writes.
+	 *
+	 * @var Import_Writer
+	 */
+	private Import_Writer $writer;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param LMS_Adapter|null        $adapter Adapter override; null looks the adapter up by id.
@@ -53,6 +58,7 @@ final class Package_Importer {
 	public function __construct( ?LMS_Adapter $adapter = null, ?Program_Repository $repo = null ) {
 		$this->adapter = $adapter;
 		$this->repo    = $repo ?? new Program_Repository();
+		$this->writer  = new Import_Writer( $this->repo );
 	}
 
 	/**
@@ -77,27 +83,27 @@ final class Package_Importer {
 
 		$adapter = $this->adapter ?? Integration_Loader::adapter( $adapter_id );
 		if ( null === $adapter ) {
-			return Import_Report::failed( array( self::error( 'adapter_unavailable', 'The LMS integration is not available.' ) ) );
+			return Import_Report::failed( array( Import_Writer::error( 'adapter_unavailable', '', 'The LMS integration is not available.' ) ) );
 		}
 
 		$structure = Course_Structure_Parser::parse( $p->cmi5_xml() );
-		$key       = Program_Module::sanitize_stable_key( (string) ( $course_json['key'] ?? self::last_segment( $structure->course_id() ) ) );
+		$key       = Program_Module::sanitize_stable_key( (string) ( $course_json['key'] ?? Import_Writer::last_segment( $structure->course_id() ) ) );
 		if ( '' === $key ) {
-			return Import_Report::failed( array( self::error( 'program_key', 'The course has no usable key.' ) ) );
+			return Import_Report::failed( array( Import_Writer::error( 'program_key', '', 'The course has no usable key.' ) ) );
 		}
 
 		$plan = self::plan( $structure );
 
 		$program_id = $this->program( $key, $structure, $course_json, $plan['placement'] );
 		if ( 0 === $program_id ) {
-			return Import_Report::failed( array( self::error( 'program_write', 'The program could not be saved.' ) ) );
+			return Import_Report::failed( array( Import_Writer::error( 'program_write', '', 'The program could not be saved.' ) ) );
 		}
 		$old_courses = $this->repo->get( $program_id )?->course_ids ?? array();
 
 		$created = array();
 		$updated = array();
 		try {
-			$hashes     = $this->hashes( $program_id );
+			$hashes     = $this->writer->hashes( $program_id );
 			$course_ids = array();
 			$path_keys  = array();
 			$keep       = array();
@@ -125,7 +131,7 @@ final class Package_Importer {
 			 * @param \Throwable $e The cause.
 			 */
 			do_action( 'learning_ledger/import_error', $e ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
-			return Import_Report::failed( array( self::error( 'import_failed', 'The import was interrupted (' . ( new \ReflectionClass( $e ) )->getShortName() . '). Run it again to resume.' ) ), $program_id, $created, $updated );
+			return Import_Report::failed( array( Import_Writer::error( 'import_failed', '', 'The import was interrupted (' . ( new \ReflectionClass( $e ) )->getShortName() . '). Run it again to resume.' ) ), $program_id, $created, $updated );
 		}
 
 		return new Import_Report( $program_id, $created, $updated, $drafted );
@@ -144,9 +150,9 @@ final class Package_Importer {
 		foreach ( $structure->children() as $child ) {
 			if ( $child instanceof Block ) {
 				$courses[] = array(
-					'key'   => Program_Module::sanitize_stable_key( $child->key() ?? self::last_segment( $child->id() ) ),
+					'key'   => Program_Module::sanitize_stable_key( $child->key() ?? Import_Writer::last_segment( $child->id() ) ),
 					'block' => $child,
-					'aus'   => self::flatten( $child ),
+					'aus'   => Import_Writer::flatten( $child ),
 				);
 			} elseif ( $child instanceof Au && 'placement' === $child->role() ) {
 				$placement = self::key_of( $child );
@@ -156,25 +162,6 @@ final class Package_Importer {
 			'courses'   => $courses,
 			'placement' => $placement,
 		);
-	}
-
-	/**
-	 * Every AU under a block, nested blocks flattened, in document order.
-	 *
-	 * @param Block $block Block.
-	 *
-	 * @return Au[]
-	 */
-	private static function flatten( Block $block ): array {
-		$aus = array();
-		foreach ( $block->children() as $child ) {
-			if ( $child instanceof Block ) {
-				$aus = array_merge( $aus, self::flatten( $child ) );
-			} elseif ( $child instanceof Au ) {
-				$aus[] = $child;
-			}
-		}
-		return $aus;
 	}
 
 	/**
@@ -188,33 +175,9 @@ final class Package_Importer {
 	 * @return integer Post id, 0 on failure.
 	 */
 	private function program( string $key, Course_Structure $structure, array $course_json, ?string $placement ): int {
-		$title = sanitize_text_field( self::pick( $structure->title(), $key ) );
-		$id    = $this->repo->find_by_key( $key );
-		if ( null === $id ) {
-			$new = wp_insert_post(
-				wp_slash(
-					array(
-						'post_type'   => Program_Repository::POST_TYPE,
-						'post_status' => 'publish',
-						'post_title'  => $title,
-					)
-				),
-				true
-			);
-			if ( is_wp_error( $new ) || 0 === (int) $new ) {
-				return 0;
-			}
-			$id = (int) $new;
-			update_post_meta( $id, '_lledger_stable_key', $key );
-		} elseif ( get_post_field( 'post_title', $id, 'raw' ) !== $title ) {
-			wp_update_post(
-				wp_slash(
-					array(
-						'ID'         => $id,
-						'post_title' => $title,
-					)
-				)
-			);
+		$id = $this->writer->program( $key, Import_Writer::pick( $structure->title(), $key ) );
+		if ( 0 === $id ) {
+			return 0;
 		}
 
 		update_post_meta( $id, '_lledger_course_iri', $structure->course_id() );
@@ -291,13 +254,13 @@ final class Package_Importer {
 				$meta[ $meta_key ] = Json::encode_exact( $path[ $field ] );
 			}
 		}
-		$title       = sanitize_text_field( self::pick( $block->title(), $course['key'] ) );
-		$description = self::pick( self::description_of( $block ), '' );
-		$content     = self::paragraph( $description );
+		$title       = sanitize_text_field( Import_Writer::pick( $block->title(), $course['key'] ) );
+		$description = Import_Writer::pick( Import_Writer::description_of( $block ), '' );
+		$content     = Import_Writer::paragraph( $description );
 		$spec        = new Course_Spec( $course['key'], $title, $content, 'publish', $meta );
 		$hash        = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $content, $meta ) ) );
 
-		return $this->write_item( $program_id, $hashes, 'course:' . $course['key'], $hash, $created, $updated, fn(): int => $adapter->upsert_course( $spec ) );
+		return $this->writer->write_item( $program_id, $hashes, 'course:' . $course['key'], $hash, $created, $updated, fn(): int => $adapter->upsert_course( $spec ) );
 	}
 
 	/**
@@ -319,9 +282,9 @@ final class Package_Importer {
 	 */
 	private function write_lesson( LMS_Adapter $adapter, int $program_id, array &$hashes, int $course_id, string $key, int $order, Au $au, Package $p, array $course_json, array &$created, array &$updated ): void {
 		$lesson  = $this->lesson_json( $p, $au );
-		$content = null === $lesson ? self::paragraph( self::pick( $au->description(), '' ) ) : Lesson_Blocks_Builder::build( $lesson );
+		$content = null === $lesson ? Import_Writer::paragraph( Import_Writer::pick( $au->description(), '' ) ) : Lesson_Blocks_Builder::build( $lesson );
 		$content = wp_kses_post( $content );
-		$title   = sanitize_text_field( self::pick( $au->title(), $key ) );
+		$title   = sanitize_text_field( Import_Writer::pick( $au->title(), $key ) );
 
 		$meta = array();
 		if ( null !== $lesson ) {
@@ -341,39 +304,7 @@ final class Package_Importer {
 
 		$spec = new Lesson_Spec( $key, $title, $content, $order, 'publish', $meta );
 		$hash = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $course_id, $title, $content, $order, $meta ) ) );
-		$this->write_item( $program_id, $hashes, 'lesson:' . $key, $hash, $created, $updated, fn(): int => $adapter->upsert_lesson( $course_id, $spec ) );
-	}
-
-	/**
-	 * Runs the write for an item unless the stored hash matches, then records the new hash.
-	 *
-	 * @param integer  $program_id Program id.
-	 * @param array    $hashes     Hashes, updated in place.
-	 * @param string   $ref        Item ref.
-	 * @param string   $hash       Content hash.
-	 * @param string[] $created    Created refs, appended to.
-	 * @param string[] $updated    Updated refs, appended to.
-	 * @param callable $write      Performs the upsert and returns the LMS id.
-	 *
-	 * @return integer LMS id.
-	 */
-	private function write_item( int $program_id, array &$hashes, string $ref, string $hash, array &$created, array &$updated, callable $write ): int {
-		$known = $hashes[ $ref ] ?? null;
-		if ( is_array( $known ) && ( $known['h'] ?? '' ) === $hash && (int) ( $known['id'] ?? 0 ) > 0 ) {
-			return (int) $known['id'];
-		}
-		$id = (int) $write();
-		if ( null === $known ) {
-			$created[] = $ref;
-		} else {
-			$updated[] = $ref;
-		}
-		$hashes[ $ref ] = array(
-			'h'  => $hash,
-			'id' => $id,
-		);
-		update_post_meta( $program_id, self::HASH_META, wp_slash( (string) wp_json_encode( $hashes ) ) );
-		return $id;
+		$this->writer->write_item( $program_id, $hashes, 'lesson:' . $key, $hash, $created, $updated, fn(): int => $adapter->upsert_lesson( $course_id, $spec ) );
 	}
 
 	/**
@@ -410,21 +341,9 @@ final class Package_Importer {
 			}
 		}
 		if ( $drafted ) {
-			update_post_meta( $program_id, self::HASH_META, wp_slash( (string) wp_json_encode( $hashes ) ) );
+			$this->writer->save_hashes( $program_id, $hashes );
 		}
 		return $drafted;
-	}
-
-	/**
-	 * Stored hashes.
-	 *
-	 * @param integer $program_id Program id.
-	 *
-	 * @return array<string,array{h:string,id:int}>
-	 */
-	private function hashes( int $program_id ): array {
-		$decoded = json_decode( (string) get_post_meta( $program_id, self::HASH_META, true ), true );
-		return is_array( $decoded ) ? $decoded : array();
 	}
 
 	/**
@@ -444,18 +363,6 @@ final class Package_Importer {
 	}
 
 	/**
-	 * Description map of a block.
-	 *
-	 * @param Block $block Block.
-	 *
-	 * @return array<string,string>
-	 */
-	private static function description_of( Block $block ): array {
-		$data = $block->to_array();
-		return (array) ( $data['description'] ?? array() );
-	}
-
-	/**
 	 * Stable key of an AU.
 	 *
 	 * @param Au $au AU.
@@ -463,58 +370,6 @@ final class Package_Importer {
 	 * @return string
 	 */
 	private static function key_of( Au $au ): string {
-		return Program_Module::sanitize_stable_key( $au->key() ?? self::last_segment( $au->id() ) );
-	}
-
-	/**
-	 * A paragraph block, or nothing for empty text.
-	 *
-	 * @param string $text Plain text.
-	 *
-	 * @return string
-	 */
-	private static function paragraph( string $text ): string {
-		return '' === trim( $text ) ? '' : Markdown_To_Blocks::block( 'core/paragraph', array(), '<p>' . esc_html( $text ) . '</p>' );
-	}
-
-	/**
-	 * English text, else the first language, else the fallback.
-	 *
-	 * @param array<string,string> $langstrings Language to text.
-	 * @param string               $fallback    Fallback.
-	 *
-	 * @return string
-	 */
-	private static function pick( array $langstrings, string $fallback ): string {
-		$text = $langstrings['en'] ?? ( $langstrings ? reset( $langstrings ) : '' );
-		return '' !== trim( (string) $text ) ? (string) $text : $fallback;
-	}
-
-	/**
-	 * Last path segment of an IRI.
-	 *
-	 * @param string $iri IRI.
-	 *
-	 * @return string
-	 */
-	private static function last_segment( string $iri ): string {
-		$path = (string) wp_parse_url( $iri, PHP_URL_PATH );
-		return basename( rtrim( $path, '/' ) );
-	}
-
-	/**
-	 * A validator-shaped error.
-	 *
-	 * @param string $code    Code.
-	 * @param string $message Message.
-	 *
-	 * @return array{code:string,path:string,message:string}
-	 */
-	private static function error( string $code, string $message ): array {
-		return array(
-			'code'    => $code,
-			'path'    => '',
-			'message' => $message,
-		);
+		return Program_Module::sanitize_stable_key( $au->key() ?? Import_Writer::last_segment( $au->id() ) );
 	}
 }

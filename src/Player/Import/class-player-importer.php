@@ -16,7 +16,7 @@ use LearningLedger\Connector\Lms\Integration_Loader;
 use LearningLedger\Connector\Lms\Lesson_Spec;
 use LearningLedger\Connector\Lms\LMS_Adapter;
 use LearningLedger\Connector\Packages\Import_Report;
-use LearningLedger\Connector\Packages\Markdown_To_Blocks;
+use LearningLedger\Connector\Packages\Import_Writer;
 use LearningLedger\Connector\Packages\Package_Importer;
 use LearningLedger\Connector\Programs\Program_Module;
 use LearningLedger\Connector\Programs\Program_Repository;
@@ -25,6 +25,7 @@ use LearningLedger\Package\Limits;
 use LearningLedger\Package\Package;
 use LearningLedger\Player\Store\Au_Store;
 use LearningLedger\Player\Store\Content_Host;
+use LearningLedger\Queue\Job_Queue;
 use LearningLedger\Util\Invalid_Input;
 
 /**
@@ -32,7 +33,8 @@ use LearningLedger\Util\Invalid_Input;
  * blocks flattened into them), AUs directly under the course go into one course
  * titled after it, and each AU becomes a lesson holding a cmi5-lesson block.
  * Courses and lessons are keyed by their cmi5 ids, so a re-import changes only
- * what changed. A package with a cxm/ folder goes through Package_Importer.
+ * what changed. A package with a cxm/ folder is checked the same way, then goes
+ * through Package_Importer.
  */
 final class Player_Importer {
 
@@ -42,19 +44,34 @@ final class Player_Importer {
 	public const AU_META = '_lledger_au_id';
 
 	/**
-	 * Program meta holding the content store package id.
+	 * Program meta: the content store package the stored structure's AU URLs point at.
 	 */
 	public const PACKAGE_META = '_lledger_cmi5_package';
 
 	/**
-	 * Program meta holding the SHA-256 of the stored ZIP.
+	 * Program meta: SHA-256 of that package's ZIP.
 	 */
 	public const SHA_META = '_lledger_cmi5_sha256';
 
 	/**
-	 * Program meta holding the content hash of each written course and lesson.
+	 * Program meta: earlier packages kept until the live one is ready.
 	 */
-	private const HASH_META = '_lledger_import_hash';
+	public const SUPERSEDED_META = '_lledger_cmi5_superseded';
+
+	/**
+	 * Job type that deletes superseded packages once the live one is ready.
+	 */
+	public const SWEEP_JOB = 'cmi5_supersede';
+
+	/**
+	 * Seconds between sweep attempts while the live package is still extracting.
+	 */
+	private const SWEEP_DELAY = 60;
+
+	/**
+	 * Sweep attempts before giving up on a package that never leaves pending.
+	 */
+	private const SWEEP_ATTEMPTS = 1440;
 
 	/**
 	 * Query parameters the LMS adds at launch, which an AU URL must not carry (cmi5 8.1).
@@ -76,6 +93,13 @@ final class Player_Importer {
 	private Program_Repository $repo;
 
 	/**
+	 * Shared program and hash writes.
+	 *
+	 * @var Import_Writer
+	 */
+	private Import_Writer $writer;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param LMS_Adapter|null        $adapter Adapter override; null uses the loaded Sensei adapter.
@@ -84,6 +108,7 @@ final class Player_Importer {
 	public function __construct( ?LMS_Adapter $adapter = null, ?Program_Repository $repo = null ) {
 		$this->adapter = $adapter;
 		$this->repo    = $repo ?? new Program_Repository();
+		$this->writer  = new Import_Writer( $this->repo );
 	}
 
 	/**
@@ -95,41 +120,44 @@ final class Player_Importer {
 	 * @return Import_Report
 	 */
 	public function import( string $zip_or_xml_path, string $source_url = '' ): Import_Report {
-		$limits = new Limits();
 		try {
-			$is_zip  = self::is_zip( $zip_or_xml_path );
-			$package = $is_zip ? Package::from_zip( $zip_or_xml_path, $limits ) : Package::from_xml( self::read_xml( $zip_or_xml_path ) );
-			if ( self::has_cxm( $package ) ) {
-				return $this->import_cxm( $package );
-			}
+			$is_zip    = self::is_zip( $zip_or_xml_path );
+			$package   = $is_zip ? Package::from_zip( $zip_or_xml_path, new Limits() ) : Package::from_xml( self::read_xml( $zip_or_xml_path ) );
+			$is_cxm    = self::has_cxm( $package );
 			$structure = Course_Structure_Parser::parse( $package->cmi5_xml() );
 			$paths     = $is_zip ? array_flip( Au_Store::paths( $package->entries() ) ) : null;
 		} catch ( Invalid_Input $e ) {
 			return Import_Report::failed( array( self::from_exception( $e ) ) );
 		}
 
-		$errors = array_merge( self::duplicate_errors( $structure ), self::url_errors( $structure, $paths ) );
+		$errors = array_merge( self::duplicate_errors( $structure ), self::url_errors( $structure, $paths, ! $is_cxm ) );
 		if ( $errors ) {
 			return Import_Report::failed( $errors );
+		}
+		if ( $is_cxm ) {
+			return $this->import_cxm( $package );
 		}
 
 		$adapter = $this->adapter ?? Integration_Loader::adapter( 'sensei' );
 		if ( null === $adapter ) {
-			return Import_Report::failed( array( self::error( 'adapter_unavailable', '', 'The Sensei integration is not available.' ) ) );
+			return Import_Report::failed( array( Import_Writer::error( 'adapter_unavailable', '', 'The Sensei integration is not available.' ) ) );
 		}
 
-		$program_id = $this->program( $structure );
+		$new_program = false;
+		$program_id  = $this->program( $structure, $new_program );
 		if ( 0 === $program_id ) {
-			return Import_Report::failed( array( self::error( 'program_write', '', 'The program could not be saved.' ) ) );
+			return Import_Report::failed( array( Import_Writer::error( 'program_write', '', 'The program could not be saved.' ) ) );
 		}
 
-		$created = array();
-		$updated = array();
+		$live       = (int) get_post_meta( $program_id, self::PACKAGE_META, true );
+		$package_id = 0;
+		$created    = array();
+		$updated    = array();
 		try {
 			$package_id = self::has_relative( $structure ) ? $this->store( $program_id, $zip_or_xml_path, $source_url ) : 0;
 			$structure  = self::resolve( $structure, $package_id );
 
-			$hashes     = $this->hashes( $program_id );
+			$hashes     = $this->writer->hashes( $program_id );
 			$course_ids = array();
 			$path_keys  = array();
 			foreach ( self::plan( $structure ) as $course ) {
@@ -144,18 +172,66 @@ final class Player_Importer {
 			update_post_meta( $program_id, '_lledger_courses', $course_ids );
 			update_post_meta( $program_id, '_lledger_path_keys', $path_keys );
 			$this->repo->set_structure( $program_id, $structure );
-		} catch ( Invalid_Input $e ) {
-			return Import_Report::failed( array( self::from_exception( $e ) ), $program_id, $created, $updated );
 		} catch ( \Throwable $e ) {
+			$dropped = $new_program && array() === $created;
+			$this->abandon( $program_id, $dropped, $package_id, $live );
+			$kept = $dropped ? 0 : $program_id;
+			if ( $e instanceof Invalid_Input ) {
+				return Import_Report::failed( array( self::from_exception( $e ) ), $kept, $created, $updated );
+			}
 			error_log( 'Learning Ledger cmi5 import failed: ' . get_class( $e ) . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Operators need the cause.
-			return Import_Report::failed( array( self::error( 'import_failed', '', 'The import was interrupted (' . ( new \ReflectionClass( $e ) )->getShortName() . '). Run it again to resume.' ) ), $program_id, $created, $updated );
+			return Import_Report::failed( array( Import_Writer::error( 'import_failed', '', 'The import was interrupted (' . ( new \ReflectionClass( $e ) )->getShortName() . '). Run it again to resume.' ) ), $kept, $created, $updated );
 		}
 
+		$this->go_live( $program_id, $live, $package_id, $package_id > 0 ? (string) hash_file( 'sha256', $zip_or_xml_path ) : '' );
 		return new Import_Report( $program_id, $created, $updated );
 	}
 
 	/**
-	 * Imports a course-xapi-mcp package with Package_Importer and marks its program as played.
+	 * Deletes superseded packages once the live one is ready (or there is none);
+	 * otherwise queues another attempt. Handler of the `cmi5_supersede` job.
+	 *
+	 * @param array $payload Holds `program_id` and `attempt`.
+	 *
+	 * @return void
+	 */
+	public static function sweep( array $payload ): void {
+		$program_id = (int) ( $payload['program_id'] ?? 0 );
+		$attempt    = (int) ( $payload['attempt'] ?? 0 );
+		$old        = get_post_meta( $program_id, self::SUPERSEDED_META, true );
+		$old        = is_array( $old ) ? array_map( 'intval', $old ) : array();
+		if ( $program_id <= 0 || array() === $old ) {
+			return;
+		}
+		$live   = (int) get_post_meta( $program_id, self::PACKAGE_META, true );
+		$status = $live > 0 ? Au_Store::status( $live ) : Au_Store::STATUS_READY;
+		if ( Au_Store::STATUS_PENDING === $status ) {
+			if ( $attempt < self::SWEEP_ATTEMPTS ) {
+				Job_Queue::push(
+					self::SWEEP_JOB,
+					array(
+						'program_id' => $program_id,
+						'attempt'    => $attempt + 1,
+					),
+					self::SWEEP_JOB . ':' . $program_id . ':' . ( $attempt + 1 ),
+					self::SWEEP_DELAY
+				);
+			}
+			return;
+		}
+		if ( Au_Store::STATUS_READY !== $status ) {
+			return; // The live package failed; keep the older ones until a later import succeeds.
+		}
+		foreach ( $old as $id ) {
+			if ( $id !== $live ) {
+				Au_Store::delete( $id );
+			}
+		}
+		delete_post_meta( $program_id, self::SUPERSEDED_META );
+	}
+
+	/**
+	 * Checks a course-xapi-mcp package like any other, imports it with Package_Importer and marks its program as played.
 	 *
 	 * @param Package $package Package.
 	 *
@@ -167,6 +243,54 @@ final class Player_Importer {
 			update_post_meta( $report->program_id, '_lledger_player', 1 );
 		}
 		return $report;
+	}
+
+	/**
+	 * Undoes what a failed import left that nothing points at: the new package, and the
+	 * program when this import created it and wrote nothing else.
+	 *
+	 * @param integer $program_id   Program id.
+	 * @param boolean $drop_program Delete the program post.
+	 * @param integer $package_id   Package begun by this import, or the reused live one.
+	 * @param integer $live         Live package before this import.
+	 *
+	 * @return void
+	 */
+	private function abandon( int $program_id, bool $drop_program, int $package_id, int $live ): void {
+		if ( $package_id > 0 && $package_id !== $live ) {
+			Au_Store::delete( $package_id );
+		}
+		if ( $drop_program ) {
+			wp_delete_post( $program_id, true );
+		}
+	}
+
+	/**
+	 * After the structure is stored: records the live package, marks the previous one
+	 * superseded and sweeps (now, or once the new package is ready).
+	 *
+	 * @param integer $program_id Program id.
+	 * @param integer $previous   Live package before this import, 0 for none.
+	 * @param integer $live       Package the stored structure now points at, 0 for none.
+	 * @param string  $sha        SHA-256 of its ZIP.
+	 *
+	 * @return void
+	 */
+	private function go_live( int $program_id, int $previous, int $live, string $sha ): void {
+		if ( $live > 0 ) {
+			update_post_meta( $program_id, self::PACKAGE_META, $live );
+			update_post_meta( $program_id, self::SHA_META, $sha );
+		} else {
+			delete_post_meta( $program_id, self::PACKAGE_META );
+			delete_post_meta( $program_id, self::SHA_META );
+		}
+		if ( $previous > 0 && $previous !== $live ) {
+			$old   = get_post_meta( $program_id, self::SUPERSEDED_META, true );
+			$old   = is_array( $old ) ? array_map( 'intval', $old ) : array();
+			$old[] = $previous;
+			update_post_meta( $program_id, self::SUPERSEDED_META, array_values( array_unique( $old ) ) );
+		}
+		self::sweep( array( 'program_id' => $program_id ) );
 	}
 
 	/**
@@ -229,7 +353,7 @@ final class Player_Importer {
 		foreach ( self::walk( $structure->children() ) as $item ) {
 			$id = $item->id();
 			if ( isset( $seen[ $id ] ) ) {
-				$errors[] = self::error( 'duplicate_id', '/' . ( $item instanceof Au ? 'au' : 'block' ), 'The id "' . $id . '" is used more than once.' );
+				$errors[] = Import_Writer::error( 'duplicate_id', '/' . ( $item instanceof Au ? 'au' : 'block' ), 'The id "' . $id . '" is used more than once.' );
 			}
 			$seen[ $id ] = true;
 		}
@@ -257,12 +381,13 @@ final class Player_Importer {
 	/**
 	 * Errors for AU URLs that are not http(s), escape the package, are missing from it or carry launch parameters.
 	 *
-	 * @param Course_Structure       $structure Structure.
-	 * @param array<string,int>|null $paths     Normalised ZIP paths as keys, or null for a standalone XML.
+	 * @param Course_Structure       $structure      Structure.
+	 * @param array<string,int>|null $paths          Normalised ZIP paths as keys, or null for a standalone XML.
+	 * @param boolean                $allow_relative Whether relative URLs may be hosted (false for cxm packages).
 	 *
 	 * @return array<array{code:string,path:string,message:string}>
 	 */
-	private static function url_errors( Course_Structure $structure, ?array $paths ): array {
+	private static function url_errors( Course_Structure $structure, ?array $paths, bool $allow_relative ): array {
 		$errors = array();
 		foreach ( self::walk( $structure->children() ) as $au ) {
 			if ( ! $au instanceof Au ) {
@@ -271,33 +396,33 @@ final class Player_Importer {
 			$url   = $au->url();
 			$where = '/au/' . $au->id() . '/url';
 			if ( '' === $url || 1 === preg_match( '/[\s\x00-\x1f\x7f\\\\]/', $url ) ) {
-				$errors[] = self::error( 'au_url', $where, 'The AU URL is not a valid URL.' );
+				$errors[] = Import_Writer::error( 'au_url', $where, 'The AU URL is not a valid URL.' );
 				continue;
 			}
 			if ( self::is_absolute( $url ) ) {
 				$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
 				if ( ! in_array( $scheme, array( 'http', 'https' ), true ) || '' === (string) wp_parse_url( $url, PHP_URL_HOST ) ) {
-					$errors[] = self::error( 'au_url', $where, 'An absolute AU URL must be an http or https URL.' );
+					$errors[] = Import_Writer::error( 'au_url', $where, 'An absolute AU URL must be an http or https URL.' );
 					continue;
 				}
-			} elseif ( null === $paths ) {
-				$errors[] = self::error( 'au_url_relative', $where, 'A standalone cmi5.xml needs absolute AU URLs.' );
+			} elseif ( null === $paths || ! $allow_relative ) {
+				$errors[] = Import_Writer::error( 'au_url_relative', $where, null === $paths ? 'A standalone cmi5.xml needs absolute AU URLs.' : 'A course-xapi-mcp package needs absolute AU URLs.' );
 				continue;
 			} else {
 				$path = Au_Store::normalise( rawurldecode( self::split( $url )['path'] ) );
 				if ( null === $path ) {
-					$errors[] = self::error( 'au_url', $where, 'The AU URL points outside the package.' );
+					$errors[] = Import_Writer::error( 'au_url', $where, 'The AU URL points outside the package.' );
 					continue;
 				}
 				if ( ! isset( $paths[ $path ] ) ) {
-					$errors[] = self::error( 'au_url_missing', $where, 'The AU URL names a file that is not in the package.' );
+					$errors[] = Import_Writer::error( 'au_url_missing', $where, 'The AU URL names a file that is not in the package.' );
 					continue;
 				}
 			}
 			foreach ( explode( '&', self::split( $url )['query'] ) as $pair ) {
 				$name = rawurldecode( explode( '=', $pair, 2 )[0] );
 				if ( in_array( $name, self::LAUNCH_PARAMS, true ) ) {
-					$errors[] = self::error( 'au_url_query', $where, 'The AU URL must not carry the launch parameter "' . $name . '".' );
+					$errors[] = Import_Writer::error( 'au_url_query', $where, 'The AU URL must not carry the launch parameter "' . $name . '".' );
 					break;
 				}
 			}
@@ -363,77 +488,23 @@ final class Player_Importer {
 	 * Creates or finds the program, keyed by the course id, and marks it as a player program.
 	 *
 	 * @param Course_Structure $structure Structure.
+	 * @param boolean          $created   Set to whether the program was created.
 	 *
 	 * @return integer Post id, 0 on failure.
 	 */
-	private function program( Course_Structure $structure ): int {
-		$key   = self::key_for( $structure->course_id() );
-		$title = sanitize_text_field( self::pick( $structure->title(), $structure->course_id() ) );
-		$id    = $this->repo->find_by_key( $key );
-		if ( null === $id ) {
-			$new = wp_insert_post(
-				wp_slash(
-					array(
-						'post_type'   => Program_Repository::POST_TYPE,
-						'post_status' => 'publish',
-						'post_title'  => $title,
-					)
-				),
-				true
-			);
-			if ( is_wp_error( $new ) || 0 === (int) $new ) {
-				return 0;
-			}
-			$id = (int) $new;
-			update_post_meta( $id, '_lledger_stable_key', $key );
-		} elseif ( get_post_field( 'post_title', $id, 'raw' ) !== $title ) {
-			wp_update_post(
-				wp_slash(
-					array(
-						'ID'         => $id,
-						'post_title' => $title,
-					)
-				)
-			);
+	private function program( Course_Structure $structure, bool &$created ): int {
+		$id = $this->writer->program( self::key_for( $structure->course_id() ), Import_Writer::pick( $structure->title(), $structure->course_id() ), $created );
+		if ( 0 === $id ) {
+			return 0;
 		}
 		update_post_meta( $id, '_lledger_player', 1 );
 		update_post_meta( $id, '_lledger_custody', 'lms-launched' );
 		update_post_meta( $id, '_lledger_course_iri', $structure->course_id() );
-		update_post_meta( $id, '_lledger_iri_base', self::iri_base( $structure ) );
 		return $id;
 	}
 
 	/**
-	 * Prefix that the program's AU activity ids share: the one AU's id plus a slash, or the
-	 * longest common prefix of the AU ids cut after its last slash.
-	 *
-	 * @param Course_Structure $structure Structure.
-	 *
-	 * @return string
-	 */
-	private static function iri_base( Course_Structure $structure ): string {
-		$ids = array_map( static fn( Au $au ): string => $au->id(), $structure->aus() );
-		if ( 1 === count( $ids ) ) {
-			return $ids[0] . '/';
-		}
-		if ( ! $ids ) {
-			return trailingslashit( $structure->course_id() );
-		}
-		$prefix = $ids[0];
-		foreach ( $ids as $id ) {
-			$len = min( strlen( $prefix ), strlen( $id ) );
-			$i   = 0;
-			while ( $i < $len && $prefix[ $i ] === $id[ $i ] ) {
-				++$i;
-			}
-			$prefix = substr( $prefix, 0, $i );
-		}
-		$slash = strrpos( $prefix, '/' );
-		return false === $slash ? trailingslashit( $structure->course_id() ) : substr( $prefix, 0, $slash + 1 );
-	}
-
-	/**
-	 * Puts the ZIP in the content store, reusing the stored copy when the ZIP is unchanged.
+	 * The package in the content store: the live one when the ZIP is unchanged, else a new one.
 	 *
 	 * @param integer $program_id Program id.
 	 * @param string  $zip_path   ZIP on disk.
@@ -444,11 +515,10 @@ final class Player_Importer {
 	 */
 	private function store( int $program_id, string $zip_path, string $source_url ): int {
 		global $wpdb;
-		$sha = (string) hash_file( 'sha256', $zip_path );
-		$old = (int) get_post_meta( $program_id, self::PACKAGE_META, true );
-		if ( $old > 0 && (string) get_post_meta( $program_id, self::SHA_META, true ) === $sha
-			&& in_array( Au_Store::status( $old ), array( Au_Store::STATUS_PENDING, Au_Store::STATUS_READY ), true ) ) {
-			return $old;
+		$live = (int) get_post_meta( $program_id, self::PACKAGE_META, true );
+		if ( $live > 0 && (string) get_post_meta( $program_id, self::SHA_META, true ) === (string) hash_file( 'sha256', $zip_path )
+			&& in_array( Au_Store::status( $live ), array( Au_Store::STATUS_PENDING, Au_Store::STATUS_READY ), true ) ) {
+			return $live;
 		}
 
 		$id  = Au_Store::begin( $zip_path, $program_id );
@@ -456,11 +526,6 @@ final class Player_Importer {
 		if ( '' !== $url ) {
 			// The row's source_url held the local ZIP copy; extraction finds it through store_dir.
 			$wpdb->update( Tables::name( 'cmi5_packages' ), array( 'source_url' => $url ), array( 'id' => $id ), array( '%s' ), array( '%d' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		}
-		update_post_meta( $program_id, self::PACKAGE_META, $id );
-		update_post_meta( $program_id, self::SHA_META, $sha );
-		if ( $old > 0 ) {
-			Au_Store::delete( $old );
 		}
 		return $id;
 	}
@@ -516,12 +581,11 @@ final class Player_Importer {
 		$root    = null;
 		foreach ( $structure->children() as $child ) {
 			if ( $child instanceof Block ) {
-				$data      = $child->to_array();
 				$courses[] = array(
 					'key'         => self::key_for( $child->id() ),
 					'title'       => $child->title(),
-					'description' => (array) ( $data['description'] ?? array() ),
-					'aus'         => self::flatten( $child ),
+					'description' => Import_Writer::description_of( $child ),
+					'aus'         => Import_Writer::flatten( $child ),
 				);
 				continue;
 			}
@@ -541,21 +605,6 @@ final class Player_Importer {
 	}
 
 	/**
-	 * Every AU under a block, nested blocks flattened, in document order.
-	 *
-	 * @param Block $block Block.
-	 *
-	 * @return Au[]
-	 */
-	private static function flatten( Block $block ): array {
-		$aus = array();
-		foreach ( $block->children() as $child ) {
-			$aus = array_merge( $aus, $child instanceof Block ? self::flatten( $child ) : array( $child ) );
-		}
-		return $aus;
-	}
-
-	/**
 	 * Creates or updates one course unless its content is unchanged.
 	 *
 	 * @param LMS_Adapter $adapter    Adapter.
@@ -568,12 +617,11 @@ final class Player_Importer {
 	 * @return integer Course id.
 	 */
 	private function write_course( LMS_Adapter $adapter, int $program_id, array &$hashes, array $course, array &$created, array &$updated ): int {
-		$title       = sanitize_text_field( self::pick( $course['title'], $course['key'] ) );
-		$description = sanitize_textarea_field( self::pick( $course['description'], '' ) );
-		$content     = '' === trim( $description ) ? '' : Markdown_To_Blocks::block( 'core/paragraph', array(), '<p>' . esc_html( $description ) . '</p>' );
-		$spec        = new Course_Spec( $course['key'], $title, $content, 'publish', array() );
-		$hash        = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $content ) ) );
-		return $this->write_item( $program_id, $hashes, 'course:' . $course['key'], $hash, $created, $updated, fn(): int => $adapter->upsert_course( $spec ) );
+		$title   = sanitize_text_field( Import_Writer::pick( $course['title'], $course['key'] ) );
+		$content = Import_Writer::paragraph( sanitize_textarea_field( Import_Writer::pick( $course['description'], '' ) ) );
+		$spec    = new Course_Spec( $course['key'], $title, $content, 'publish', array() );
+		$hash    = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $content ) ) );
+		return self::saved( $this->writer->write_item( $program_id, $hashes, 'course:' . $course['key'], $hash, $created, $updated, fn(): int => $adapter->upsert_course( $spec ) ), 'course:' . $course['key'] );
 	}
 
 	/**
@@ -592,60 +640,28 @@ final class Player_Importer {
 	 */
 	private function write_lesson( LMS_Adapter $adapter, int $program_id, array &$hashes, int $course_id, int $order, Au $au, array &$created, array &$updated ): void {
 		$key     = self::key_for( $au->id() );
-		$title   = sanitize_text_field( self::pick( $au->title(), $au->id() ) );
+		$title   = sanitize_text_field( Import_Writer::pick( $au->title(), $au->id() ) );
 		$content = get_comment_delimited_block_content( 'learning-ledger/cmi5-lesson', array( 'auId' => $au->id() ), '' );
 		$meta    = array( self::AU_META => $au->id() );
 		$spec    = new Lesson_Spec( $key, $title, $content, $order, 'publish', $meta );
 		$hash    = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $course_id, $title, $content, $order, $meta ) ) );
-		$this->write_item( $program_id, $hashes, 'lesson:' . $key, $hash, $created, $updated, fn(): int => $adapter->upsert_lesson( $course_id, $spec ) );
+		self::saved( $this->writer->write_item( $program_id, $hashes, 'lesson:' . $key, $hash, $created, $updated, fn(): int => $adapter->upsert_lesson( $course_id, $spec ) ), 'lesson:' . $key );
 	}
 
 	/**
-	 * Runs the write for an item unless the stored hash matches, then records the new hash.
+	 * An LMS id, or an exception when the adapter saved nothing.
 	 *
-	 * @param integer  $program_id Program id.
-	 * @param array    $hashes     Hashes, updated in place.
-	 * @param string   $ref        Item ref.
-	 * @param string   $hash       Content hash.
-	 * @param string[] $created    Created refs, appended to.
-	 * @param string[] $updated    Updated refs, appended to.
-	 * @param callable $write      Performs the upsert and returns the LMS id.
+	 * @param integer $id  LMS id.
+	 * @param string  $ref Item ref.
 	 *
-	 * @return integer LMS id.
-	 * @throws \RuntimeException When the adapter writes nothing.
+	 * @return integer
+	 * @throws \RuntimeException When the id is not positive.
 	 */
-	private function write_item( int $program_id, array &$hashes, string $ref, string $hash, array &$created, array &$updated, callable $write ): int {
-		$known = $hashes[ $ref ] ?? null;
-		if ( is_array( $known ) && ( $known['h'] ?? '' ) === $hash && (int) ( $known['id'] ?? 0 ) > 0 && get_post( (int) $known['id'] ) ) {
-			return (int) $known['id'];
-		}
-		$id = (int) $write();
+	private static function saved( int $id, string $ref ): int {
 		if ( $id <= 0 ) {
 			throw new \RuntimeException( 'The LMS did not save ' . $ref ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- logged, never echoed.
 		}
-		if ( null === $known ) {
-			$created[] = $ref;
-		} else {
-			$updated[] = $ref;
-		}
-		$hashes[ $ref ] = array(
-			'h'  => $hash,
-			'id' => $id,
-		);
-		update_post_meta( $program_id, self::HASH_META, wp_slash( (string) wp_json_encode( $hashes ) ) );
 		return $id;
-	}
-
-	/**
-	 * Stored hashes.
-	 *
-	 * @param integer $program_id Program id.
-	 *
-	 * @return array<string,array{h:string,id:int}>
-	 */
-	private function hashes( int $program_id ): array {
-		$decoded = json_decode( (string) get_post_meta( $program_id, self::HASH_META, true ), true );
-		return is_array( $decoded ) ? $decoded : array();
 	}
 
 	/**
@@ -657,22 +673,8 @@ final class Player_Importer {
 	 * @return string
 	 */
 	private static function key_for( string $id ): string {
-		$path = (string) wp_parse_url( $id, PHP_URL_PATH );
-		$slug = trim( substr( Program_Module::sanitize_stable_key( basename( rtrim( $path, '/' ) ) ), 0, 40 ), '-' );
+		$slug = trim( substr( Program_Module::sanitize_stable_key( Import_Writer::last_segment( $id ) ), 0, 40 ), '-' );
 		return ( '' === $slug ? 'cmi5' : $slug ) . '-' . substr( hash( 'sha256', $id ), 0, 12 );
-	}
-
-	/**
-	 * English text, else the first language, else the fallback.
-	 *
-	 * @param array<string,string> $langstrings Language to text.
-	 * @param string               $fallback    Fallback.
-	 *
-	 * @return string
-	 */
-	private static function pick( array $langstrings, string $fallback ): string {
-		$text = $langstrings['en'] ?? ( $langstrings ? reset( $langstrings ) : '' );
-		return '' !== trim( (string) $text ) ? (string) $text : $fallback;
 	}
 
 	/**
@@ -683,23 +685,6 @@ final class Player_Importer {
 	 * @return array{code:string,path:string,message:string}
 	 */
 	private static function from_exception( Invalid_Input $e ): array {
-		return self::error( $e->error_code(), $e->path(), $e->getMessage() );
-	}
-
-	/**
-	 * A validator-shaped error.
-	 *
-	 * @param string $code    Code.
-	 * @param string $path    Path.
-	 * @param string $message Message.
-	 *
-	 * @return array{code:string,path:string,message:string}
-	 */
-	private static function error( string $code, string $path, string $message ): array {
-		return array(
-			'code'    => $code,
-			'path'    => $path,
-			'message' => $message,
-		);
+		return Import_Writer::error( $e->error_code(), $e->path(), $e->getMessage() );
 	}
 }

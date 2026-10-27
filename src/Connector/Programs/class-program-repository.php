@@ -100,13 +100,18 @@ final class Program_Repository {
 	}
 
 	/**
-	 * Program owning an activity IRI (longest IRI base prefix wins).
+	 * Program owning an activity IRI: the player program with that exact AU id or AU activity
+	 * id, else the longest IRI base prefix.
 	 *
 	 * @param string $iri Activity IRI.
 	 *
 	 * @return integer|null
 	 */
 	public function for_activity( string $iri ): ?int {
+		$player = $this->for_au( $iri );
+		if ( null !== $player ) {
+			return $player;
+		}
 		$best     = null;
 		$best_len = 0;
 		foreach ( $this->all_ids() as $id ) {
@@ -118,6 +123,47 @@ final class Program_Repository {
 			}
 		}
 		return $best;
+	}
+
+	/**
+	 * Player program holding an AU whose id, or AU activity id `{au@id}/au`, is exactly the IRI.
+	 *
+	 * Only runs through the player programs when a lesson carries the AU id in `_lledger_au_id`.
+	 *
+	 * @param string $iri Activity IRI.
+	 *
+	 * @return integer|null
+	 */
+	private function for_au( string $iri ): ?int {
+		global $wpdb;
+		if ( '' === $iri ) {
+			return null;
+		}
+		$ids = array( $iri );
+		if ( str_ends_with( $iri, '/au' ) ) {
+			$ids[] = substr( $iri, 0, -3 );
+		}
+		$hit = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				"SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = '_lledger_au_id' AND meta_value IN (%s, %s) ORDER BY meta_value = %s DESC LIMIT 1",
+				$ids[0],
+				$ids[1] ?? $ids[0],
+				$iri
+			)
+		);
+		if ( ! is_string( $hit ) || '' === $hit ) {
+			return null;
+		}
+		foreach ( $this->all_ids() as $id ) {
+			if ( ! (int) get_post_meta( $id, '_lledger_player', true ) ) {
+				continue;
+			}
+			$structure = $this->structure( $id );
+			if ( null !== $structure && null !== $structure->find_au( $hit ) ) {
+				return $id;
+			}
+		}
+		return null;
 	}
 
 	/**

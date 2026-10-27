@@ -7,6 +7,7 @@
 
 // phpcs:disable WordPress.WP.AlternativeFunctions -- tests read fixtures and write temp files directly.
 
+use LearningLedger\Cmi5\Au;
 use LearningLedger\Cmi5\Course_Structure;
 use LearningLedger\Connector\Lms\Integration_Loader;
 use LearningLedger\Connector\Outbox\Direction2;
@@ -73,6 +74,7 @@ class Player_Importer_Test extends WP_UnitTestCase {
 			}
 		}
 		remove_all_actions( 'learning_ledger/jobs/cmi5_extract' );
+		remove_all_actions( 'learning_ledger/jobs/cmi5_supersede' );
 		parent::tear_down();
 	}
 
@@ -257,6 +259,7 @@ class Player_Importer_Test extends WP_UnitTestCase {
 	public function test_module_hooks_the_extract_job_so_the_package_becomes_ready() {
 		( new Player_Import_Module() )->register();
 		$this->assertSame( 10, has_action( 'learning_ledger/jobs/cmi5_extract', array( Extract_Job::class, 'run' ) ) );
+		$this->assertSame( 10, has_action( 'learning_ledger/jobs/cmi5_supersede', array( Player_Importer::class, 'sweep' ) ) );
 
 		$report  = $this->importer()->import( $this->zip( $this->fixture( '001-essentials/cmi5.xml' ) ) );
 		$package = (int) get_post_meta( $report->program_id, Player_Importer::PACKAGE_META, true );
@@ -347,6 +350,102 @@ class Player_Importer_Test extends WP_UnitTestCase {
 		foreach ( $this->repo->get( $report->program_id )->course_ids as $course ) {
 			$this->assertFalse( Direction2::is_on( $course ) );
 		}
+	}
+
+	private function cxm_zip( callable $edit_xml ): string {
+		$in    = Package_Fixtures::inputs( 'good-full' );
+		$in[0] = $edit_xml( $in[0] );
+		$path  = wp_tempnam( 'llcxm' );
+		file_put_contents( $path, Package_Writer::write( ...$in ) );
+		$this->temp[] = $path;
+		return $path;
+	}
+
+	public function test_cxm_package_with_a_bad_au_url_is_refused_whole() {
+		$js = $this->cxm_zip( static fn( string $xml ): string => str_replace( 'https://json-basics.example.org/cmi5/launch?au=json-syntax', 'javascript:alert(1)', $xml ) );
+		$this->assert_refused_whole( $this->importer()->import( $js ), 'au_url' );
+		$relative = $this->cxm_zip( static fn( string $xml ): string => str_replace( 'https://json-basics.example.org/cmi5/launch?au=json-syntax', 'cmi5.xml', $xml ) );
+		$this->assert_refused_whole( $this->importer()->import( $relative ), 'au_url_relative' );
+	}
+
+	public function test_changed_package_keeps_the_old_one_until_the_new_one_is_ready() {
+		( new Player_Import_Module() )->register();
+		$first = $this->importer()->import( $this->zip( $this->fixture( '001-essentials/cmi5.xml' ) ) );
+		$old   = (int) get_post_meta( $first->program_id, Player_Importer::PACKAGE_META, true );
+		Job_Queue::run();
+		$this->assertSame( Au_Store::STATUS_READY, Au_Store::status( $old ) );
+
+		$second = $this->importer()->import( $this->zip( str_replace( 'CATAPULT LMS Test AU: 001 Essentials', 'Version two', $this->fixture( '001-essentials/cmi5.xml' ) ) . "\n" ) );
+		$this->assertTrue( $second->ok(), wp_json_encode( $second->errors ) );
+		$new = (int) get_post_meta( $first->program_id, Player_Importer::PACKAGE_META, true );
+		$this->assertNotSame( $old, $new );
+		$this->assertSame( Au_Store::STATUS_PENDING, Au_Store::status( $new ) );
+		$this->assertSame( Content_Host::base_url( $new ) . 'index.html?paramA=1&paramB=2', $this->repo->structure( $first->program_id )->find_au( self::ESSENTIALS_AU )->url() );
+		// The old package still serves while the new one extracts.
+		$this->assertNotNull( Au_Store::lookup( $old, 'index.html' ) );
+		$this->assertSame( array( $old ), get_post_meta( $first->program_id, Player_Importer::SUPERSEDED_META, true ) );
+
+		Player_Importer::sweep( array( 'program_id' => $first->program_id ) );
+		$this->assertSame( Au_Store::STATUS_READY, Au_Store::status( $old ), 'swept before the new package was ready' );
+
+		Job_Queue::run();
+		$this->assertSame( Au_Store::STATUS_READY, Au_Store::status( $new ) );
+		Player_Importer::sweep( array( 'program_id' => $first->program_id ) );
+		$this->assertSame( Au_Store::STATUS_MISSING, Au_Store::status( $old ) );
+		$this->assertSame( Au_Store::STATUS_READY, Au_Store::status( $new ) );
+		$this->assertSame( '', get_post_meta( $first->program_id, Player_Importer::SUPERSEDED_META, true ) );
+	}
+
+	public function test_reimport_without_relative_urls_deletes_the_stored_package() {
+		$first = $this->importer()->import( $this->zip( $this->fixture( '001-essentials/cmi5.xml' ) ) );
+		$old   = (int) get_post_meta( $first->program_id, Player_Importer::PACKAGE_META, true );
+		$this->assertGreaterThan( 0, $old );
+
+		$remote = str_replace( 'index.html?paramA=1&paramB=2', 'https://au.example.net/essentials/index.html', $this->fixture( '001-essentials/cmi5.xml' ) );
+		$second = $this->importer()->import( $this->zip( $remote ) );
+		$this->assertTrue( $second->ok(), wp_json_encode( $second->errors ) );
+		$this->assertSame( $first->program_id, $second->program_id );
+		$this->assertSame( '', get_post_meta( $second->program_id, Player_Importer::PACKAGE_META, true ) );
+		$this->assertSame( Au_Store::STATUS_MISSING, Au_Store::status( $old ) );
+		$this->assertSame( 0, $this->count_packages() );
+	}
+
+	public function test_store_failure_leaves_no_empty_program() {
+		$zip    = $this->zip( $this->fixture( '001-essentials/cmi5.xml' ) );
+		$vanish = static function ( $id, $post ) use ( $zip ) {
+			if ( Program_Repository::POST_TYPE === $post->post_type && file_exists( $zip ) ) {
+				unlink( $zip ); // The ZIP disappears before Au_Store::begin reads it.
+			}
+		};
+		add_action( 'wp_insert_post', $vanish, 10, 2 );
+		$report = $this->importer()->import( $zip );
+		remove_action( 'wp_insert_post', $vanish, 10 );
+		$this->assert_refused_whole( $report, 'zip_invalid' );
+	}
+
+	public function test_for_activity_finds_player_programs_by_exact_au_id() {
+		$essentials = $this->importer()->import( $this->zip( $this->fixture( '001-essentials/cmi5.xml' ) ) )->program_id;
+		$allowed    = $this->importer()->import( $this->zip( $this->fixture( '002-allowed/cmi5.xml' ) ) )->program_id;
+		$deeper_xml = str_replace(
+			array( 'course/002-allowed', 'au/002-allowed"' ),
+			array( 'course/002-deeper', 'au/001-essentials/deeper"' ),
+			$this->fixture( '002-allowed/cmi5.xml' )
+		);
+		$deeper     = $this->importer()->import( $this->zip( $deeper_xml ) )->program_id;
+		$this->assertCount( 3, array_unique( array( $essentials, $allowed, $deeper ) ) );
+		$allowed_au = 'https://w3id.org/xapi/cmi5/catapult/lts/au/002-allowed';
+		$deeper_au  = self::ESSENTIALS_AU . '/deeper';
+
+		$this->assertSame( $essentials, $this->repo->for_activity( self::ESSENTIALS_AU ) );
+		$this->assertSame( $essentials, $this->repo->for_activity( Au::activity_id( self::ESSENTIALS_AU ) ) );
+		$this->assertSame( $allowed, $this->repo->for_activity( $allowed_au ) );
+		$this->assertSame( $allowed, $this->repo->for_activity( Au::activity_id( $allowed_au ) ) );
+		$this->assertSame( $deeper, $this->repo->for_activity( $deeper_au ) );
+		$this->assertSame( $deeper, $this->repo->for_activity( Au::activity_id( $deeper_au ) ) );
+		$this->assertNull( $this->repo->for_activity( 'https://w3id.org/xapi/cmi5/catapult/lts/au/' ) );
+		$this->assertNull( $this->repo->for_activity( self::ESSENTIALS_AU . '/other' ) );
+		$this->assertNull( $this->repo->for_activity( Au::activity_id( self::ESSENTIALS_AU ) . '/extra' ) );
+		$this->assertSame( '', get_post_meta( $essentials, '_lledger_iri_base', true ) );
 	}
 
 	private function admin(): int {
