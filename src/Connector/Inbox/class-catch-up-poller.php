@@ -33,6 +33,12 @@ final class Catch_Up_Poller {
 	const MAX_PAGES = 50;
 
 	/**
+	 * Seconds the query reaches back before the cursor. Statements committed late, or sharing a
+	 * `stored` value across a page boundary, are fetched again; statement-id dedupe makes repeats free.
+	 */
+	const OVERLAP = 60;
+
+	/**
 	 * LRS client.
 	 *
 	 * @var Lrs_Client
@@ -47,18 +53,30 @@ final class Catch_Up_Poller {
 	private Inbox_Repository $inbox;
 
 	/**
+	 * Most pages per run.
+	 *
+	 * @var integer
+	 */
+	private int $max_pages;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Lrs_Client|null       $client LRS client.
-	 * @param Inbox_Repository|null $inbox  Inbox.
+	 * @param Lrs_Client|null       $client    LRS client.
+	 * @param Inbox_Repository|null $inbox     Inbox.
+	 * @param integer               $max_pages Most pages per run.
 	 */
-	public function __construct( ?Lrs_Client $client = null, ?Inbox_Repository $inbox = null ) {
-		$this->client = $client ?? new Lrs_Client();
-		$this->inbox  = $inbox ?? new Inbox_Repository();
+	public function __construct( ?Lrs_Client $client = null, ?Inbox_Repository $inbox = null, int $max_pages = self::MAX_PAGES ) {
+		$this->client    = $client ?? new Lrs_Client();
+		$this->inbox     = $inbox ?? new Inbox_Repository();
+		$this->max_pages = max( 1, $max_pages );
 	}
 
 	/**
 	 * Run one poll.
+	 *
+	 * The cursor never moves past the LRS's consistent-through time, nor past a statement whose
+	 * insert failed, and never moves backwards.
 	 *
 	 * @return integer New inbox rows.
 	 */
@@ -68,11 +86,12 @@ final class Catch_Up_Poller {
 			return 0;
 		}
 
-		$since = self::get( self::CURSOR );
-		$query = array( 'limit' => self::LIMIT );
-		if ( null !== $since ) {
+		$stored_cursor = self::get( self::CURSOR );
+		$cursor        = null === $stored_cursor ? null : self::parse( $stored_cursor );
+		$query         = array( 'limit' => self::LIMIT );
+		if ( null !== $cursor ) {
 			$query = array(
-				'since' => $since,
+				'since' => Timestamp::to_xapi( $cursor->modify( '-' . self::OVERLAP . ' seconds' ) ),
 				'limit' => self::LIMIT,
 			);
 		}
@@ -81,10 +100,9 @@ final class Catch_Up_Poller {
 
 		$resource = 'statements';
 		$added    = 0;
-		$newest   = null === $since ? null : self::parse( $since );
 		$ok       = true;
 
-		for ( $page = 0; $page < self::MAX_PAGES; $page++ ) {
+		for ( $page = 0; $page < $this->max_pages; $page++ ) {
 			try {
 				$res = $this->client->xapi( 'GET', $resource, $query );
 			} catch ( \RuntimeException $e ) {
@@ -97,20 +115,44 @@ final class Catch_Up_Poller {
 				break;
 			}
 
+			$consistent = $res->headers['x-experience-api-consistent-through'] ?? null;
+			$consistent = is_array( $consistent ) ? reset( $consistent ) : $consistent;
+			$cap        = is_string( $consistent ) ? self::parse( $consistent ) : null;
+			$newest     = null;
+			$blocked    = false;
 			foreach ( $data['statements'] as $statement ) {
 				if ( ! is_array( $statement ) ) {
 					continue;
 				}
-				if ( $this->inbox->add( $statement, 'poll' ) ) {
+				$stored = is_string( $statement['stored'] ?? null ) ? self::parse( $statement['stored'] ) : null;
+				$result = $this->inbox->store( $statement, 'poll' );
+				if ( Inbox_Repository::ERROR === $result ) {
+					// Keep the cursor at or before this statement so the next run fetches it again.
+					$ok = false;
+					if ( null === $stored ) {
+						$blocked = true;
+					} elseif ( null === $cap || $stored < $cap ) {
+						$cap = $stored;
+					}
+					continue;
+				}
+				if ( Inbox_Repository::ADDED === $result ) {
 					++$added;
 				}
-				$stored = is_string( $statement['stored'] ?? null ) ? self::parse( $statement['stored'] ) : null;
 				if ( $stored && ( null === $newest || $stored > $newest ) ) {
 					$newest = $stored;
 				}
 			}
-			if ( $newest ) {
-				self::set( self::CURSOR, Timestamp::to_xapi( $newest ) );
+
+			if ( ! $blocked && null !== $newest ) {
+				$candidate = null !== $cap && $cap < $newest ? $cap : $newest;
+				if ( null === $cursor || $candidate > $cursor ) {
+					$cursor = $candidate;
+					self::set( self::CURSOR, Timestamp::to_xapi( $cursor ) );
+				}
+			}
+			if ( ! $ok ) {
+				break;
 			}
 
 			$next = self::follow( is_string( $data['more'] ?? null ) ? $data['more'] : '', $settings );

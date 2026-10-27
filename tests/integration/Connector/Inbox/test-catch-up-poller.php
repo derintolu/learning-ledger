@@ -58,7 +58,7 @@ class Catch_Up_Poller_Test extends WP_UnitTestCase {
 			'body' => '{"statements":[],"more":""}',
 		);
 		return array(
-			'headers'  => array( 'content-type' => 'application/json' ),
+			'headers'  => array_merge( array( 'content-type' => 'application/json' ), $next['headers'] ?? array() ),
 			'body'     => $next['body'],
 			'response' => array(
 				'code'    => $next['code'],
@@ -134,7 +134,7 @@ class Catch_Up_Poller_Test extends WP_UnitTestCase {
 		$this->assertCount( 2, $this->requests );
 		$first = $this->query( $this->requests[0]['url'] );
 		$this->assertStringStartsWith( 'https://lrs.example.test/xapi/statements?', $this->requests[0]['url'] );
-		$this->assertSame( '2026-10-27T09:00:00.000000Z', $first['since'] );
+		$this->assertSame( '2026-10-27T08:59:00.000000Z', $first['since'], 'the query reaches 60 s behind the cursor' );
 		$this->assertSame( '500', $first['limit'] );
 		$this->assertSame( 'GET', $this->requests[0]['args']['method'] );
 		$this->assertStringStartsWith( 'Basic ', $this->requests[0]['args']['headers']['Authorization'] );
@@ -153,7 +153,72 @@ class Catch_Up_Poller_Test extends WP_UnitTestCase {
 
 		$this->responses[] = $this->page( array(), '' );
 		$this->assertSame( 0, $poller->run() );
-		$this->assertSame( '2026-10-27T10:00:03.500000Z', $this->query( $this->requests[2]['url'] )['since'] );
+		$this->assertSame( '2026-10-27T09:59:03.500000Z', $this->query( $this->requests[2]['url'] )['since'] );
+		$this->assertSame( '2026-10-27T10:00:03.500000Z', $this->cursor(), 'an empty page leaves the cursor' );
+	}
+
+	public function test_page_cap_mid_equal_stored_group_fetches_the_rest_next_run() {
+		$same = '2026-10-27T10:00:00.000000Z';
+		$a    = $this->st( Uuid::v4(), $same );
+		$b    = $this->st( Uuid::v4(), $same );
+		$c    = $this->st( Uuid::v4(), $same );
+
+		$poller            = new Catch_Up_Poller( null, null, 1 );
+		$this->responses[] = $this->page( array( $a, $b ), '/xapi/statements?more=next' );
+		$this->assertSame( 2, $poller->run() );
+		$this->assertCount( 1, $this->requests, 'stopped at the page cap' );
+		$this->assertSame( $same, $this->cursor() );
+
+		// The LRS's next page held c with the same stored value; the overlap reaches it.
+		$this->responses[] = $this->page( array( $a, $b, $c ), '' );
+		$this->assertSame( 1, $poller->run() );
+		$this->assertSame( '2026-10-27T09:59:00.000000Z', $this->query( $this->requests[1]['url'] )['since'] );
+		$ids = array_column( ( new Inbox_Repository() )->pending( 10 ), 'statement_id' );
+		$this->assertEqualsCanonicalizing( array( $a['id'], $b['id'], $c['id'] ), $ids );
+	}
+
+	public function test_failed_insert_keeps_the_cursor_behind_it() {
+		global $wpdb;
+		$this->set_cursor( '2026-10-27T09:00:00.000000Z' );
+		$a   = $this->st( Uuid::v4(), '2026-10-27T10:00:01.000000Z' );
+		$bad = $this->st( Uuid::v4(), '2026-10-27T10:00:02.000000Z' );
+		$c   = $this->st( Uuid::v4(), '2026-10-27T10:00:03.000000Z' );
+
+		$break = static function ( $q ) use ( $bad ) {
+			return false !== strpos( $q, 'INSERT IGNORE INTO' ) && false !== strpos( $q, $bad['id'] ) ? 'SELECT lledger_broken(' : $q;
+		};
+		add_filter( 'query', $break );
+		$suppress          = $wpdb->suppress_errors( true );
+		$this->responses[] = $this->page( array( $a, $bad, $c ), '/xapi/statements?more=next' );
+		$poller            = new Catch_Up_Poller();
+		$this->assertSame( 2, $poller->run() );
+		$wpdb->suppress_errors( $suppress );
+		remove_filter( 'query', $break );
+
+		$this->assertCount( 1, $this->requests, 'the run stops at the failure' );
+		$this->assertSame( '2026-10-27T10:00:02.000000Z', $this->cursor(), 'not past the failed statement' );
+		$this->assertTrue( $poller->recovery_needed() );
+
+		$this->responses[] = $this->page( array( $bad, $c ), '' );
+		$this->assertSame( 1, $poller->run() );
+		$this->assertSame( '2026-10-27T09:59:02.000000Z', $this->query( $this->requests[1]['url'] )['since'] );
+		$this->assertCount( 3, ( new Inbox_Repository() )->pending( 10 ) );
+		$this->assertSame( '2026-10-27T10:00:03.000000Z', $this->cursor() );
+	}
+
+	public function test_cursor_is_capped_at_consistent_through() {
+		$this->set_cursor( '2026-10-27T09:00:00.000000Z' );
+		$page              = $this->page( array( $this->st( Uuid::v4(), '2026-10-27T10:00:05.000000Z' ) ), '' );
+		$page['headers']   = array( 'X-Experience-API-Consistent-Through' => '2026-10-27T10:00:00.000000Z' );
+		$this->responses[] = $page;
+		$this->assertSame( 1, ( new Catch_Up_Poller() )->run() );
+		$this->assertSame( '2026-10-27T10:00:00.000000Z', $this->cursor() );
+
+		$page              = $this->page( array( $this->st( Uuid::v4(), '2026-10-27T09:30:00.000000Z' ) ), '' );
+		$page['headers']   = array( 'X-Experience-API-Consistent-Through' => '2026-10-27T08:00:00.000000Z' );
+		$this->responses[] = $page;
+		( new Catch_Up_Poller() )->run();
+		$this->assertSame( '2026-10-27T10:00:00.000000Z', $this->cursor(), 'never moves backwards' );
 	}
 
 	public function test_first_run_without_cursor_sends_no_since() {

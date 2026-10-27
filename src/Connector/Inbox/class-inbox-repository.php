@@ -9,6 +9,7 @@ namespace LearningLedger\Connector\Inbox;
 
 // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery -- Table names come from Tables::name(); every value goes through prepare().
 
+use LearningLedger\Connector\Identity\Identity_Map;
 use LearningLedger\Db\Tables;
 use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
@@ -31,15 +32,32 @@ final class Inbox_Repository {
 
 	const VOIDED = 'http://adlnet.gov/expapi/verbs/voided';
 
+	const ADDED     = 'added';
+	const DUPLICATE = 'duplicate';
+	const INVALID   = 'invalid';
+	const ERROR     = 'error';
+
 	/**
 	 * Store a statement. Statements without a valid id, actor IFI, verb or object are refused.
 	 *
 	 * @param array  $statement Statement as an associative array.
 	 * @param string $source    One of webhook, poll or backfill.
 	 *
-	 * @return boolean True when a new row was stored, false for a duplicate or an invalid statement.
+	 * @return boolean True when a new row was stored, false for a duplicate, an invalid statement or a database error.
 	 */
 	public function add( array $statement, string $source ): bool {
+		return self::ADDED === $this->store( $statement, $source );
+	}
+
+	/**
+	 * Store a statement and say what happened.
+	 *
+	 * @param array  $statement Statement as an associative array.
+	 * @param string $source    One of webhook, poll or backfill.
+	 *
+	 * @return string ADDED, DUPLICATE, INVALID or ERROR (the database refused the insert).
+	 */
+	public function store( array $statement, string $source ): string {
 		global $wpdb;
 		$table = Tables::name( 'conn_inbox' );
 
@@ -48,15 +66,15 @@ final class Inbox_Repository {
 		$object = $statement['object'] ?? null;
 		$actor  = $statement['actor'] ?? null;
 		if ( ! is_string( $id ) || ! Uuid::is_valid( $id ) || ! is_string( $verb ) || '' === $verb || strlen( $verb ) > 255 || ! is_array( $object ) || ! is_array( $actor ) ) {
-			return false;
+			return self::INVALID;
 		}
 		$object_id = $object['id'] ?? null;
 		if ( ! is_string( $object_id ) || '' === $object_id ) {
-			return false;
+			return self::INVALID;
 		}
 		if ( 'StatementRef' === ( $object['objectType'] ?? null ) ) {
 			if ( ! Uuid::is_valid( $object_id ) ) {
-				return false;
+				return self::INVALID;
 			}
 			$object_id = strtolower( $object_id );
 		}
@@ -65,7 +83,7 @@ final class Inbox_Repository {
 			$actor_hash = Agent_Identity::from_array( $actor )->hash();
 			$body       = Json::encode_exact( $statement );
 		} catch ( Invalid_Input $e ) {
-			return false;
+			return self::INVALID;
 		}
 
 		$registration = $statement['context']['registration'] ?? null;
@@ -97,7 +115,10 @@ final class Inbox_Repository {
 				$now
 			)
 		);
-		return 1 === $n;
+		if ( false === $n ) {
+			return self::ERROR;
+		}
+		return 1 === $n ? self::ADDED : self::DUPLICATE;
 	}
 
 	/**
@@ -254,7 +275,9 @@ final class Inbox_Repository {
 	}
 
 	/**
-	 * Delete every row matched to a user.
+	 * Delete every row matched to a user, and every row (matched or not) about the user's actors:
+	 * the site-issued account and the explicitly linked identities. Call it before the identity
+	 * links are removed.
 	 *
 	 * @param integer $user User id.
 	 *
@@ -262,8 +285,40 @@ final class Inbox_Repository {
 	 */
 	public function delete_user( int $user ): int {
 		global $wpdb;
-		$table = Tables::name( 'conn_inbox' );
-		$n     = $wpdb->delete( $table, array( 'user_id' => $user ), array( '%d' ) );
+		$table  = Tables::name( 'conn_inbox' );
+		$hashes = array();
+		$name   = (string) get_user_meta( $user, Identity_Map::META, true );
+		$actors = array();
+		if ( '' !== $name ) {
+			$actors[] = array(
+				'account' => array(
+					'homePage' => ( new Identity_Map() )->home_page(),
+					'name'     => $name,
+				),
+			);
+		}
+		foreach ( ( new Identity_Map() )->links_for_user( $user ) as $link ) {
+			$actors[] = is_array( $link['actor'] ) ? $link['actor'] : array();
+		}
+		foreach ( $actors as $actor ) {
+			try {
+				$hashes[] = Agent_Identity::from_array( $actor )->hash();
+			} catch ( Invalid_Input $e ) {
+				continue;
+			}
+		}
+
+		if ( array() === $hashes ) {
+			$n = $wpdb->query( $wpdb->prepare( "DELETE FROM `{$table}` WHERE user_id = %d", $user ) );
+			return false === $n ? 0 : (int) $n;
+		}
+		$placeholders = implode( ', ', array_fill( 0, count( $hashes ), '%s' ) );
+		$n            = $wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM `{$table}` WHERE user_id = %d OR actor_hash IN ({$placeholders})", // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+				...array_merge( array( $user ), $hashes )
+			)
+		);
 		return false === $n ? 0 : (int) $n;
 	}
 

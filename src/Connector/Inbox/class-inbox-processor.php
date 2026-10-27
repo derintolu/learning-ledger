@@ -84,13 +84,44 @@ final class Inbox_Processor {
 	}
 
 	/**
-	 * Process pending rows.
+	 * Process pending rows. Only one run at a time per site: a run that finds another holding
+	 * the lock returns at once and leaves the rows for that run or the next.
 	 *
 	 * @param integer $limit Maximum rows to read.
 	 *
 	 * @return integer Rows that left pending.
 	 */
 	public function process_pending( int $limit = 100 ): int {
+		global $wpdb;
+		$lock = self::lock_name();
+		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock ) ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			return 0;
+		}
+		try {
+			return $this->run_pending( $limit );
+		} finally {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		}
+	}
+
+	/**
+	 * Name of the MySQL advisory lock for this site's inbox.
+	 *
+	 * @return string
+	 */
+	public static function lock_name(): string {
+		global $wpdb;
+		return 'lledger_inbox_' . md5( DB_NAME . '|' . $wpdb->prefix );
+	}
+
+	/**
+	 * Process pending rows; the caller holds the lock.
+	 *
+	 * @param integer $limit Maximum rows to read.
+	 *
+	 * @return integer Rows that left pending.
+	 */
+	private function run_pending( int $limit ): int {
 		$done   = 0;
 		$groups = array();
 
@@ -107,16 +138,17 @@ final class Inbox_Processor {
 				continue;
 			}
 
-			$user = is_array( $statement['actor'] ?? null ) ? $this->identity->user_for_actor( $statement['actor'] ) : null;
-			if ( null === $user ) {
-				$this->inbox->mark( $row['statement_id'], Inbox_Repository::UNMATCHED );
+			// Statements outside every program are ignored, whoever they are about.
+			$program_id = $this->programs->for_activity( $row['object_id'] );
+			if ( null === $program_id || '' === $row['registration'] ) {
+				$this->inbox->mark( $row['statement_id'], Inbox_Repository::PROCESSED );
 				++$done;
 				continue;
 			}
 
-			$program_id = $this->programs->for_activity( $row['object_id'] );
-			if ( null === $program_id || '' === $row['registration'] ) {
-				$this->inbox->mark( $row['statement_id'], Inbox_Repository::PROCESSED, $user );
+			$user = is_array( $statement['actor'] ?? null ) ? $this->identity->user_for_actor( $statement['actor'] ) : null;
+			if ( null === $user ) {
+				$this->inbox->mark( $row['statement_id'], Inbox_Repository::UNMATCHED );
 				++$done;
 				continue;
 			}

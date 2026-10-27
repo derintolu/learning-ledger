@@ -150,6 +150,34 @@ class Inbox_Route_Test extends WP_UnitTestCase {
 		$this->assertFalse( $poller->recovery_needed() );
 	}
 
+	public function test_insert_error_is_503_and_the_event_can_be_redelivered() {
+		global $wpdb;
+		$good  = $this->statement();
+		$bad   = $this->statement();
+		$event = Uuid::v4();
+		$body  = $this->body( array( $good, $bad ), $event );
+		$break = static function ( $q ) use ( $bad ) {
+			return false !== strpos( $q, 'INSERT IGNORE INTO' ) && false !== strpos( $q, $bad['id'] ) ? 'SELECT lledger_broken(' : $q;
+		};
+		add_filter( 'query', $break );
+		$suppress = $wpdb->suppress_errors( true );
+		$res      = $this->send( $body );
+		$wpdb->suppress_errors( $suppress );
+		remove_filter( 'query', $break );
+
+		$this->assertSame( 503, $res->get_status() );
+		$this->assertTrue( ( new Catch_Up_Poller() )->recovery_needed() );
+		$this->assertSame( 202, $this->send( $body )->get_status(), 'the event claim was released' );
+		$this->assertSame( 2, $this->inbox_count() );
+	}
+
+	public function test_body_over_two_megabytes_is_413() {
+		$big           = $this->statement();
+		$big['result'] = array( 'response' => str_repeat( 'a', 2 * 1024 * 1024 ) );
+		$this->assertSame( 413, $this->send( $this->body( array( $big ) ) )->get_status() );
+		$this->assertSame( 0, $this->inbox_count() );
+	}
+
 	public function test_tampered_body_is_401_and_stores_nothing() {
 		$body     = $this->body( array( $this->statement() ) );
 		$tampered = str_replace( 'learner@example.org', 'attacker@example.org', $body );

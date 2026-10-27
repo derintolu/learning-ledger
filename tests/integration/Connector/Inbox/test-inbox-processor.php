@@ -363,6 +363,68 @@ class Inbox_Processor_Test extends WP_UnitTestCase {
 		$this->assertSame( array( array( $this->program, $this->user, $this->registration, true ) ), $seen );
 	}
 
+	public function test_a_run_skips_while_another_holds_the_lock() {
+		$c = $this->st( Vocab::COMPLETED, $this->l2 );
+		$this->add( $c );
+
+		$other = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->assertSame( '1', (string) $other->get_var( $other->prepare( 'SELECT GET_LOCK(%s, 0)', Inbox_Processor::lock_name() ) ) );
+		try {
+			$this->assertSame( 0, $this->processor->process_pending() );
+			$this->assertSame( 'pending', $this->status_of( $c['id'] ) );
+			$this->assertSame( array(), $this->fake->applied );
+		} finally {
+			$other->get_var( $other->prepare( 'SELECT RELEASE_LOCK(%s)', Inbox_Processor::lock_name() ) );
+			$other->close();
+		}
+
+		$this->assertSame( 1, $this->processor->process_pending() );
+		$this->assertSame( 'processed', $this->status_of( $c['id'] ) );
+		$after = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->assertSame( '1', (string) $after->get_var( $after->prepare( 'SELECT GET_LOCK(%s, 0)', Inbox_Processor::lock_name() ) ), 'the run released the lock' );
+		$after->get_var( $after->prepare( 'SELECT RELEASE_LOCK(%s)', Inbox_Processor::lock_name() ) );
+		$after->close();
+	}
+
+	public function test_unknown_actor_outside_any_program_is_processed_not_unmatched() {
+		$other                 = $this->st(
+			Vocab::COMPLETED,
+			$this->l2,
+			array(),
+			array(
+				'objectType' => 'Agent',
+				'mbox'       => 'mailto:stranger@example.org',
+			)
+		);
+		$other['object']['id'] = 'https://elsewhere.example/activity';
+		$this->add( $other );
+		$this->processor->process_pending();
+		$this->assertSame( 'processed', $this->status_of( $other['id'] ) );
+	}
+
+	public function test_delete_user_removes_rows_about_the_users_actors() {
+		$linked = array(
+			'objectType' => 'Agent',
+			'mbox'       => 'mailto:linked@example.org',
+		);
+		( new Identity_Map() )->link( Agent_Identity::from_array( $linked ), $this->user );
+		$own      = $this->st( Vocab::COMPLETED, $this->l2 );
+		$via_link = $this->st( Vocab::COMPLETED, $this->l2, array(), $linked );
+		$stranger = $this->st(
+			Vocab::COMPLETED,
+			$this->l2,
+			array(),
+			array(
+				'objectType' => 'Agent',
+				'mbox'       => 'mailto:stranger@example.org',
+			)
+		);
+		$this->add( $own, $via_link, $stranger );
+
+		$this->assertSame( 2, $this->repo->delete_user( $this->user ), 'unmatched rows about the user go too' );
+		$this->assertSame( array( $stranger['id'] ), array_column( $this->repo->for_registration( $this->registration ), 'statement_id' ) );
+	}
+
 	public function test_statement_outside_any_program_is_processed_and_ignored() {
 		$other                 = $this->st( Vocab::COMPLETED, $this->l2 );
 		$other['object']['id'] = 'https://elsewhere.example/activity';

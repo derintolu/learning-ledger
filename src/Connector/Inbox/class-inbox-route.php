@@ -32,9 +32,9 @@ final class Inbox_Route {
 	const WINDOW = 300;
 
 	/**
-	 * Largest envelope accepted (100 statements of at most 1 MB each, plus envelope).
+	 * Largest envelope accepted: twice the LRS's 1 MB statements request limit.
 	 */
-	const MAX_BYTES = 104857600;
+	const MAX_BYTES = 2097152;
 
 	/**
 	 * Inbox.
@@ -124,7 +124,17 @@ final class Inbox_Route {
 
 		$stored = 0;
 		foreach ( $envelope['statements'] as $statement ) {
-			if ( is_array( $statement ) && $this->inbox->add( $statement, 'webhook' ) ) {
+			if ( ! is_array( $statement ) ) {
+				continue;
+			}
+			$result = $this->inbox->store( $statement, 'webhook' );
+			if ( Inbox_Repository::ERROR === $result ) {
+				// Forget the event so the LRS's redelivery is accepted; rows already stored dedupe by id.
+				self::release_event( $event_id );
+				( new Catch_Up_Poller() )->need_recovery();
+				return self::error( 503, 'unavailable' );
+			}
+			if ( Inbox_Repository::ADDED === $result ) {
 				++$stored;
 			}
 		}
@@ -178,6 +188,18 @@ final class Inbox_Route {
 			return null;
 		}
 		return 1 === $n;
+	}
+
+	/**
+	 * Forget an event id.
+	 *
+	 * @param string $event_id Lowercase UUID.
+	 *
+	 * @return void
+	 */
+	private static function release_event( string $event_id ): void {
+		global $wpdb;
+		$wpdb->delete( Tables::name( 'conn_events' ), array( 'event_id' => $event_id ), array( '%s' ) );
 	}
 
 	/**
