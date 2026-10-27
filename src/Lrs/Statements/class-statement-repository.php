@@ -213,7 +213,7 @@ final class Statement_Repository {
 	}
 
 	/**
-	 * Remember a voiding statement whose target has not arrived. The first one wins.
+	 * Remember a voiding statement whose target has not arrived (every voider is kept).
 	 *
 	 * @param string  $target_id   Target statement id.
 	 * @param integer $voiding_seq Seq of the voiding statement.
@@ -230,25 +230,25 @@ final class Statement_Repository {
 	}
 
 	/**
-	 * Remove and return the pending void of a statement, if any.
+	 * Remove and return every pending void of a statement.
 	 *
 	 * @param string $target_id Statement id.
 	 *
-	 * @return integer|null Seq of the voiding statement.
+	 * @return int[] Seqs of the voiding statements, oldest first.
 	 * @throws \RuntimeException On a database error.
 	 */
-	public function take_pending_void( string $target_id ): ?int {
+	public function take_pending_voids( string $target_id ): array {
 		global $wpdb;
 		$table = Tables::name( 'pending_voids' );
 		$hex   = self::hex_uuid( $target_id );
-		$seq   = $wpdb->get_var( $wpdb->prepare( "SELECT voiding_seq FROM {$table} WHERE target_id = UNHEX(%s) FOR UPDATE", $hex ) );
-		if ( null === $seq ) {
-			return null;
+		$seqs  = $wpdb->get_col( $wpdb->prepare( "SELECT voiding_seq FROM {$table} WHERE target_id = UNHEX(%s) ORDER BY voiding_seq FOR UPDATE", $hex ) );
+		if ( array() === $seqs ) {
+			return array();
 		}
 		if ( false === $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE target_id = UNHEX(%s)", $hex ) ) ) {
-			throw new \RuntimeException( 'Could not apply the pending void.' );
+			throw new \RuntimeException( 'Could not apply the pending voids.' );
 		}
-		return (int) $seq;
+		return array_map( 'intval', $seqs );
 	}
 
 	/**

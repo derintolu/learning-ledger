@@ -83,7 +83,7 @@ PRIMARY KEY  (ref_hash,ref_kind,seq)',
 
 			'pending_voids'  => 'target_id BINARY(16) NOT NULL,
 voiding_seq BIGINT(20) UNSIGNED NOT NULL,
-PRIMARY KEY  (target_id)',
+PRIMARY KEY  (target_id,voiding_seq)',
 
 			'activities'     => 'iri_hash BINARY(20) NOT NULL,
 iri TEXT NOT NULL,

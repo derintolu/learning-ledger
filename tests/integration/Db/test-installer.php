@@ -237,7 +237,7 @@ class Installer_Test extends WP_UnitTestCase {
 		$this->install_real_tables();
 		$expect = array(
 			'statement_refs' => array( array( array( 'ref_hash', 'ref_kind', 'seq' ), true ) ),
-			'pending_voids'  => array( array( array( 'target_id' ), true ) ),
+			'pending_voids'  => array( array( array( 'target_id', 'voiding_seq' ), true ) ),
 			'tokens'         => array( array( array( 'parent_client' ), false ), array( array( 'registration' ), false ) ),
 			'courses'        => array( array( array( 'course_iri_hash' ), true ) ),
 			'outbox'         => array( array( array( 'status', 'next_attempt_at' ), false ) ),

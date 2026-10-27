@@ -302,7 +302,7 @@ final class Statement_Store {
 			$voided = array();
 			$voids  = array();
 			foreach ( $items as $item ) {
-				$voiding_seq = $this->repo->take_pending_void( $item['id'] );
+				$pending = $this->repo->take_pending_voids( $item['id'] );
 				if ( null !== $item['target'] ) {
 					if ( $this->repo->mark_voided( $item['target'] ) ) {
 						$voided[ $item['target'] ] = true;
@@ -310,14 +310,18 @@ final class Statement_Store {
 					} elseif ( null === $this->repo->find( $item['target'] ) ) {
 						$this->repo->add_pending_void( $item['target'], $item['seq'] );
 					}
-					if ( null !== $voiding_seq ) {
-						error_log( 'Learning Ledger: pending void of ' . $item['id'] . ' dropped: a voiding statement cannot be voided.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- dropped voids are logged for the admin.
+					foreach ( $pending as $voiding_seq ) {
+						self::log_dropped_void( $item['id'], $voiding_seq, 'a voiding statement cannot be voided' );
 					}
 					continue;
 				}
-				if ( null !== $voiding_seq && $this->pending_void_allowed( $voiding_seq, $item ) && $this->repo->mark_voided( $item['id'] ) ) {
-					$voided[ $item['id'] ] = true;
-					$voids[]               = array( $item['id'], $voiding_seq );
+				foreach ( $pending as $voiding_seq ) {
+					if ( isset( $voided[ $item['id'] ] ) ) {
+						self::log_dropped_void( $item['id'], $voiding_seq, 'the statement was already voided' );
+					} elseif ( $this->pending_void_allowed( $voiding_seq, $item ) && $this->repo->mark_voided( $item['id'] ) ) {
+						$voided[ $item['id'] ] = true;
+						$voids[]               = array( $item['id'], $voiding_seq );
+					}
 				}
 			}
 
@@ -369,8 +373,21 @@ final class Statement_Store {
 		if ( null !== $voider && $voider->can( Scopes::VOID ) && $voider->bindings()->allows_statement( $item['row']['statement'] ) ) {
 			return true;
 		}
-		error_log( 'Learning Ledger: pending void of ' . $item['id'] . ' dropped: the target is outside the voiding client\'s bindings.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- dropped voids are logged for the admin.
+		self::log_dropped_void( $item['id'], $voiding_seq, 'the voiding client is gone, inactive, lacks void or is not bound to the target' );
 		return false;
+	}
+
+	/**
+	 * Log a pending void that was not applied.
+	 *
+	 * @param string  $target_id   Target statement id.
+	 * @param integer $voiding_seq Seq of the voiding statement.
+	 * @param string  $reason      Why.
+	 *
+	 * @return void
+	 */
+	private static function log_dropped_void( string $target_id, int $voiding_seq, string $reason ): void {
+		error_log( sprintf( 'Learning Ledger: pending void of %s by statement seq %d dropped: %s.', $target_id, $voiding_seq, $reason ) ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- dropped voids are logged for the admin.
 	}
 
 	/**
@@ -378,20 +395,26 @@ final class Statement_Store {
 	 *
 	 * @param string $key Authority key.
 	 *
-	 * @return Principal|null Null when the client or token no longer exists.
+	 * @return Principal|null Null when the client or token no longer exists, the client is
+	 *                        revoked or expired, or the token is revoked (an expired token
+	 *                        still counts while its parent client is active).
 	 */
 	private static function principal_for( string $key ): ?Principal {
 		if ( 'sys:' . Principal::SYSTEM_NAME === $key ) {
 			return Principal::system();
 		}
+		$now     = Clock::now();
 		$clients = new Client_Repository();
 		if ( str_starts_with( $key, 'tok:' ) ) {
-			$token  = ( new Token_Repository() )->find( substr( $key, 4 ) );
-			$parent = null === $token ? null : $clients->find( $token->parent_client );
-			return null === $parent ? null : Principal::for_token( $parent, $token );
+			$token = ( new Token_Repository() )->find( substr( $key, 4 ) );
+			if ( null === $token || null !== $token->revoked_at ) {
+				return null;
+			}
+			$parent = $clients->find( $token->parent_client );
+			return null === $parent || ! $parent->is_active( $now ) ? null : Principal::for_token( $parent, $token );
 		}
 		$client = $clients->find( $key );
-		return null === $client ? null : Principal::for_client( $client );
+		return null === $client || ! $client->is_active( $now ) ? null : Principal::for_client( $client );
 	}
 
 	/**

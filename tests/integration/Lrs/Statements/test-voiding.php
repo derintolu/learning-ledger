@@ -133,7 +133,7 @@ class Voiding_Test extends WP_UnitTestCase {
 		$p        = self::principal();
 		$target   = Uuid::v4();
 		[ $void ] = $store->store( array( self::voiding( $target ) ), $p, '2.0.0' );
-		$this->assertSame( array(), $this->fired );
+		$this->assertSame( array(), $fired );
 
 		global $wpdb;
 		$this->assertSame( 1, (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'pending_voids' ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -206,7 +206,7 @@ class Voiding_Test extends WP_UnitTestCase {
 		$this->assertFalse( ( new Statement_Repository() )->find( $target )->voided );
 		$this->assertSame( array(), $this->fired );
 		$this->assertSame( 0, self::pending_count() );
-		$this->assertStringContainsString( 'pending void of ' . $target . ' dropped', $log );
+		$this->assertStringContainsString( 'pending void of ' . $target . ' by statement seq', $log );
 	}
 
 	public function test_voiding_statement_actor_must_satisfy_bindings() {
@@ -246,7 +246,7 @@ class Voiding_Test extends WP_UnitTestCase {
 		$this->assertFalse( ( new Statement_Repository() )->find( $y )->voided );
 		// Only the late statement's own pending void remains.
 		$this->assertSame( 1, self::pending_count() );
-		$this->assertStringContainsString( 'pending void of ' . $y . ' dropped', $log );
+		$this->assertStringContainsString( 'pending void of ' . $y . ' by statement seq', $log );
 	}
 
 	public function test_erasing_the_voider_removes_its_pending_voids() {
@@ -256,5 +256,56 @@ class Voiding_Test extends WP_UnitTestCase {
 		$this->assertSame( 1, self::pending_count() );
 		( new Statement_Repository() )->delete_for_actor( Agent_Identity::from_array( $void['actor'] )->hash() );
 		$this->assertSame( 0, self::pending_count() );
+	}
+
+	public function test_first_allowed_pending_voider_applies() {
+		$this->watch_voids();
+		$store  = new Statement_Store();
+		$target = Uuid::v4();
+		$bound  = self::principal(
+			array( 'statements/write', 'void' ),
+			array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u1' ) )
+		);
+		$store->store( array( self::voiding( $target, 'u1' ) ), $bound, '2.0.0' );
+		[ $allowed ] = $store->store( array( self::voiding( $target ) ), self::principal(), '2.0.0' );
+		$this->assertSame( 2, self::pending_count() );
+
+		$fired = array();
+		add_action(
+			'learning_ledger/statement_voided',
+			static function ( string $target_id, Stored_Statement $voiding ) use ( &$fired ) {
+				$fired[] = $voiding->id;
+			},
+			10,
+			2
+		);
+		$st       = self::statement( 'u2' );
+		$st['id'] = $target;
+		$log      = self::capture_log( fn() => $store->store( array( $st ), self::principal(), '2.0.0' ) );
+
+		$this->assertTrue( ( new Statement_Repository() )->find( $target )->voided );
+		$this->assertSame( array( $target ), $this->fired );
+		$this->assertSame( array( $allowed ), $fired );
+		$this->assertSame( 0, self::pending_count() );
+		$this->assertStringContainsString( 'pending void of ' . $target . ' by statement seq', $log );
+	}
+
+	public function test_revoked_voider_pending_void_is_dropped() {
+		$this->watch_voids();
+		$store  = new Statement_Store();
+		$c      = Client_Factory::create( array( 'statements/write', 'void' ) );
+		$voider = Principal::for_client( ( new Client_Repository() )->find( $c['id'] ) );
+		$target = Uuid::v4();
+		$store->store( array( self::voiding( $target ) ), $voider, '2.0.0' );
+		( new Client_Repository() )->revoke( $c['id'] );
+
+		$st       = self::statement();
+		$st['id'] = $target;
+		$log      = self::capture_log( fn() => $store->store( array( $st ), self::principal(), '2.0.0' ) );
+
+		$this->assertFalse( ( new Statement_Repository() )->find( $target )->voided );
+		$this->assertSame( array(), $this->fired );
+		$this->assertSame( 0, self::pending_count() );
+		$this->assertStringContainsString( 'dropped', $log );
 	}
 }
