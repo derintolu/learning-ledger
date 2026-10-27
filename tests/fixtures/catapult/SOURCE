@@ -1,0 +1,28 @@
+CATAPULT cmi5 LMS Test Suite sample packages
+
+Source:   https://github.com/adlnet/CATAPULT
+Revision: 806c0baaa0fa99c9cb4f398ad7eb21fc5461c6e4 (CATAPULT_SHA in bin/versions.env)
+Path:     lts/pkg/src/
+Licence:  Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+
+Files copied unchanged:
+  001-essentials/cmi5.xml
+  002-allowed/cmi5.xml
+  203-1-relative-url-no-reference/cmi5.xml
+  202-1-relative-url-no-zip.xml
+  204-query-string-conflict-endpoint.xml
+  205-3-duplicated-au.xml
+  206-1-invalid-au-url.xml
+  207-1-invalid-courseStructure.xml
+  index.html (the HTML template CATAPULT's build puts in every package ZIP)
+
+Upstream NOTICE:
+
+  Catapult
+  Copyright 2020 Rustici Software
+
+  This product includes software developed at
+  Rustici Software (http://www.rusticisoftware.com/).
+
+The tests build each package ZIP from cmi5.xml plus index.html at run time,
+as CATAPULT's webpack build does (without the bundled AU JavaScript).
