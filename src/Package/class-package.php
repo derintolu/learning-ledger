@@ -21,6 +21,8 @@ final class Package {
 
 	const MAX_JSON_BYTES = 8388608;
 
+	const MAX_XML_BYTES = 8388608;
+
 	/**
 	 * Entry names (files only), sorted.
 	 *
@@ -166,7 +168,7 @@ final class Package {
 	 * @return string
 	 */
 	public function cmi5_xml(): string {
-		return $this->file( 'cmi5.xml' );
+		return $this->file( 'cmi5.xml', self::MAX_XML_BYTES );
 	}
 
 	/**
@@ -232,14 +234,19 @@ final class Package {
 	/**
 	 * Contents of an entry.
 	 *
-	 * @param string $path Entry path as listed by entries().
+	 * @param string       $path Entry path as listed by entries().
+	 * @param integer|null $max  Refuse, before inflating, an entry larger than this many bytes.
 	 *
 	 * @return string
-	 * @throws Invalid_Input Codes not_found, zip_too_large (entry larger than its declared size).
+	 * @throws Invalid_Input Codes not_found, too_large (over $max), zip_too_large (entry larger than its declared size).
 	 */
-	public function file( string $path ): string {
+	public function file( string $path, ?int $max = null ): string {
 		if ( ! in_array( $path, $this->names, true ) ) {
 			throw new Invalid_Input( 'The package has no such file.', 'not_found', $path );
+		}
+		$known = $this->sizes[ $path ] ?? strlen( $this->memory[ $path ] ?? '' );
+		if ( null !== $max && $known > $max ) {
+			throw new Invalid_Input( 'The package file is too large.', 'too_large', $path );
 		}
 		if ( null === $this->zip_path ) {
 			return $this->memory[ $path ];
@@ -281,7 +288,7 @@ final class Package {
 		if ( ! in_array( $path, $this->names, true ) ) {
 			return null;
 		}
-		$value = Json::decode_strict( $this->file( $path ), self::MAX_JSON_BYTES );
+		$value = Json::decode_strict( $this->file( $path, self::MAX_JSON_BYTES ), self::MAX_JSON_BYTES );
 		if ( ! is_array( $value ) ) {
 			throw new Invalid_Input( 'The JSON file is not an object.', 'malformed', $path );
 		}

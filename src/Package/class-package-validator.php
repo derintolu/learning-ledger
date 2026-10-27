@@ -65,11 +65,41 @@ final class Package_Validator {
 			}
 		}
 
+		if ( $is_public ) {
+			self::stray_secret_errors( $errors, $p );
+		}
+
 		if ( null !== $structure ) {
 			self::structure_errors( $errors, $p, $structure, $lessons );
 		}
 
 		return new Validation_Result( $errors );
+	}
+
+	/**
+	 * Secret fields in JSON entries that are neither course.json, a lesson file nor under cxm/files/.
+	 *
+	 * @param array   $errors Errors, appended to.
+	 * @param Package $p      Package.
+	 *
+	 * @return void
+	 */
+	private static function stray_secret_errors( array &$errors, Package $p ): void {
+		$known = array_map(
+			static fn( string $k ): string => 'cxm/lessons/' . $k . '.json',
+			$p->lesson_keys()
+		);
+		foreach ( $p->entries() as $entry ) {
+			if ( '.json' !== substr( $entry, -5 ) || Package::COURSE_JSON === $entry || 0 === strpos( $entry, 'cxm/files/' ) || in_array( $entry, $known, true ) ) {
+				continue;
+			}
+			$loaded = self::load_json( $p, $entry );
+			if ( is_array( $loaded['array'] ?? null ) ) {
+				foreach ( Secrets::present( $loaded['array'] ) as $pointer ) {
+					$errors[] = self::error( 'secret_in_public', '/' . $entry . $pointer, 'A public package must not carry secret field ' . $pointer . '.' );
+				}
+			}
+		}
 	}
 
 	/**
@@ -119,8 +149,9 @@ final class Package_Validator {
 			if ( null === $lesson ) {
 				continue;
 			}
-			$file = basename( $src, '.json' );
-			foreach ( $lesson['checkpoint']['branches'] ?? array() as $i => $branch ) {
+			$file     = basename( $src, '.json' );
+			$branches = is_array( $lesson['checkpoint'] ?? null ) && is_array( $lesson['checkpoint']['branches'] ?? null ) ? $lesson['checkpoint']['branches'] : array();
+			foreach ( $branches as $i => $branch ) {
 				$to = is_array( $branch ) ? ( $branch['to'] ?? null ) : null;
 				if ( ! is_string( $to ) ) {
 					continue;
@@ -146,7 +177,7 @@ final class Package_Validator {
 	 */
 	private static function load_json( Package $p, string $path ): array {
 		try {
-			$raw   = $p->file( $path );
+			$raw   = $p->file( $path, Package::MAX_JSON_BYTES );
 			$array = Json::decode_strict( $raw, Package::MAX_JSON_BYTES );
 			if ( ! is_array( $array ) ) {
 				return array( 'error' => 'The JSON document must be an object.' );

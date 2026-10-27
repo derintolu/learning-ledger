@@ -157,9 +157,8 @@ class Package_Validator_Test extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function test_malformed_lesson_json_is_a_schema_error() {
-		$in  = Package_Fixtures::inputs( 'good-full' );
-		$zip = Package_Writer::write( $in[0], $in[1], $in[2], array() );
-		// Rebuild with a broken lesson file.
+		$in = Package_Fixtures::inputs( 'good-full' );
+		// Build a package with a broken lesson file.
 		$path         = Package_Fixtures::zip(
 			function ( ZipArchive $z ) use ( $in ) {
 				$z->addFromString( 'cmi5.xml', $in[0] );
@@ -169,10 +168,59 @@ class Package_Validator_Test extends \PHPUnit\Framework\TestCase {
 			}
 		);
 		$this->temp[] = $path;
-		$this->assertNotSame( '', $zip );
-		$r     = Package_Validator::validate( Package::from_zip( $path, new \LearningLedger\Package\Limits() ), 'full' );
-		$paths = array_column( array_filter( $r->errors(), fn( $e ) => 'schema' === $e['code'] ), 'path' );
+		$r            = Package_Validator::validate( Package::from_zip( $path, new \LearningLedger\Package\Limits() ), 'full' );
+		$paths        = array_column( array_filter( $r->errors(), fn( $e ) => 'schema' === $e['code'] ), 'path' );
 		$this->assertContains( '/lessons/what-is-json', $paths );
 		$this->assertContains( '/course', $paths );
+	}
+
+	public function test_branches_of_the_wrong_type_do_not_crash() {
+		$in = Package_Fixtures::inputs( 'good-full' );
+		$in[2]['what-is-json']['checkpoint']['branches'] = 'nope';
+		$r = Package_Validator::validate( $this->load( $in ), 'full' );
+		$this->assertContains( 'schema', $this->codes( $r ) );
+	}
+
+	public function test_public_scans_json_outside_the_known_locations() {
+		$in           = Package_Fixtures::inputs( 'good-public' );
+		$path         = Package_Fixtures::zip(
+			function ( ZipArchive $z ) use ( $in ) {
+				$z->addFromString( 'cmi5.xml', $in[0] );
+				$z->addFromString( 'cxm/course.json', \LearningLedger\Util\Json::encode_exact( $in[1] ) );
+				$z->addFromString( 'cxm/lessons/json-syntax.json', \LearningLedger\Util\Json::encode_exact( $in[2]['json-syntax'] ) );
+				$z->addFromString( 'cxm/lessons/what-is-json.json', \LearningLedger\Util\Json::encode_exact( $in[2]['what-is-json'] ) );
+				$z->addFromString( 'cxm/extra/leak.json', '{"referenceSolution":{"files":{}}}' );
+				$z->addFromString( 'cxm/files/starter.json', '{"referenceSolution":1}' );
+			}
+		);
+		$this->temp[] = $path;
+		$r            = Package_Validator::validate( Package::from_zip( $path, new \LearningLedger\Package\Limits() ), 'public' );
+		$this->assertSame( array( 'secret_in_public' ), $this->codes( $r ) );
+		$this->assertSame( '/cxm/extra/leak.json/referenceSolution', $r->errors()[0]['path'] );
+	}
+
+	public function test_oversized_cmi5_xml_is_an_xsd_error_not_an_inflate() {
+		$path         = Package_Fixtures::zip(
+			function ( ZipArchive $z ) {
+				$z->addFromString( 'cmi5.xml', str_repeat( ' ', Package::MAX_XML_BYTES + 1 ) );
+			}
+		);
+		$this->temp[] = $path;
+		$r            = Package_Validator::validate( Package::from_zip( $path, new \LearningLedger\Package\Limits( 1073741824, 20000, 100000 ) ), 'full' );
+		$this->assertSame( array( 'xsd' ), $this->codes( $r ) );
+	}
+
+	public function test_oversized_json_entry_is_refused_before_reading() {
+		$in           = Package_Fixtures::inputs( 'good-full' );
+		$path         = Package_Fixtures::zip(
+			function ( ZipArchive $z ) use ( $in ) {
+				$z->addFromString( 'cmi5.xml', $in[0] );
+				$z->addFromString( 'cxm/lessons/what-is-json.json', '{"a":"' . str_repeat( 'a', Package::MAX_JSON_BYTES ) . '"}' );
+			}
+		);
+		$this->temp[] = $path;
+		$p            = Package::from_zip( $path, new \LearningLedger\Package\Limits( 1073741824, 20000, 100000 ) );
+		$r            = Package_Validator::validate( $p, 'full' );
+		$this->assertContains( '/lessons/what-is-json', array_column( array_filter( $r->errors(), fn( $e ) => 'schema' === $e['code'] ), 'path' ) );
 	}
 }

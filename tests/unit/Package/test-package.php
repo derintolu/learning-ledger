@@ -140,4 +140,70 @@ class Package_Test extends \PHPUnit\Framework\TestCase {
 		$in = Package_Fixtures::inputs( 'good-full' );
 		$this->assertSame( 'none', $this->code_of( $this->zip_of( Package_Writer::write( $in[0], $in[1], $in[2], array() ) ) ) );
 	}
+
+	public function test_whole_archive_ratio_catches_many_small_entries() {
+		$path = Package_Fixtures::zip(
+			function ( ZipArchive $z ) {
+				$z->addFromString( 'cmi5.xml', Package_Fixtures::xml() );
+				for ( $i = 0; $i < 20; $i++ ) {
+					$z->addFromString( 'cxm/files/z' . $i, str_repeat( "\0", 1000 ) );
+				}
+			}
+		);
+		// Each entry is under the per-entry floor, so only the archive-wide check can reject this.
+		$this->assertSame( 'zip_ratio', $this->code_of( $path, new Limits( 1073741824, 20000, 3 ) ) );
+	}
+
+	public function test_oversized_entry_is_refused_by_file_max() {
+		$path         = Package_Fixtures::zip(
+			function ( ZipArchive $z ) {
+				$z->addFromString( 'cmi5.xml', Package_Fixtures::xml() );
+				$z->addFromString( 'cxm/files/big', str_repeat( 'a', 5000 ) );
+			}
+		);
+		$this->temp[] = $path;
+		$p            = Package::from_zip( $path, new Limits( 1073741824, 20000, 100000 ) );
+		$this->assertSame( 5000, strlen( $p->file( 'cxm/files/big', 5000 ) ) );
+		try {
+			$p->file( 'cxm/files/big', 4999 );
+			$this->fail( 'expected Invalid_Input' );
+		} catch ( Invalid_Input $e ) {
+			$this->assertSame( 'too_large', $e->error_code() );
+		}
+	}
+
+	public function test_forged_declared_size_bounds_the_read() {
+		$zip = Package_Writer::write( Package_Fixtures::xml(), array(), array(), array( 'x' => 'abcdefghij' ) );
+		$pos = 0;
+		while ( false !== ( $pos = strpos( $zip, "PK\x01\x02", $pos ) ) ) { // phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition -- scanning loop.
+			$nlen = unpack( 'v', substr( $zip, $pos + 28, 2 ) )[1];
+			if ( 'cxm/files/x' === substr( $zip, $pos + 46, $nlen ) ) {
+				// Declare 3 bytes (compressed and uncompressed) for a 10 byte stored entry.
+				$zip = substr_replace( $zip, pack( 'VV', 3, 3 ), $pos + 20, 8 );
+				break;
+			}
+			$pos += 46;
+		}
+		$p = Package::from_zip( $this->zip_of( $zip ), new Limits() );
+		try {
+			$this->assertLessThanOrEqual( 3, strlen( $p->file( 'cxm/files/x' ) ) );
+		} catch ( Invalid_Input $e ) {
+			$this->assertSame( 'zip_too_large', $e->error_code() );
+		}
+	}
+
+	public function test_duplicate_entries_are_rejected() {
+		$zip = Package_Writer::write(
+			Package_Fixtures::xml(),
+			array(),
+			array(),
+			array(
+				'a' => '1',
+				'b' => '2',
+			)
+		);
+		$this->assertSame( 1, substr_count( $zip, 'cxm/files/b' ) / 2 );
+		$zip = str_replace( 'cxm/files/b', 'cxm/files/a', $zip );
+		$this->assertSame( 'zip_path', $this->code_of( $this->zip_of( $zip ) ) );
+	}
 }
