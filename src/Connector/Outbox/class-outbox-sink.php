@@ -22,7 +22,8 @@ use LearningLedger\Queue\Shutdown_Runner;
  * at most one INSERT (the outbox row). Exception: on a learner's first event for a
  * course, the actor (user meta `lledger_actor`), the registration row and, through
  * the integration's IRI filter, the course's `_lledger_activity_base` are written
- * once; later events only read them.
+ * once; later events only read them. A course reset also ends the registration
+ * (one UPDATE inside Statement_Builder::build()).
  */
 final class Outbox_Sink implements Event_Sink {
 

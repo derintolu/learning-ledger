@@ -245,7 +245,7 @@ final class Job_Queue {
 			$wpdb->prepare(
 				"UPDATE {$table} SET attempts = %d, run_after = %s, locked_until = %s WHERE id = %d AND lock_token = %s AND done_at IS NULL", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				$attempts,
-				Timestamp::to_db( $now->modify( '+' . self::backoff( $attempts ) . ' seconds' ) ),
+				Timestamp::to_db( $now->modify( '+' . self::retry_delay( $attempts ) . ' seconds' ) ),
 				Timestamp::to_db( $now->modify( '+' . self::LOCK_SECONDS . ' seconds' ) ),
 				(int) $job->id,
 				(string) $job->lock_token
@@ -301,7 +301,7 @@ final class Job_Queue {
 			Tables::name( 'jobs' ),
 			array(
 				'last_error'   => $error,
-				'run_after'    => Timestamp::to_db( $now->modify( '+' . self::backoff( $attempts ) . ' seconds' ) ),
+				'run_after'    => Timestamp::to_db( $now->modify( '+' . self::retry_delay( $attempts ) . ' seconds' ) ),
 				'lock_token'   => null,
 				'locked_until' => null,
 			),
@@ -321,8 +321,17 @@ final class Job_Queue {
 	 *
 	 * @return integer
 	 */
-	private static function backoff( int $attempts ): int {
+	public static function retry_delay( int $attempts ): int {
 		return self::BACKOFF[ $attempts - 1 ] ?? self::BACKOFF_LATER;
+	}
+
+	/**
+	 * Age in seconds after which failing work is given up.
+	 *
+	 * @return integer
+	 */
+	public static function give_up_seconds(): int {
+		return self::GIVE_UP_SECONDS;
 	}
 
 	/**

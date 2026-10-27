@@ -73,6 +73,7 @@ final class Statement_Builder {
 		}
 
 		// First use mints the actor (user meta) and the registration (one row); later events only read them.
+		// A course reset ends the registration below (one UPDATE), so the next event mints a new one.
 		$scope        = 'course:' . $e->course_id;
 		$registration = $this->registrations->find( $e->user_id, $scope ) ?? $this->registrations->get_or_create( $e->user_id, $scope );
 		$actor        = $this->identity->actor_for_user( $e->user_id );

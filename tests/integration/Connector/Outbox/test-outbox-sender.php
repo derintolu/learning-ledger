@@ -24,6 +24,9 @@ class Outbox_Sender_Test extends WP_UnitTestCase {
 	/** @var int|WP_Error */
 	private $reply = 204;
 
+	/** @var array */
+	private array $reply_headers = array();
+
 	public function set_up() {
 		parent::set_up();
 		Installer::install();
@@ -43,8 +46,9 @@ class Outbox_Sender_Test extends WP_UnitTestCase {
 		);
 		Connector_Secret::generate();
 		Clock::freeze( new DateTimeImmutable( '2026-10-27 10:00:00.000000', new DateTimeZone( 'UTC' ) ) );
-		$this->requests = array();
-		$this->reply    = 204;
+		$this->requests      = array();
+		$this->reply         = 204;
+		$this->reply_headers = array();
 		add_filter( 'pre_http_request', array( $this, 'fake_http' ), 10, 3 );
 	}
 
@@ -63,7 +67,7 @@ class Outbox_Sender_Test extends WP_UnitTestCase {
 			return $this->reply;
 		}
 		return array(
-			'headers'  => array( 'x-experience-api-version' => '1.0.3' ),
+			'headers'  => array_merge( array( 'x-experience-api-version' => '1.0.3' ), $this->reply_headers ),
 			'body'     => '',
 			'response' => array(
 				'code'    => $this->reply,
@@ -182,6 +186,42 @@ class Outbox_Sender_Test extends WP_UnitTestCase {
 		Clock::freeze( Clock::now()->modify( '+1 day' ) );
 		( new Outbox_Sender() )->flush();
 		$this->assertCount( 1, $this->requests );
+	}
+
+	public function test_429_is_retried_no_earlier_than_retry_after() {
+		$s                   = $this->queue();
+		$this->reply         = 429;
+		$this->reply_headers = array( 'retry-after' => '600' );
+
+		( new Outbox_Sender() )->flush();
+		$row = $this->row( $s['id'] );
+		$this->assertSame( 'pending', $row['status'] );
+		$this->assertSame( '1', $row['attempts'] );
+		$this->assertGreaterThanOrEqual( '2026-10-27 10:10:00.000000', $row['next_attempt_at'] );
+
+		Clock::freeze( Clock::now()->modify( '+301 seconds' ) );
+		( new Outbox_Sender() )->flush();
+		$this->assertCount( 1, $this->requests, 'Not retried before Retry-After.' );
+	}
+
+	public function test_429_without_retry_after_uses_backoff() {
+		$s           = $this->queue();
+		$this->reply = 429;
+
+		( new Outbox_Sender() )->flush();
+		$row = $this->row( $s['id'] );
+		$this->assertSame( 'pending', $row['status'] );
+		$this->assertSame( '2026-10-27 10:01:00.000000', $row['next_attempt_at'] );
+	}
+
+	public function test_408_is_retried() {
+		$s           = $this->queue();
+		$this->reply = 408;
+
+		( new Outbox_Sender() )->flush();
+		$row = $this->row( $s['id'] );
+		$this->assertSame( 'pending', $row['status'] );
+		$this->assertSame( '1', $row['attempts'] );
 	}
 
 	public function test_gives_up_after_72_hours() {

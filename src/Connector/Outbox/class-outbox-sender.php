@@ -9,6 +9,8 @@ namespace LearningLedger\Connector\Outbox;
 
 use LearningLedger\Audit\Audit_Log;
 use LearningLedger\Connector\Pairing\Lrs_Client;
+use LearningLedger\Connector\Pairing\Lrs_Response;
+use LearningLedger\Queue\Job_Queue;
 use LearningLedger\Util\Clock;
 use LearningLedger\Util\Timestamp;
 
@@ -17,21 +19,6 @@ use LearningLedger\Util\Timestamp;
  * Runs at `shutdown` (after the response) and every cron minute.
  */
 final class Outbox_Sender {
-
-	/**
-	 * Retry delays in seconds after the 1st to 4th failure: the job queue's backoff (Job_Queue).
-	 */
-	private const BACKOFF = array( 60, 300, 900, 3600 );
-
-	/**
-	 * Retry delay after later failures, as the job queue.
-	 */
-	private const BACKOFF_LATER = 21600;
-
-	/**
-	 * Age after which a row that keeps failing is given up, as the job queue.
-	 */
-	private const GIVE_UP_SECONDS = 259200;
 
 	/**
 	 * Seconds a claim holds a row.
@@ -64,7 +51,8 @@ final class Outbox_Sender {
 	}
 
 	/**
-	 * Send due rows: 2xx sent, 409 conflict (audited), other 4xx failed, 5xx or no response retried.
+	 * Send due rows: 2xx sent, 409 conflict (audited), other 4xx failed; 408, 429, 5xx or no response
+	 * retried on the job queue's backoff, never earlier than a Retry-After.
 	 *
 	 * @param integer $limit Most rows to send.
 	 *
@@ -84,7 +72,7 @@ final class Outbox_Sender {
 				$this->repo->update( (int) $row->id, Outbox_Repository::PENDING, (int) $row->attempts, (string) $row->next_attempt_at );
 				break;
 			}
-			if ( $this->record( $row, $res->status ) ) {
+			if ( $this->record( $row, $res ) ) {
 				++$sent;
 			}
 		}
@@ -94,12 +82,13 @@ final class Outbox_Sender {
 	/**
 	 * Record the outcome of one PUT.
 	 *
-	 * @param object  $row    Row.
-	 * @param integer $status HTTP status, 0 when there was no response.
+	 * @param object       $row Row.
+	 * @param Lrs_Response $res Response; status 0 when there was none.
 	 *
 	 * @return boolean Whether the row was sent.
 	 */
-	private function record( object $row, int $status ): bool {
+	private function record( object $row, Lrs_Response $res ): bool {
+		$status   = $res->status;
 		$id       = (int) $row->id;
 		$attempts = (int) $row->attempts + 1;
 		$now      = Clock::now();
@@ -119,13 +108,13 @@ final class Outbox_Sender {
 			);
 			return false;
 		}
-		if ( $status >= 400 && $status < 500 ) {
+		if ( $status >= 400 && $status < 500 && 408 !== $status && 429 !== $status ) {
 			$this->repo->update( $id, Outbox_Repository::FAILED, $attempts, Timestamp::to_db( $now ) );
 			return false;
 		}
 
 		$age = $now->getTimestamp() - Timestamp::from_db( (string) $row->created_at )->getTimestamp();
-		if ( $age >= self::GIVE_UP_SECONDS ) {
+		if ( $age >= Job_Queue::give_up_seconds() ) {
 			$this->repo->update( $id, Outbox_Repository::FAILED, $attempts, Timestamp::to_db( $now ) );
 			Audit_Log::record(
 				'outbox_abandoned',
@@ -137,8 +126,28 @@ final class Outbox_Sender {
 			);
 			return false;
 		}
-		$delay = self::BACKOFF[ $attempts - 1 ] ?? self::BACKOFF_LATER;
+		$delay = max( Job_Queue::retry_delay( $attempts ), self::retry_after( $res ) );
 		$this->repo->update( $id, Outbox_Repository::PENDING, $attempts, Timestamp::to_db( $now->modify( '+' . $delay . ' seconds' ) ) );
 		return false;
+	}
+
+	/**
+	 * Seconds from a Retry-After header (delta seconds or HTTP date), 0 when absent or invalid.
+	 *
+	 * @param Lrs_Response $res Response.
+	 *
+	 * @return integer
+	 */
+	private static function retry_after( Lrs_Response $res ): int {
+		$value = $res->headers['retry-after'] ?? '';
+		$value = trim( (string) ( is_array( $value ) ? reset( $value ) : $value ) );
+		if ( '' === $value ) {
+			return 0;
+		}
+		if ( ctype_digit( $value ) ) {
+			return (int) $value;
+		}
+		$at = strtotime( $value );
+		return false === $at ? 0 : max( 0, $at - Clock::now()->getTimestamp() );
 	}
 }
