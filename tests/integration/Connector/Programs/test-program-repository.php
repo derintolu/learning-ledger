@@ -59,6 +59,9 @@ class Program_Repository_Test extends WP_UnitTestCase {
 		$this->assertSame( 'https://a/x', $p->course_iri );
 		$this->assertTrue( $p->waive_recommended );
 		$this->assertSame( 0, $p->version );
+		$this->assertSame( array(), $p->course_ids );
+		$this->assertSame( array(), $p->path_keys );
+		$this->assertNull( $this->repo->for_lms_course( 0 ) );
 		$this->assertNull( $this->repo->get( self::factory()->post->create() ) );
 		$this->assertNull( $this->repo->get( 999999 ) );
 
@@ -101,6 +104,16 @@ class Program_Repository_Test extends WP_UnitTestCase {
 		$this->assertSame( '', (string) get_post_meta( $id, '_lledger_rules', true ) );
 	}
 
+	public function test_meta_auth_callback_checks_edit_post() {
+		$id = $this->make( 'prog', 'https://a/x/' );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+		$this->assertFalse( current_user_can( 'edit_post_meta', $id, '_lledger_rules' ) );
+		$user = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		get_userdata( $user )->add_cap( 'lledger_manage_connector' );
+		wp_set_current_user( $user );
+		$this->assertTrue( current_user_can( 'edit_post_meta', $id, '_lledger_rules' ) );
+	}
+
 	public function test_meta_auth_allows_connector_manager() {
 		$id   = $this->make( 'prog', 'https://a/x/' );
 		$user = self::factory()->user->create( array( 'role' => 'subscriber' ) );
@@ -118,8 +131,8 @@ class Program_Repository_Test extends WP_UnitTestCase {
 		$this->assertFalse( $pt->public );
 		$this->assertTrue( $pt->show_ui );
 		$this->assertTrue( $pt->show_in_rest );
-		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$this->assertFalse( user_can( $admin, $pt->cap->edit_posts ) );
+		$editor = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$this->assertFalse( user_can( $editor, $pt->cap->edit_posts ) );
 		$user = self::factory()->user->create( array( 'role' => 'subscriber' ) );
 		get_userdata( $user )->add_cap( 'lledger_manage_connector' );
 		$this->assertTrue( user_can( $user, $pt->cap->edit_posts ) );

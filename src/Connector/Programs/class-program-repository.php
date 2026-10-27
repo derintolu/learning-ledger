@@ -32,7 +32,8 @@ final class Program_Repository {
 		$course_iri = (string) get_post_meta( $id, '_lledger_course_iri', true );
 		$waive      = get_post_meta( $id, '_lledger_waive_recommended', true );
 		$path_keys  = array();
-		foreach ( (array) get_post_meta( $id, '_lledger_path_keys', true ) as $cid => $key ) {
+		$raw_keys   = get_post_meta( $id, '_lledger_path_keys', true );
+		foreach ( is_array( $raw_keys ) ? $raw_keys : array() as $cid => $key ) {
 			$path_keys[ (int) $cid ] = (string) $key;
 		}
 		$custody = (string) get_post_meta( $id, '_lledger_custody', true );
@@ -199,7 +200,8 @@ final class Program_Repository {
 	 * @return int[]
 	 */
 	private function course_ids( int $id ): array {
-		return array_values( array_map( 'intval', (array) get_post_meta( $id, '_lledger_courses', true ) ) );
+		$raw = get_post_meta( $id, '_lledger_courses', true );
+		return is_array( $raw ) ? array_values( array_map( 'intval', $raw ) ) : array();
 	}
 
 	/**

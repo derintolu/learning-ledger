@@ -65,6 +65,9 @@ final class Program_Command {
 				if ( 'iri-base' === $flag && '' === Program_Module::sanitize_iri_base( $value ) ) {
 					\WP_CLI::error( 'iri-base must be an absolute http(s) IRI.' );
 				}
+				if ( in_array( $flag, array( 'course-iri', 'course-server-url' ), true ) && '' === esc_url_raw( $value, array( 'http', 'https' ) ) ) {
+					\WP_CLI::error( $flag . ' must be an absolute http(s) URL.' );
+				}
 				if ( 'au-url-template' === $flag && ! str_contains( $value, '{key}' ) ) {
 					\WP_CLI::error( 'au-url-template must contain {key}.' );
 				}
@@ -83,6 +86,9 @@ final class Program_Command {
 		}
 		foreach ( $set as $meta_key => $value ) {
 			update_post_meta( $id, $meta_key, $value );
+			if ( is_string( $value ) && '' !== $value && '' === (string) get_post_meta( $id, $meta_key, true ) ) {
+				\WP_CLI::error( 'Value rejected for ' . $meta_key . '.' );
+			}
 		}
 		\WP_CLI::success( 'Program ' . $id . ' updated.' );
 	}
