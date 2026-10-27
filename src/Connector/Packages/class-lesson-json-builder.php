@@ -18,7 +18,7 @@ final class Lesson_Json_Builder {
 	/**
 	 * Key under the lesson's `extensions` for data the schema has no field for.
 	 */
-	public const EXTENSION = 'learning-ledger.org/lesson';
+	public const EXTENSION = 'https://github.com/derintolu/learning-ledger/extensions/lesson';
 
 	private const MAX_META_BYTES = 1048576;
 
@@ -67,7 +67,7 @@ final class Lesson_Json_Builder {
 		$extension = array();
 		$licence   = (string) get_post_meta( $lesson->ID, '_lledger_licence', true );
 		if ( '' !== $licence ) {
-			$extension['licence'] = $licence;
+			$extension['license'] = $licence;
 		}
 		if ( null !== $found['checkpoint'] && $found['checkpoint']['fallback'] ) {
 			$extension['fallbackOptions'] = $found['checkpoint']['fallback'];

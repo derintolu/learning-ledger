@@ -297,7 +297,7 @@ class Package_Builder_Test extends WP_UnitTestCase {
 		$this->assertSame( 2, $course['placement']['maxQuestions'] );
 		$this->assertSame( 'Tagline of Path A', $course['paths']['path-a']['tagline'] );
 		$this->assertSame( array( 'path-a', 'path-b' ), array_keys( $course['paths'] ) );
-		$ext = $course['extensions']['learning-ledger.org/course']['paths']['path-a'];
+		$ext = $course['extensions']['https://github.com/derintolu/learning-ledger/extensions/course']['paths']['path-a'];
 		$this->assertSame( 'html', $ext['preview']['kind'] );
 		$this->assertSame( 'Learn A', $ext['landing']['headline'] );
 
@@ -317,6 +317,26 @@ class Package_Builder_Test extends WP_UnitTestCase {
 		}
 		$this->assertSame( 'distribution', $pkg->course_json()['flavour'] );
 		$this->assertSame( 'quotes-check', $pkg->lesson_json( 'lesson-one' )['checkpoint']['key'] );
+	}
+
+	public function test_public_package_drops_final_files_and_fallback_options() {
+		update_post_meta( $this->courses['path-a'], '_lledger_final_files', wp_slash( '[{"path":"a.txt","content":"FINALFILES-SENTINEL"}]' ) );
+		wp_update_post(
+			array(
+				'ID'           => $this->lessons['lesson-one'],
+				'post_content' => wp_slash( str_replace( '"maxAttempts":3', '"maxAttempts":3,"fallbackOptions":[{"label":"FALLBACK-SENTINEL","outcome":"x"}]', get_post_field( 'post_content', $this->lessons['lesson-one'] ) ) ),
+			)
+		);
+		$full = $this->package( $this->build( 'full' )->zip );
+		$this->assertStringContainsString( 'FINALFILES-SENTINEL', $this->all_bytes( $full ) );
+		$this->assertStringContainsString( 'FALLBACK-SENTINEL', $this->all_bytes( $full ) );
+
+		$public = $this->package( $this->build( 'public' )->zip );
+		$this->assertSame( array(), Package_Validator::validate( $public, 'public' )->errors() );
+		$bytes = $this->all_bytes( $public );
+		$this->assertStringNotContainsString( 'FINALFILES-SENTINEL', $bytes );
+		$this->assertStringNotContainsString( 'FALLBACK-SENTINEL', $bytes );
+		$this->assertStringContainsString( 'Learn A', $bytes );
 	}
 
 	public function test_au_ids_and_activity_scheme() {
@@ -418,8 +438,7 @@ class Package_Builder_Test extends WP_UnitTestCase {
 	}
 
 	public function test_missing_stable_key_fails() {
-		$adapter = Integration_Loader::adapter( 'fake' );
-		$id      = $this->lesson_post( $this->courses['path-b'], '', 'Keyless', $this->beat( 'x', $this->para( 'X.' ) ), 2 );
+		$id = $this->lesson_post( $this->courses['path-b'], '', 'Keyless', $this->beat( 'x', $this->para( 'X.' ) ), 2 );
 		try {
 			$this->build();
 			$this->fail( 'Expected Invalid_Input.' );
@@ -427,7 +446,6 @@ class Package_Builder_Test extends WP_UnitTestCase {
 			$this->assertSame( 'missing_stable_key', $e->error_code() );
 			$this->assertSame( (string) $id, $e->path() );
 		}
-		$this->assertNotNull( $adapter );
 	}
 
 	public function test_missing_path_key_fails() {

@@ -30,7 +30,7 @@ final class Package_Builder {
 	/**
 	 * Key under course.json `extensions` for the path data the schema has no field for.
 	 */
-	public const EXTENSION = 'learning-ledger.org/course';
+	public const EXTENSION = 'https://github.com/derintolu/learning-ledger/extensions/course';
 
 	private const MAX_META_BYTES = 1048576;
 
@@ -81,16 +81,18 @@ final class Package_Builder {
 			$etag    = Package_Writer::etag( $full );
 		}
 		self::validate( $full, 'full' );
+		$public = null;
+		if ( 'public' === $flavour ) {
+			$public = $this->zip( $program, $parts, 'public', $version );
+			self::validate( $public, 'public' );
+		}
 		if ( $changed ) {
 			$this->programs->bump_version( $program_id, $etag );
 			$this->programs->set_structure( $program_id, Course_Structure_Parser::parse( $parts['xml'] ) );
 		}
-		if ( 'full' === $flavour ) {
+		if ( null === $public ) {
 			return new Built_Package( $full, $etag, $version, 'full', $parts['warnings'] );
 		}
-
-		$public = $this->zip( $program, $parts, 'public', $version );
-		self::validate( $public, 'public' );
 		return new Built_Package( $public, Package_Writer::etag( $public ), $version, 'public', $parts['warnings'] );
 	}
 
@@ -197,9 +199,30 @@ final class Package_Builder {
 	private function zip( Program $p, array $parts, string $flavour, int $version ): string {
 		$lessons = $parts['lessons'];
 		if ( 'public' === $flavour ) {
-			$lessons = array_map( array( Secrets::class, 'strip' ), $lessons );
+			$lessons = array_map( array( self::class, 'public_lesson' ), $lessons );
 		}
 		return Package_Writer::write( $parts['xml'], $this->course_json( $p, $parts, $flavour, $version ), $lessons, array() );
+	}
+
+	/**
+	 * A lesson as the public flavour carries it: secrets and fallback options removed.
+	 *
+	 * @param array $lesson Lesson document.
+	 *
+	 * @return array
+	 */
+	private static function public_lesson( array $lesson ): array {
+		$lesson = Secrets::strip( $lesson );
+		unset( $lesson['extensions'][ Lesson_Json_Builder::EXTENSION ]['fallbackOptions'] );
+		if ( isset( $lesson['extensions'] ) ) {
+			if ( array() === ( $lesson['extensions'][ Lesson_Json_Builder::EXTENSION ] ?? array() ) ) {
+				unset( $lesson['extensions'][ Lesson_Json_Builder::EXTENSION ] );
+			}
+			if ( array() === $lesson['extensions'] ) {
+				unset( $lesson['extensions'] );
+			}
+		}
+		return $lesson;
 	}
 
 	/**
@@ -237,8 +260,19 @@ final class Package_Builder {
 		if ( $p->badge_issuer ) {
 			$course['badgeIssuer'] = $p->badge_issuer;
 		}
-		if ( $parts['extensions'] ) {
-			$course['extensions'] = array( self::EXTENSION => array( 'paths' => $parts['extensions'] ) );
+		$extensions = $parts['extensions'];
+		if ( 'public' === $flavour ) {
+			foreach ( $extensions as $key => $ext ) {
+				unset( $ext['finalFiles'] );
+				if ( $ext ) {
+					$extensions[ $key ] = $ext;
+				} else {
+					unset( $extensions[ $key ] );
+				}
+			}
+		}
+		if ( $extensions ) {
+			$course['extensions'] = array( self::EXTENSION => array( 'paths' => $extensions ) );
 		}
 		return $course;
 	}
