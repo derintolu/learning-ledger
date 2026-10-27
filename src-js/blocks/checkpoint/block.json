@@ -1,0 +1,22 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "learning-ledger/checkpoint",
+	"title": "Checkpoint",
+	"category": "text",
+	"description": "A question the learner answers, with hidden checks and branches.",
+	"textdomain": "learning-ledger",
+	"attributes": {
+		"key": { "type": "string", "default": "" },
+		"kind": { "type": "string", "enum": [ "free-text", "code" ], "default": "free-text" },
+		"question": { "type": "string", "default": "" },
+		"file": { "type": [ "string", "null" ], "default": null },
+		"maxAttempts": { "type": [ "integer", "null" ], "default": null },
+		"checks": { "type": "array", "default": [] },
+		"branches": { "type": "array", "default": [] },
+		"fallbackOptions": { "type": "array", "default": [] }
+	},
+	"supports": { "html": false },
+	"editorScript": "file:./index.js",
+	"render": "file:./render.php"
+}

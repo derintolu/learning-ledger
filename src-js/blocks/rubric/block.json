@@ -1,0 +1,16 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "learning-ledger/rubric",
+	"title": "Rubric",
+	"category": "text",
+	"description": "Grading guidance for a checkpoint. Never shown to learners.",
+	"textdomain": "learning-ledger",
+	"parent": [ "learning-ledger/checkpoint" ],
+	"attributes": {
+		"text": { "type": "string", "default": "" }
+	},
+	"supports": { "html": false, "inserter": true },
+	"editorScript": "file:./index.js",
+	"render": "file:./render.php"
+}
