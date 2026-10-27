@@ -28,6 +28,12 @@ final class Eddsa_Rdfc_2022 {
 	const VERIFY_PURPOSE = 'assertionMethod';
 
 	/**
+	 * Longest base58btc multibase a 64-byte signature encodes to (`z` + 88).
+	 * Checked before decoding, since the decoder is quadratic in its input.
+	 */
+	const MAX_PROOF_VALUE_LENGTH = 89;
+
+	/**
 	 * Proof configuration (the proof options plus the document's `@context`).
 	 *
 	 * @param array              $doc                 Document being secured.
@@ -81,11 +87,15 @@ final class Eddsa_Rdfc_2022 {
 	 *
 	 * @return array The document with `proof` (carrying `proofValue`, base58btc multibase).
 	 *
-	 * @throws Invalid_Input When the document already has a proof or cannot be canonicalized.
+	 * @throws Invalid_Input When the document already has a proof, the verification method is
+	 *                       empty, or the document cannot be canonicalized.
 	 */
 	public static function sign( array $doc, string $verification_method, string $secret, \DateTimeImmutable $created, string $purpose = 'assertionMethod', ?DocumentLoader $loader = null ): array {
 		if ( array_key_exists( 'proof', $doc ) ) {
 			throw new Invalid_Input( 'Document already has a proof.', 'invalid', 'proof' );
+		}
+		if ( '' === $verification_method ) {
+			throw new Invalid_Input( 'Verification method is empty.', 'invalid', 'proof.verificationMethod' );
 		}
 		$config = self::proof_config( $doc, $verification_method, $created, $purpose );
 		$proof  = $config;
@@ -116,7 +126,7 @@ final class Eddsa_Rdfc_2022 {
 			|| self::CRYPTOSUITE !== ( $proof['cryptosuite'] ?? null )
 			|| self::VERIFY_PURPOSE !== ( $proof['proofPurpose'] ?? null )
 			|| ! is_string( $proof['verificationMethod'] ?? null ) || '' === $proof['verificationMethod']
-			|| ! is_string( $proof['proofValue'] ?? null )
+			|| ! is_string( $proof['proofValue'] ?? null ) || strlen( $proof['proofValue'] ) > self::MAX_PROOF_VALUE_LENGTH
 			|| ( array_key_exists( 'created', $proof ) && ! self::is_datetime( $proof['created'] ) ) ) {
 			return false;
 		}
@@ -147,14 +157,18 @@ final class Eddsa_Rdfc_2022 {
 			return false;
 		}
 
-		$public_key = $public_key_for( $proof['verificationMethod'] );
+		try {
+			$public_key = $public_key_for( $proof['verificationMethod'] );
+		} catch ( \Throwable $e ) {
+			return false;
+		}
 		if ( ! is_string( $public_key ) || 32 !== strlen( $public_key ) ) {
 			return false;
 		}
 
 		try {
 			$hash = self::hash_data( $document, $options, $loader, Canonicalizer::UNTRUSTED_MAX_DEEP_ITERATIONS );
-		} catch ( Invalid_Input $e ) {
+		} catch ( \Exception $e ) {
 			return false;
 		}
 
@@ -162,7 +176,8 @@ final class Eddsa_Rdfc_2022 {
 	}
 
 	/**
-	 * Whether a value is an XML Schema dateTime with a time zone.
+	 * Whether a value is an XML Schema dateTime with a time zone and a real
+	 * calendar date (hours 00-23, no leap second, offsets up to 14:00).
 	 *
 	 * @param mixed $value Value.
 	 *
@@ -170,6 +185,7 @@ final class Eddsa_Rdfc_2022 {
 	 */
 	private static function is_datetime( mixed $value ): bool {
 		return is_string( $value )
-			&& 1 === preg_match( '/^-?\d{4,}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?(Z|[+-](0\d|1[0-3]):[0-5]\d|[+-]14:00)$/', $value );
+			&& 1 === preg_match( '/^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]((0\d|1[0-3]):[0-5]\d|14:00))$/D', $value, $m )
+			&& checkdate( (int) $m[2], (int) $m[3], (int) $m[1] );
 	}
 }

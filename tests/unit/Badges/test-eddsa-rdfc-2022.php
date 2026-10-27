@@ -135,6 +135,7 @@ class Eddsa_Rdfc_2022_Test extends \PHPUnit\Framework\TestCase {
 			'other proofPurpose'         => array( $p( 'proofPurpose', 'authentication' ) ),
 			'created altered'            => array( $p( 'created', '2023-02-24T23:36:39Z' ) ),
 			'created not a dateTime'     => array( $p( 'created', 'yesterday' ) ),
+			'proofValue too long'        => array( $p( 'proofValue', 'z' . str_repeat( '2', 89 ) ) ),
 			'proof context not a prefix' => array( $p( '@context', array( 'https://www.w3.org/ns/credentials/examples/v2' ) ) ),
 			'unbundled document context' => array(
 				static function ( array $d ): array {
@@ -150,6 +151,76 @@ class Eddsa_Rdfc_2022_Test extends \PHPUnit\Framework\TestCase {
 	 */
 	public function test_verify_rejects_malformed_proofs( callable $mutate ) {
 		$this->assertFalse( self::verify( $mutate( self::json( 'signed-credential.json' ) ) ) );
+	}
+
+	/**
+	 * The vector credential with a correctly signed proof whose `created` is the given string.
+	 */
+	private static function signed_with_created( string $created ): array {
+		$document = self::json( 'unsigned-credential.json' );
+		$config   = self::json( 'proof-options.json' );
+
+		$config['created'] = $created;
+		$proof             = $config;
+		unset( $proof['@context'] );
+		$proof['proofValue'] = Multibase::base58btc_encode( Ed25519::sign( Eddsa_Rdfc_2022::hash_data( $document, $config, new Fixture_Context_Loader() ), self::keypair()['secret'] ) );
+		$document['proof']   = $proof;
+		return $document;
+	}
+
+	public static function created_values(): array {
+		return array(
+			'valid, fractional, offset' => array( '2023-02-24T23:36:38.5+14:00', true ),
+			'valid leap day'            => array( '2024-02-29T00:00:00Z', true ),
+			'trailing newline'          => array( self::CREATED . "\n", false ),
+			'no such day'               => array( '2023-02-29T23:36:38Z', false ),
+			'april 31'                  => array( '2023-04-31T23:36:38Z', false ),
+			'second 60'                 => array( '2023-02-24T23:36:60Z', false ),
+			'hour 24'                   => array( '2023-02-24T24:00:00Z', false ),
+			'zone past 14:00'           => array( '2023-02-24T23:36:38+14:30', false ),
+			'zone minutes 60'           => array( '2023-02-24T23:36:38+01:60', false ),
+			'no zone'                   => array( '2023-02-24T23:36:38', false ),
+			'not a dateTime'            => array( 'yesterday', false ),
+		);
+	}
+
+	/**
+	 * @dataProvider created_values
+	 */
+	public function test_verify_checks_created_is_an_xsd_datetime( string $created, bool $valid ) {
+		$this->assertSame( $valid, self::verify( self::signed_with_created( $created ) ) );
+	}
+
+	public function test_verify_rejects_an_oversized_proof_value_without_decoding_it() {
+		$this->assertSame( Eddsa_Rdfc_2022::MAX_PROOF_VALUE_LENGTH, strlen( Multibase::base58btc_encode( str_repeat( "\xff", 64 ) ) ) );
+
+		$signed                        = self::json( 'signed-credential.json' );
+		$signed['proof']['proofValue'] = 'z' . str_repeat( '2', 1000000 );
+
+		$start = microtime( true );
+		$this->assertFalse( self::verify( $signed ) );
+		$this->assertLessThan( 0.5, microtime( true ) - $start );
+	}
+
+	public function test_verify_fails_closed_when_the_resolver_throws() {
+		$resolver = static function (): ?string {
+			throw new \RuntimeException( 'resolver down' );
+		};
+		$this->assertFalse( Eddsa_Rdfc_2022::verify( self::json( 'signed-credential.json' ), $resolver, new Fixture_Context_Loader() ) );
+	}
+
+	public function test_verify_fails_closed_when_canonicalization_throws() {
+		$loader = new class() implements \LearningLedger\Vendor\Accredify\JsonLd\Contracts\DocumentLoader {
+			public function loadDocument( string $url ): \LearningLedger\Vendor\Accredify\JsonLd\Documents\RemoteDocument { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid -- Library interface.
+				throw new \RuntimeException( 'loader failure' );
+			}
+		};
+		$this->assertFalse( Eddsa_Rdfc_2022::verify( self::json( 'signed-credential.json' ), self::resolver(), $loader ) );
+	}
+
+	public function test_sign_refuses_an_empty_verification_method() {
+		$this->expectException( Invalid_Input::class );
+		Eddsa_Rdfc_2022::sign( self::json( 'unsigned-credential.json' ), '', self::keypair()['secret'], self::created(), 'assertionMethod', new Fixture_Context_Loader() );
 	}
 
 	public function test_verify_accepts_proof_context_that_prefixes_the_document_context() {
