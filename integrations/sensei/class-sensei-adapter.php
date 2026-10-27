@@ -184,16 +184,12 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 				'_order_' . $course_id => (string) $spec->order,
 			)
 		);
-		$id   = $this->find_by_key( 'lesson', $key );
+		// Stable keys are scoped to the course: a key new to this course creates a new lesson.
+		$id = $this->find_by_key( 'lesson', $key, array( $course_id ) );
 		if ( null === $id ) {
 			$id = $this->insert( 'lesson', $spec->title, $spec->content, $spec->status, $meta );
 		} else {
-			$previous = (int) get_post_meta( $id, '_lesson_course', true );
 			$this->update( $id, $spec->title, $spec->content, $spec->status, $meta );
-			if ( $previous > 0 && $previous !== $course_id ) {
-				delete_post_meta( $id, '_order_' . $previous );
-				$this->save_lesson_order( $previous );
-			}
 		}
 		if ( $id > 0 ) {
 			$this->save_lesson_order( $course_id );
@@ -305,7 +301,7 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 			if ( 'lesson' !== get_post_type( $lesson ) || 'course' !== get_post_type( $course ) ) {
 				return null;
 			}
-			if ( Sensei_Iris::course( $course ) !== $m[1] ) {
+			if ( Sensei_Iris::peek( $course ) !== $m[1] ) {
 				return null;
 			}
 			if ( empty( $m[3] ) ) {
@@ -326,7 +322,17 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 				'no_found_rows'  => true,
 			)
 		);
-		return $ids ? new Lms_Object( 'course', (int) $ids[0] ) : null;
+		if ( $ids ) {
+			return new Lms_Object( 'course', (int) $ids[0] );
+		}
+		// A course whose base is not fixed yet still answers to the default form.
+		if ( 1 === preg_match( '#/courses/(\d+)$#', $iri, $m ) ) {
+			$course = (int) $m[1];
+			if ( 'course' === get_post_type( $course ) && Sensei_Iris::peek( $course ) === $iri ) {
+				return new Lms_Object( 'course', $course );
+			}
+		}
+		return null;
 	}
 
 	/**

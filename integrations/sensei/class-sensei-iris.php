@@ -33,6 +33,19 @@ final class Sensei_Iris {
 	}
 
 	/**
+	 * Course IRI without fixing it: the stored base, or the default form when
+	 * none is stored yet. Used by resolve(), which must not write.
+	 *
+	 * @param integer $id Course ID.
+	 *
+	 * @return string
+	 */
+	public static function peek( int $id ): string {
+		$base = (string) get_post_meta( $id, self::META, true );
+		return '' === $base ? home_url( '/activities/courses/' . $id ) : $base;
+	}
+
+	/**
 	 * Lesson IRI.
 	 *
 	 * @param integer $course Course ID.

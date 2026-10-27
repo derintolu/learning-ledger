@@ -188,6 +188,35 @@ class Sensei_Adapter_Test extends WP_UnitTestCase {
 		$this->assertSame( array( $l2, $l1 ), array_map( static fn( $n ) => $n->id, $this->adapter->course_tree( $course )->lessons ) );
 	}
 
+	public function test_same_lesson_key_in_two_courses_keeps_separate_lessons() {
+		$a  = $this->adapter->upsert_course( new Course_Spec( 'course-a', 'A', '', 'publish', array() ) );
+		$b  = $this->adapter->upsert_course( new Course_Spec( 'course-b', 'B', '', 'publish', array() ) );
+		$la = $this->adapter->upsert_lesson( $a, new Lesson_Spec( 'intro', 'Intro A', '', 1, 'publish', array() ) );
+		$this->backdate( $la );
+		$order_a  = get_post_meta( $a, '_lesson_order', true );
+		$before_a = $this->modified( $la );
+
+		$lb = $this->adapter->upsert_lesson( $b, new Lesson_Spec( 'intro', 'Intro B', '', 1, 'publish', array() ) );
+		$this->assertGreaterThan( 0, $lb );
+		$this->assertNotSame( $la, $lb );
+		$this->assertSame( (string) $a, (string) get_post_meta( $la, '_lesson_course', true ) );
+		$this->assertSame( (string) $b, (string) get_post_meta( $lb, '_lesson_course', true ) );
+		$this->assertSame( 'Intro A', get_post( $la )->post_title );
+		$this->assertSame( $before_a, $this->modified( $la ) );
+		$this->assertSame( (string) $la, $order_a );
+		$this->assertSame( $order_a, get_post_meta( $a, '_lesson_order', true ), 'first course order untouched' );
+		$this->assertSame( (string) $lb, get_post_meta( $b, '_lesson_order', true ) );
+		$this->assertSame( $lb, $this->adapter->upsert_lesson( $b, new Lesson_Spec( 'intro', 'Intro B', '', 1, 'publish', array() ) ) );
+	}
+
+	public function test_resolve_does_not_fix_the_activity_base() {
+		$course = $this->course();
+		$lesson = $this->lesson( $course, 1 );
+		$this->assertEquals( new Lms_Object( 'course', $course ), $this->adapter->resolve( new Activity_Ref( home_url( '/activities/courses/' . $course ) ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $lesson ), $this->adapter->resolve( new Activity_Ref( home_url( '/activities/courses/' . $course . '/lessons/' . $lesson ) ) ) );
+		$this->assertFalse( metadata_exists( 'post', $course, '_lledger_activity_base' ), 'resolve() writes nothing' );
+	}
+
 	public function test_resolve_program_and_direction2_iris() {
 		$course = $this->course();
 		$lesson = $this->lesson( $course, 1 );
@@ -217,7 +246,7 @@ class Sensei_Adapter_Test extends WP_UnitTestCase {
 		$quiz   = self::factory()->post->create(
 			array(
 				'post_type'   => 'quiz',
-				'post_status' => 'publish',
+				'post_status' => 'draft',
 				'post_parent' => $solo_l,
 			)
 		);
