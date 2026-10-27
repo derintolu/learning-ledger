@@ -12,12 +12,16 @@ class Ed25519_Test extends \PHPUnit\Framework\TestCase {
 	const PUBLIC = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a';
 	const SIG    = 'e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b';
 
+	private static function backends(): array {
+		return extension_loaded( 'sodium' ) ? array( 'native', 'compat' ) : array( 'compat' );
+	}
+
 	protected function tearDown(): void {
 		Ed25519::force_backend( null );
 	}
 
 	public function test_rfc8032_vector_1_both_backends() {
-		foreach ( array( 'native', 'compat' ) as $b ) {
+		foreach ( self::backends() as $b ) {
 			Ed25519::force_backend( $b );
 			$this->assertSame( $b, Ed25519::backend() );
 			$kp = Ed25519::from_seed( hex2bin( self::SEED ) );
@@ -34,6 +38,9 @@ class Ed25519_Test extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function test_backends_interoperate() {
+		if ( ! extension_loaded( 'sodium' ) ) {
+			$this->markTestSkipped( 'ext-sodium is not loaded; native backend unavailable.' );
+		}
 		Ed25519::force_backend( 'native' );
 		$kp  = Ed25519::keypair();
 		$sig = Ed25519::sign( 'message', $kp['secret'] );
@@ -53,7 +60,7 @@ class Ed25519_Test extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function test_verify_returns_false_on_malformed_input_both_backends() {
-		foreach ( array( 'native', 'compat' ) as $b ) {
+		foreach ( self::backends() as $b ) {
 			Ed25519::force_backend( $b );
 			$public = hex2bin( self::PUBLIC );
 			$this->assertFalse( Ed25519::verify( 'short', '', $public ) );

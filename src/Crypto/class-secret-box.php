@@ -63,7 +63,7 @@ final class Secret_Box {
 	 * @return string `constant` or `salts`.
 	 */
 	public static function key_source(): string {
-		return defined( 'LLEDGER_ENCRYPTION_KEY' ) ? 'constant' : 'salts';
+		return '' !== self::constant_key() ? 'constant' : 'salts';
 	}
 
 	/**
@@ -77,7 +77,19 @@ final class Secret_Box {
 	 * @return string
 	 */
 	private static function key( string $context ): string {
-		$root = defined( 'LLEDGER_ENCRYPTION_KEY' ) ? (string) constant( 'LLEDGER_ENCRYPTION_KEY' ) : AUTH_KEY . SECURE_AUTH_KEY;
+		$root = self::constant_key();
+		if ( '' === $root ) {
+			$root = AUTH_KEY . SECURE_AUTH_KEY;
+		}
 		return Sodium::crypto_generichash( $context, Sodium::crypto_generichash( $root, '', 32 ), 32 );
+	}
+
+	/**
+	 * Value of LLEDGER_ENCRYPTION_KEY, or '' when it is undefined or empty.
+	 *
+	 * @return string
+	 */
+	private static function constant_key(): string {
+		return defined( 'LLEDGER_ENCRYPTION_KEY' ) ? (string) constant( 'LLEDGER_ENCRYPTION_KEY' ) : '';
 	}
 }

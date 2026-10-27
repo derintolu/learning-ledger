@@ -73,6 +73,29 @@ class Secret_Box_Test extends \PHPUnit\Framework\TestCase {
 		Secret_Box::open( $sealed, 'c' );
 	}
 
+	/**
+	 * Known answer pinning the key derivation:
+	 * key = generichash( context, generichash( root, '', 32 ), 32 ).
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_known_answer_pins_key_derivation() {
+		define( 'LLEDGER_ENCRYPTION_KEY', 'known-answer-encryption-key-for-tests' );
+		$this->assertSame( 'known answer', Secret_Box::open( 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBPU/DNegRfu3GJ6gnBcboAM1oyTbbW3Qw6EX2nQ==', 'kat-context' ) );
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_empty_constant_is_treated_as_unset() {
+		$sealed = Secret_Box::seal( 'v', 'c' );
+		define( 'LLEDGER_ENCRYPTION_KEY', '' );
+		$this->assertSame( 'salts', Secret_Box::key_source() );
+		$this->assertSame( 'v', Secret_Box::open( $sealed, 'c' ) );
+	}
+
 	public function test_tokens_random_is_base64url_without_padding() {
 		$t = Tokens::random();
 		$this->assertMatchesRegularExpression( '/^[A-Za-z0-9_-]{43}$/', $t );

@@ -82,11 +82,11 @@ final class Ed25519 {
 				'secret' => sodium_crypto_sign_secretkey( $kp ),
 			);
 		}
-		$public = '';
-		$secret = '';
-		Compat_Ed25519::seed_keypair( $public, $secret, $seed32 );
+		$public_key = '';
+		$secret     = '';
+		Compat_Ed25519::seed_keypair( $public_key, $secret, $seed32 );
 		return array(
-			'public' => $public,
+			'public' => $public_key,
 			'secret' => $secret,
 		);
 	}
@@ -114,21 +114,21 @@ final class Ed25519 {
 	/**
 	 * Verify a detached signature. Malformed input yields false.
 	 *
-	 * @param string $sig    Raw 64-byte signature.
-	 * @param string $msg    Message.
-	 * @param string $public Raw 32-byte public key.
+	 * @param string $sig        Raw 64-byte signature.
+	 * @param string $msg        Message.
+	 * @param string $public_key Raw 32-byte public key.
 	 *
 	 * @return boolean
 	 */
-	public static function verify( string $sig, string $msg, string $public ): bool {
-		if ( 64 !== strlen( $sig ) || 32 !== strlen( $public ) ) {
+	public static function verify( string $sig, string $msg, string $public_key ): bool {
+		if ( 64 !== strlen( $sig ) || 32 !== strlen( $public_key ) ) {
 			return false;
 		}
 		try {
 			if ( self::NATIVE === self::backend() ) {
-				return sodium_crypto_sign_verify_detached( $sig, $msg, $public );
+				return sodium_crypto_sign_verify_detached( $sig, $msg, $public_key );
 			}
-			return Compat_Ed25519::verify_detached( $sig, $msg, $public );
+			return Compat_Ed25519::verify_detached( $sig, $msg, $public_key );
 		} catch ( \SodiumException $e ) {
 			return false;
 		}
@@ -137,11 +137,11 @@ final class Ed25519 {
 	/**
 	 * Key id: first 16 hex characters of SHA-256 of the public key.
 	 *
-	 * @param string $public Raw public key.
+	 * @param string $public_key Raw public key.
 	 *
 	 * @return string
 	 */
-	public static function key_id( string $public ): string {
-		return substr( hash( 'sha256', $public ), 0, 16 );
+	public static function key_id( string $public_key ): string {
+		return substr( hash( 'sha256', $public_key ), 0, 16 );
 	}
 }
