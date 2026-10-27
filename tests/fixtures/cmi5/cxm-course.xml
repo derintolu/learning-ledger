@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<courseStructure xmlns="https://w3id.org/xapi/profiles/cmi5/v1/CourseStructure.xsd"
+                 xmlns:cxm="https://course-xapi-mcp.sqwrlz.com/course/v1">
+  <course id="https://example.org/courses/json-basics">
+    <title>
+      <langstring lang="en">
+        JSON basics
+      </langstring>
+    </title>
+    <description><langstring lang="en">Read and write JSON.</langstring></description>
+    <cxm:course src="cxm/course.json" specVersion="1.0" mcp="https://json-basics.example.org/mcp"/>
+  </course>
+  <au id="https://example.org/courses/json-basics/placement" cxm:key="placement" cxm:role="placement"
+      moveOn="NotApplicable" launchMethod="OwnWindow">
+    <title><langstring lang="en">Placement</langstring></title>
+    <description><langstring lang="en">Find your starting point.</langstring></description>
+    <url>https://json-basics.example.org/cmi5/launch?au=placement</url>
+  </au>
+  <block id="https://example.org/courses/json-basics/paths/json" cxm:key="json">
+    <title><langstring lang="en">JSON</langstring></title>
+    <description><langstring lang="en">The JSON path.</langstring></description>
+    <au id="https://example.org/courses/json-basics/lessons/what-is-json" cxm:key="what-is-json"
+        moveOn="CompletedAndPassed" masteryScore="0.8" launchMethod="OwnWindow"
+        activityType="http://adlnet.gov/expapi/activities/lesson">
+      <title><langstring lang="en">What is JSON</langstring></title>
+      <description><langstring lang="en">Values, objects and arrays.</langstring></description>
+      <url>https://json-basics.example.org/cmi5/launch?au=what-is-json</url>
+      <cxm:lesson src="cxm/lessons/what-is-json.json"/>
+    </au>
+    <au id="https://example.org/courses/json-basics/lessons/json-syntax" cxm:key="json-syntax"
+        moveOn="Completed" launchMethod="OwnWindow"
+        activityType="http://adlnet.gov/expapi/activities/lesson">
+      <title><langstring lang="en">JSON syntax</langstring></title>
+      <description><langstring lang="en">Quotes, commas and brackets.</langstring></description>
+      <url>https://json-basics.example.org/cmi5/launch?au=json-syntax</url>
+      <cxm:lesson src="cxm/lessons/json-syntax.json"/>
+    </au>
+    <cxm:path src="cxm/course.json#/paths/json"/>
+  </block>
+</courseStructure>

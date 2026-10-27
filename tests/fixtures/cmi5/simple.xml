@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<courseStructure xmlns="https://w3id.org/xapi/profiles/cmi5/v1/CourseStructure.xsd">
+  <course id="https://example.org/courses/simple">
+    <title>
+      <langstring lang="en-US">Simple course</langstring>
+      <langstring lang="fr">Cours simple</langstring>
+    </title>
+    <description><langstring lang="en-US">One AU.</langstring></description>
+  </course>
+  <au id="https://example.org/courses/simple/au1">
+    <title><langstring lang="en-US">  Only lesson  </langstring></title>
+    <description><langstring lang="en-US">The only lesson.</langstring></description>
+    <url>index.html</url>
+    <launchParameters>  {"mode":"quiz"}  </launchParameters>
+    <entitlementKey>ent-123</entitlementKey>
+  </au>
+</courseStructure>

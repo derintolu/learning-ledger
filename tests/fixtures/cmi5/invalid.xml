@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<courseStructure xmlns="https://w3id.org/xapi/profiles/cmi5/v1/CourseStructure.xsd">
+  <course id="https://example.org/courses/invalid">
+    <title><langstring lang="en">Invalid</langstring></title>
+    <description><langstring lang="en">The AU has no url and an unknown moveOn.</langstring></description>
+  </course>
+  <au id="https://example.org/courses/invalid/au1" moveOn="Sometimes">
+    <title><langstring lang="en">No url</langstring></title>
+    <description><langstring lang="en">Missing url.</langstring></description>
+  </au>
+</courseStructure>

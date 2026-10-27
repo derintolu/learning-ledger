@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<courseStructure xmlns="https://w3id.org/xapi/profiles/cmi5/v1/CourseStructure.xsd">
+  <course id="https://example.org/courses/nested">
+    <title><langstring lang="en">Nested</langstring></title>
+    <description><langstring lang="en">Blocks inside blocks.</langstring></description>
+  </course>
+  <block id="https://example.org/courses/nested/blocks/a">
+    <title><langstring lang="en">Block A</langstring></title>
+    <description><langstring lang="en">First block.</langstring></description>
+    <au id="https://example.org/courses/nested/aus/a1" moveOn="Completed">
+      <title><langstring lang="en">A1</langstring></title>
+      <description><langstring lang="en">A1.</langstring></description>
+      <url>https://example.org/aus/a1.html</url>
+    </au>
+  </block>
+  <block id="https://example.org/courses/nested/blocks/b">
+    <title><langstring lang="en">Block B</langstring></title>
+    <description><langstring lang="en">Second block.</langstring></description>
+    <block id="https://example.org/courses/nested/blocks/b1">
+      <title><langstring lang="en">Block B1</langstring></title>
+      <description><langstring lang="en">Nested block.</langstring></description>
+      <au id="https://example.org/courses/nested/aus/b1" moveOn="Passed" masteryScore="0.5">
+        <title><langstring lang="en">B1</langstring></title>
+        <description><langstring lang="en">B1.</langstring></description>
+        <url>https://example.org/aus/b1.html</url>
+      </au>
+    </block>
+    <au id="https://example.org/courses/nested/aus/b2" moveOn="CompletedOrPassed">
+      <title><langstring lang="en">B2</langstring></title>
+      <description><langstring lang="en">B2.</langstring></description>
+      <url>https://example.org/aus/b2.html</url>
+    </au>
+  </block>
+</courseStructure>
