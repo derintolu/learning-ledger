@@ -269,7 +269,10 @@ final class Learners_Controller {
 		if ( ! $user ) {
 			return self::error( 'lledger_unknown_learner', 'No such learner.', 404 );
 		}
-		if ( array( Identity_Module::ROLE ) !== array_values( (array) $user->roles ) || is_super_admin( $id ) ) {
+		// Only the learner role, and no capability granted to the user directly.
+		if ( array( Identity_Module::ROLE ) !== array_values( (array) $user->roles )
+			|| array( Identity_Module::ROLE ) !== array_keys( (array) $user->caps )
+			|| is_super_admin( $id ) ) {
 			return self::error( 'lledger_not_a_learner', 'Only anonymous learner accounts can be deleted here.', 403 );
 		}
 
@@ -285,13 +288,17 @@ final class Learners_Controller {
 
 		require_once ABSPATH . 'wp-admin/includes/user.php';
 		if ( ! wp_delete_user( $id ) ) {
-			return self::error( 'lledger_learner_not_deleted', 'WordPress did not delete the user.', 500 );
+			// The connector rows are already gone, so the LRS erase still happens, from the queue.
+			foreach ( $actors as $actor ) {
+				self::queue_erase( $actor );
+			}
+			return self::error( 'lledger_learner_not_deleted', 'WordPress did not delete the user; the LRS erase is queued.', 500 );
 		}
 
 		$erase = 'erased';
 		foreach ( $actors as $actor ) {
 			if ( ! self::erase( $actor ) ) {
-				Job_Queue::push( self::ERASE_JOB, array( 'actor' => $actor ), self::ERASE_JOB . ':' . bin2hex( Agent_Identity::from_array( $actor )->hash() ), Job_Queue::retry_delay( 1 ) );
+				self::queue_erase( $actor );
 				$erase = 'queued';
 			}
 		}
@@ -323,6 +330,17 @@ final class Learners_Controller {
 		if ( ! self::erase( $actor ) ) {
 			throw new \RuntimeException( 'The LRS did not erase the actor.' );
 		}
+	}
+
+	/**
+	 * Queue a retried LRS erase for one actor (one undone job per actor).
+	 *
+	 * @param array $actor Agent object.
+	 *
+	 * @return void
+	 */
+	private static function queue_erase( array $actor ): void {
+		Job_Queue::push( self::ERASE_JOB, array( 'actor' => $actor ), self::ERASE_JOB . ':' . bin2hex( Agent_Identity::from_array( $actor )->hash() ), Job_Queue::retry_delay( 1 ) );
 	}
 
 	/**

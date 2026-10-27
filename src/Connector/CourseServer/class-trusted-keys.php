@@ -8,6 +8,7 @@
 namespace LearningLedger\Connector\CourseServer;
 
 // phpcs:disable WordPress.DB.DirectDatabaseQuery -- plugin-owned table, read once per signed request.
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Invalid_Input messages here are fixed text for WP-CLI, never HTML.
 
 use LearningLedger\Db\Tables;
 use LearningLedger\Util\Clock;
@@ -90,7 +91,7 @@ final class Trusted_Keys {
 		$caps = array();
 		foreach ( $capabilities as $cap ) {
 			if ( ! is_string( $cap ) || ! in_array( $cap, self::ALL_CAPABILITIES, true ) ) {
-				throw new Invalid_Input( 'Unknown capability. Use any of: ' . esc_html( implode( ', ', self::ALL_CAPABILITIES ) ) . '.', 'invalid', 'capabilities' );
+				throw new Invalid_Input( 'Unknown capability. Use any of: ' . implode( ', ', self::ALL_CAPABILITIES ) . '.', 'invalid', 'capabilities' );
 			}
 			$caps[ $cap ] = true;
 		}
@@ -100,7 +101,7 @@ final class Trusted_Keys {
 		foreach ( self::DEFAULT_LIMITS as $name => $default ) {
 			$value = $limits[ $name ] ?? $default;
 			if ( ! is_int( $value ) || $value < 1 ) {
-				throw new Invalid_Input( 'Limits must be positive integers.', 'invalid', esc_html( $name ) );
+				throw new Invalid_Input( 'Limits must be positive integers.', 'invalid', $name );
 			}
 			$clean[ $name ] = $value;
 		}

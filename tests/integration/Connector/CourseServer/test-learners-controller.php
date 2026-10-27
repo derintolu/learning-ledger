@@ -332,6 +332,13 @@ class Learners_Controller_Test extends WP_UnitTestCase {
 		$this->assertInstanceOf( WP_User::class, get_userdata( $user ) );
 	}
 
+	public function test_deleting_a_learner_with_a_directly_granted_cap_is_403() {
+		$user = $this->create_learner()['user_id'];
+		( new WP_User( $user ) )->add_cap( 'edit_posts' );
+		$this->assertSame( 403, $this->send( 'DELETE', 'learners/' . $user )->get_status() );
+		$this->assertInstanceOf( WP_User::class, get_userdata( $user ) );
+	}
+
 	public function test_status_route_returns_the_secret_hash() {
 		$res = $this->send( 'GET', 'status' );
 		$this->assertSame( 200, $res->get_status() );

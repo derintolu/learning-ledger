@@ -71,7 +71,7 @@ class Signed_Request_Auth_Test extends WP_UnitTestCase {
 	 * @return WP_REST_Response
 	 */
 	private function send( string $method, string $route, array $query = array(), string $body = '', array $sign = array() ): WP_REST_Response {
-		$uri = self::PREFIX . $route . ( $query ? '?' . http_build_query( $query, '', '&', PHP_QUERY_RFC3986 ) : '' );
+		$uri = $sign['uri'] ?? self::PREFIX . $route . ( $query ? '?' . http_build_query( $query, '', '&', PHP_QUERY_RFC3986 ) : '' );
 		$req = new WP_REST_Request( $method, '/learning-ledger/v1/course-server/' . $route );
 		$req->set_query_params( $query );
 		if ( '' !== $body ) {
@@ -88,6 +88,15 @@ class Signed_Request_Auth_Test extends WP_UnitTestCase {
 		);
 		foreach ( (array) $headers as $name => $value ) {
 			$req->set_header( $name, $value );
+		}
+		if ( isset( $sign['content_type'] ) ) {
+			$req->set_header( 'Content-Type', $sign['content_type'] );
+		}
+		if ( isset( $sign['body_params'] ) ) {
+			$req->set_body_params( $sign['body_params'] );
+		}
+		if ( isset( $sign['file_params'] ) ) {
+			$req->set_file_params( $sign['file_params'] );
 		}
 		$_SERVER['REQUEST_URI'] = $uri;
 		return rest_get_server()->dispatch( $req );
@@ -165,6 +174,48 @@ class Signed_Request_Auth_Test extends WP_UnitTestCase {
 		$res = $this->send( 'GET', 'status', array(), '', array( 'headers' => null ) );
 		$this->assertSame( 401, $res->get_status() );
 		$this->assertSame( 'lledger_signature_missing_header', $res->get_data()['code'] );
+	}
+
+	public function test_form_params_beside_an_empty_signed_body_are_401() {
+		$res = $this->send( 'GET', 'status', array(), '', array( 'body_params' => array( 'x' => 'y' ) ) );
+		$this->assertSame( 401, $res->get_status() );
+		$this->assertSame( 'lledger_signature_form_body', $res->get_data()['code'] );
+	}
+
+	public function test_uploaded_files_beside_an_empty_signed_body_are_401() {
+		$file = array(
+			'f' => array(
+				'name'     => 'a.txt',
+				'tmp_name' => '/tmp/none',
+				'size'     => 1,
+				'error'    => 0,
+			),
+		);
+		$this->assertSame( 401, $this->send( 'GET', 'status', array(), '', array( 'file_params' => $file ) )->get_status() );
+	}
+
+	public function test_form_and_multipart_content_types_are_401() {
+		foreach ( array( 'multipart/form-data; boundary=x', 'application/x-www-form-urlencoded' ) as $type ) {
+			$res = $this->send( 'GET', 'status', array(), '', array( 'content_type' => $type ) );
+			$this->assertSame( 401, $res->get_status(), $type );
+		}
+	}
+
+	public function test_signed_path_for_another_route_is_401() {
+		$user = self::factory()->user->create( array( 'role' => Identity_Module::ROLE ) );
+		$res  = $this->send( 'GET', 'learners/' . $user . '/progress', array(), '', array( 'uri' => self::PREFIX . 'status' ) );
+		$this->assertSame( 401, $res->get_status() );
+		$this->assertSame( 'lledger_signature_route_mismatch', $res->get_data()['code'] );
+
+		$res = $this->send( 'GET', 'status', array(), '', array( 'uri' => '/?rest_route=/learning-ledger/v1/course-server/learners/' . $user . '/progress' ) );
+		$this->assertSame( 401, $res->get_status(), 'rest_route query form is checked too' );
+	}
+
+	public function test_rest_route_query_form_is_accepted() {
+		$res = $this->send( 'GET', 'status', array(), '', array( 'uri' => '/?rest_route=/learning-ledger/v1/course-server/status' ) );
+		$this->assertSame( 200, $res->get_status() );
+		$res = $this->send( 'GET', 'status', array(), '', array( 'uri' => '/index.php?rest_route=%2Flearning-ledger%2Fv1%2Fcourse-server%2Fstatus%2F' ) );
+		$this->assertSame( 200, $res->get_status(), 'encoded, with a trailing slash' );
 	}
 
 	public function test_missing_capability_is_403() {

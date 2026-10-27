@@ -67,6 +67,19 @@ final class Signed_Request_Auth {
 		if ( '' === $path ) {
 			return self::signature_error( 'bad_signature' );
 		}
+		// Only the raw body is signed. Form and multipart requests fill $_POST and $_FILES (WordPress
+		// even reads rest_route from $_POST) while the raw body can be empty, so they are refused.
+		$type = $r->get_content_type();
+		$type = is_array( $type ) ? (string) ( $type['value'] ?? '' ) : '';
+		if ( in_array( $type, array( 'application/x-www-form-urlencoded', 'multipart/form-data' ), true )
+			|| array() !== (array) $r->get_body_params() || array() !== (array) $r->get_file_params() ) {
+			return self::signature_error( 'form_body' );
+		}
+		// The signed path must name the route being dispatched.
+		$signed_route = self::route_of( $path );
+		if ( null === $signed_route || untrailingslashit( $r->get_route() ) !== $signed_route ) {
+			return self::signature_error( 'route_mismatch' );
+		}
 		$keys = $this->keys;
 		$key  = null;
 		try {
@@ -136,6 +149,34 @@ final class Signed_Request_Auth {
 		}
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- the exact bytes are signed; sanitizing would change them.
 		return wp_unslash( $_SERVER['REQUEST_URI'] );
+	}
+
+	/**
+	 * The REST route a request URI names, the way WordPress reads it: a `rest_route` query
+	 * parameter wins, otherwise the path after the REST prefix. No trailing slash.
+	 *
+	 * @param string $uri Path and query.
+	 *
+	 * @return string|null
+	 */
+	private static function route_of( string $uri ): ?string {
+		$parts = wp_parse_url( $uri );
+		if ( ! is_array( $parts ) ) {
+			return null;
+		}
+		if ( isset( $parts['query'] ) ) {
+			parse_str( $parts['query'], $query );
+			if ( isset( $query['rest_route'] ) ) {
+				return is_string( $query['rest_route'] ) ? '/' . trim( $query['rest_route'], '/' ) : null;
+			}
+		}
+		$path   = rawurldecode( (string) ( $parts['path'] ?? '' ) );
+		$prefix = '/' . trim( rest_get_url_prefix(), '/' ) . '/';
+		$at     = strpos( $path, $prefix );
+		if ( false === $at ) {
+			return null;
+		}
+		return '/' . trim( substr( $path, $at + strlen( $prefix ) ), '/' );
 	}
 
 	/**
