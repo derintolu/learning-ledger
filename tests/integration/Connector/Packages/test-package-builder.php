@@ -232,8 +232,6 @@ class Package_Builder_Test extends WP_UnitTestCase {
 			'_lledger_course_server_url' => 'https://demo.example.org/mcp',
 			'_lledger_au_url_template'   => 'https://demo.example.org/cmi5/launch?au={key}',
 		);
-		// The registered sanitizer runs esc_url_raw(), which strips the braces from "{key}" (Task 12); store the template as authored.
-		unregister_meta_key( 'post', '_lledger_au_url_template', Program_Repository::POST_TYPE );
 		foreach ( $meta as $k => $v ) {
 			update_post_meta( $this->program, $k, $v );
 		}
