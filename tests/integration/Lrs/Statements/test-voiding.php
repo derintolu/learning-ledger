@@ -15,6 +15,7 @@ use LearningLedger\Lrs\Statements\Statement_Store;
 use LearningLedger\Lrs\Statements\Stored_Statement;
 use LearningLedger\Tests\Client_Factory;
 use LearningLedger\Util\Uuid;
+use LearningLedger\Xapi\Agent_Identity;
 
 class Voiding_Test extends WP_UnitTestCase {
 
@@ -132,7 +133,7 @@ class Voiding_Test extends WP_UnitTestCase {
 		$p        = self::principal();
 		$target   = Uuid::v4();
 		[ $void ] = $store->store( array( self::voiding( $target ) ), $p, '2.0.0' );
-		$this->assertSame( array(), $fired );
+		$this->assertSame( array(), $this->fired );
 
 		global $wpdb;
 		$this->assertSame( 1, (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'pending_voids' ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -155,5 +156,105 @@ class Voiding_Test extends WP_UnitTestCase {
 		// The voiding statement's own actor is within the bindings; its target is not.
 		$this->assertSame( 403, self::status_of( fn() => $store->store( array( self::voiding( $target, 'u1' ) ), $bound, '2.0.0' ) ) );
 		$this->assertFalse( ( new Statement_Repository() )->find( $target )->voided );
+	}
+
+	private array $fired = array();
+
+	private function watch_voids(): void {
+		$this->fired = array();
+		add_action(
+			'learning_ledger/statement_voided',
+			function ( string $target_id ) {
+				$this->fired[] = $target_id;
+			}
+		);
+	}
+
+	private static function pending_count(): int {
+		global $wpdb;
+		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'pending_voids' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
+	private static function capture_log( callable $call ): string {
+		$file     = wp_tempnam( 'lledger-log' );
+		$previous = ini_set( 'error_log', $file ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		try {
+			$call();
+		} finally {
+			ini_set( 'error_log', (string) $previous ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		}
+		$log = (string) file_get_contents( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		wp_delete_file( $file );
+		return $log;
+	}
+
+	public function test_pending_void_outside_voider_bindings_is_dropped() {
+		$this->watch_voids();
+		$store  = new Statement_Store();
+		$bound  = self::principal(
+			array( 'statements/write', 'void' ),
+			array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u1' ) )
+		);
+		$target = Uuid::v4();
+		$store->store( array( self::voiding( $target, 'u1' ) ), $bound, '2.0.0' );
+		$this->assertSame( 1, self::pending_count() );
+
+		$st       = self::statement( 'u2' );
+		$st['id'] = $target;
+		$log      = self::capture_log( fn() => $store->put( $target, $st, self::principal(), '2.0.0' ) );
+
+		$this->assertFalse( ( new Statement_Repository() )->find( $target )->voided );
+		$this->assertSame( array(), $this->fired );
+		$this->assertSame( 0, self::pending_count() );
+		$this->assertStringContainsString( 'pending void of ' . $target . ' dropped', $log );
+	}
+
+	public function test_voiding_statement_actor_must_satisfy_bindings() {
+		$store      = new Statement_Store();
+		$bound      = self::principal(
+			array( 'statements/write', 'void' ),
+			array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u1' ) )
+		);
+		[ $target ] = $store->store( array( self::statement( 'u1' ) ), $bound, '2.0.0' );
+		$this->assertSame( 403, self::status_of( fn() => $store->store( array( self::voiding( $target, 'u2' ) ), $bound, '2.0.0' ) ) );
+		$this->assertFalse( ( new Statement_Repository() )->find( $target )->voided );
+		$store->store( array( self::voiding( $target, 'u1' ) ), $bound, '2.0.0' );
+		$this->assertTrue( ( new Statement_Repository() )->find( $target )->voided );
+	}
+
+	public function test_revoid_does_not_fire_again() {
+		$this->watch_voids();
+		$store      = new Statement_Store();
+		$p          = self::principal();
+		[ $target ] = $store->store( array( self::statement() ), $p, '2.0.0' );
+		$store->store( array( self::voiding( $target ) ), $p, '2.0.0' );
+		$store->store( array( self::voiding( $target ) ), $p, '2.0.0' );
+		$this->assertSame( array( $target ), $this->fired );
+		$this->assertSame( 0, self::pending_count() );
+	}
+
+	public function test_arriving_voiding_statement_discards_its_pending_void() {
+		$store = new Statement_Store();
+		$p     = self::principal();
+		$y     = Uuid::v4();
+		$store->store( array( self::voiding( $y ) ), $p, '2.0.0' );
+
+		$late       = self::voiding( Uuid::v4() );
+		$late['id'] = $y;
+		$log        = self::capture_log( fn() => $store->store( array( $late ), $p, '2.0.0' ) );
+
+		$this->assertFalse( ( new Statement_Repository() )->find( $y )->voided );
+		// Only the late statement's own pending void remains.
+		$this->assertSame( 1, self::pending_count() );
+		$this->assertStringContainsString( 'pending void of ' . $y . ' dropped', $log );
+	}
+
+	public function test_erasing_the_voider_removes_its_pending_voids() {
+		$store = new Statement_Store();
+		$void  = self::voiding( Uuid::v4(), 'admin' );
+		$store->store( array( $void ), self::principal(), '2.0.0' );
+		$this->assertSame( 1, self::pending_count() );
+		( new Statement_Repository() )->delete_for_actor( Agent_Identity::from_array( $void['actor'] )->hash() );
+		$this->assertSame( 0, self::pending_count() );
 	}
 }

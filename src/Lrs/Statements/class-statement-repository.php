@@ -105,7 +105,9 @@ final class Statement_Repository {
 		$statements = Tables::name( 'statements' );
 		$refs       = Tables::name( 'statement_refs' );
 		$hex        = bin2hex( $actor_hash );
+		$pending    = Tables::name( 'pending_voids' );
 		$wpdb->query( $wpdb->prepare( "DELETE r FROM {$refs} r INNER JOIN {$statements} s ON s.seq = r.seq WHERE s.actor_hash = UNHEX(%s)", $hex ) );
+		$wpdb->query( $wpdb->prepare( "DELETE v FROM {$pending} v INNER JOIN {$statements} s ON s.seq = v.voiding_seq WHERE s.actor_hash = UNHEX(%s)", $hex ) );
 		return (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$statements} WHERE actor_hash = UNHEX(%s)", $hex ) );
 	}
 
@@ -193,21 +195,21 @@ final class Statement_Repository {
 	}
 
 	/**
-	 * Set the voided flag of a statement that is not itself a voiding statement.
+	 * Set the voided flag of a statement that is neither voided nor itself a voiding statement.
 	 *
 	 * @param string $target_id Target statement id.
 	 *
-	 * @return boolean Whether a stored target was found.
+	 * @return boolean Whether the flag changed.
 	 * @throws \RuntimeException On a database error.
 	 */
 	public function mark_voided( string $target_id ): bool {
 		global $wpdb;
-		$table = Tables::name( 'statements' );
-		$hex   = self::hex_uuid( $target_id );
-		if ( false === $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET voided = 1 WHERE statement_id = UNHEX(%s) AND is_voiding = 0", $hex ) ) ) {
+		$table   = Tables::name( 'statements' );
+		$changed = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET voided = 1 WHERE statement_id = UNHEX(%s) AND is_voiding = 0 AND voided = 0", self::hex_uuid( $target_id ) ) );
+		if ( false === $changed ) {
 			throw new \RuntimeException( 'Could not void the statement.' );
 		}
-		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT seq FROM {$table} WHERE statement_id = UNHEX(%s) AND is_voiding = 0", $hex ) );
+		return $changed > 0;
 	}
 
 	/**

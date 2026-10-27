@@ -7,8 +7,10 @@
 
 namespace LearningLedger\Lrs\Statements;
 
+use LearningLedger\Lrs\Auth\Client_Repository;
 use LearningLedger\Lrs\Auth\Principal;
 use LearningLedger\Lrs\Auth\Scopes;
+use LearningLedger\Lrs\Auth\Token_Repository;
 use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Resources\Activity_Repository;
 use LearningLedger\Lrs\Resources\Agent_Repository;
@@ -204,7 +206,8 @@ final class Statement_Store {
 					throw new Xapi_Error( 403, 'Voiding statements requires the void scope.' );
 				}
 				$target = strtolower( $plain['object']['id'] );
-			} elseif ( ! $p->bindings()->allows_statement( $plain ) ) {
+			}
+			if ( ! $p->bindings()->allows_statement( $plain ) ) {
 				throw new Xapi_Error( 403, 'The statement is outside this client\'s bindings.' );
 			}
 
@@ -237,8 +240,8 @@ final class Statement_Store {
 			if ( null !== $target && Statement_Validator::VOIDED_VERB === ( $target['verb']['id'] ?? null ) ) {
 				throw new Xapi_Error( 400, 'A voiding statement cannot be voided.' );
 			}
-			// A target that has not arrived is checked through the voiding statement's own actor and registration.
-			if ( ! $p->bindings()->allows_statement( $target ?? $item['plain'] ) ) {
+			// A target that has not arrived yet is checked against the voider's bindings on arrival.
+			if ( null !== $target && ! $p->bindings()->allows_statement( $target ) ) {
 				throw new Xapi_Error( 403, 'The voided statement is outside this client\'s bindings.' );
 			}
 		}
@@ -282,7 +285,9 @@ final class Statement_Store {
 	private function insert_all( array $items, Principal $p ): bool {
 		global $wpdb;
 		$started = microtime( true );
-		$wpdb->query( 'START TRANSACTION' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			throw new \RuntimeException( 'Could not start the statements transaction.' );
+		}
 		try {
 			foreach ( $items as $i => $item ) {
 				$seq = $this->repo->insert( $item['row'] );
@@ -297,18 +302,20 @@ final class Statement_Store {
 			$voided = array();
 			$voids  = array();
 			foreach ( $items as $item ) {
+				$voiding_seq = $this->repo->take_pending_void( $item['id'] );
 				if ( null !== $item['target'] ) {
 					if ( $this->repo->mark_voided( $item['target'] ) ) {
 						$voided[ $item['target'] ] = true;
 						$voids[]                   = array( $item['target'], $item['seq'] );
-					} else {
+					} elseif ( null === $this->repo->find( $item['target'] ) ) {
 						$this->repo->add_pending_void( $item['target'], $item['seq'] );
+					}
+					if ( null !== $voiding_seq ) {
+						error_log( 'Learning Ledger: pending void of ' . $item['id'] . ' dropped: a voiding statement cannot be voided.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- dropped voids are logged for the admin.
 					}
 					continue;
 				}
-				$voiding_seq = $this->repo->take_pending_void( $item['id'] );
-				if ( null !== $voiding_seq ) {
-					$this->repo->mark_voided( $item['id'] );
+				if ( null !== $voiding_seq && $this->pending_void_allowed( $voiding_seq, $item ) && $this->repo->mark_voided( $item['id'] ) ) {
 					$voided[ $item['id'] ] = true;
 					$voids[]               = array( $item['id'], $voiding_seq );
 				}
@@ -344,6 +351,47 @@ final class Statement_Store {
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Whether a pending void may be applied to an arriving statement: the principal that
+	 * wrote the voiding statement must still exist and its bindings must allow the target.
+	 * A refused void is dropped and logged.
+	 *
+	 * @param integer $voiding_seq Seq of the voiding statement.
+	 * @param array   $item        Arriving statement.
+	 *
+	 * @return boolean
+	 */
+	private function pending_void_allowed( int $voiding_seq, array $item ): bool {
+		$voiding = $this->repo->find_by_seq( $voiding_seq );
+		$voider  = null === $voiding ? null : self::principal_for( $voiding->authority_client );
+		if ( null !== $voider && $voider->can( Scopes::VOID ) && $voider->bindings()->allows_statement( $item['row']['statement'] ) ) {
+			return true;
+		}
+		error_log( 'Learning Ledger: pending void of ' . $item['id'] . ' dropped: the target is outside the voiding client\'s bindings.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- dropped voids are logged for the admin.
+		return false;
+	}
+
+	/**
+	 * The principal behind a stored `authority_client` (Principal::authority_key()).
+	 *
+	 * @param string $key Authority key.
+	 *
+	 * @return Principal|null Null when the client or token no longer exists.
+	 */
+	private static function principal_for( string $key ): ?Principal {
+		if ( 'sys:' . Principal::SYSTEM_NAME === $key ) {
+			return Principal::system();
+		}
+		$clients = new Client_Repository();
+		if ( str_starts_with( $key, 'tok:' ) ) {
+			$token  = ( new Token_Repository() )->find( substr( $key, 4 ) );
+			$parent = null === $token ? null : $clients->find( $token->parent_client );
+			return null === $parent ? null : Principal::for_token( $parent, $token );
+		}
+		$client = $clients->find( $key );
+		return null === $client ? null : Principal::for_client( $client );
 	}
 
 	/**

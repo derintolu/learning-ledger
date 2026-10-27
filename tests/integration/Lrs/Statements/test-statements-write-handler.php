@@ -120,7 +120,7 @@ class Statements_Write_Handler_Test extends WP_UnitTestCase {
 		$st['id'] = Uuid::v4();
 		$this->assertSame( 400, $this->send( 'PUT', array( 'statementId' => Uuid::v4() ), Json::encode_exact( $st ) )->status() );
 		$this->assertSame( 204, $this->send( 'PUT', array( 'statementId' => strtoupper( $st['id'] ) ), Json::encode_exact( $st ) )->status() );
-		$this->assertSame( 0 + 1, self::count_rows() );
+		$this->assertSame( 1, self::count_rows() );
 	}
 
 	/**
