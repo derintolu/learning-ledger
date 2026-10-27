@@ -293,8 +293,10 @@ class Package_Importer_Test extends WP_UnitTestCase {
 	}
 
 	public function test_interrupted_import_resumes_without_duplicates() {
+		$prev_log                    = ini_set( 'error_log', '/dev/null' ); // phpcs:ignore WordPress.PHP.IniSet.Risky
 		$this->adapter->fail_on_call = 3;
 		$first                       = $this->import();
+		ini_set( 'error_log', (string) $prev_log ); // phpcs:ignore WordPress.PHP.IniSet.Risky
 
 		$this->assertFalse( $first->ok() );
 		$this->assertSame( 'import_failed', $first->errors[0]['code'] );
@@ -333,6 +335,32 @@ class Package_Importer_Test extends WP_UnitTestCase {
 
 		$this->assertSame( array( 'lesson:what-is-json' ), $report->updated );
 		$this->assertEquals( $before, $this->adapter->progress( 7, $course ) );
+	}
+
+	public function test_script_in_titles_is_stripped() {
+		$in             = $this->inputs();
+		$in[0]          = str_replace( '<langstring lang="en">JSON basics', '<langstring lang="en">JSON &lt;script&gt;alert(1)&lt;/script&gt;basics', $in[0] );
+		$in[0]          = str_replace( '<langstring lang="en">YAML</langstring>', '<langstring lang="en">YAML&lt;script&gt;x&lt;/script&gt;</langstring>', $in[0] );
+		$in[1]['rules'] = array( 'Be kind <script>bad()</script>.' );
+
+		$report = $this->import( $this->package( $in ) );
+
+		$this->assertTrue( $report->ok(), wp_json_encode( $report->errors ) );
+		$this->assertStringNotContainsString( '<', get_post_field( 'post_title', $report->program_id, 'raw' ) );
+		$this->assertStringNotContainsString( '<', $this->adapter->course_specs[1]->title );
+		$this->assertStringNotContainsString( '<script', $this->repo->get( $report->program_id )->rules );
+	}
+
+	public function test_code_quote_and_image_content_is_stable_under_kses() {
+		$in = $this->inputs();
+		$in[2]['yaml-intro']['beats'][0]['content'] = "Intro\n\n```yaml\na: \"<b>\"\n```\n\n> Quoted *text*\n\n![Alt text](https://example.org/a.png)\n\n1. one\n2. two";
+		$this->import( $this->package( $in ) );
+		$content = $this->adapter->lesson_specs[2]->content;
+
+		$this->assertStringContainsString( 'wp:code', $content );
+		$this->assertStringContainsString( 'wp:quote', $content );
+		$this->assertStringContainsString( 'wp:image', $content );
+		$this->assertSame( $content, wp_kses_post( $content ) );
 	}
 
 	public function test_fetcher_streams_https_url_to_a_temp_file() {

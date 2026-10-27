@@ -118,7 +118,14 @@ final class Package_Importer {
 			update_post_meta( $program_id, '_lledger_path_keys', $path_keys );
 			$this->repo->set_structure( $program_id, $structure );
 		} catch ( \Throwable $e ) {
-			return Import_Report::failed( array( self::error( 'import_failed', 'The import was interrupted. Run it again to resume.' ) ), $program_id, $created, $updated );
+			error_log( 'Learning Ledger import failed: ' . get_class( $e ) . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Operators need the cause.
+			/**
+			 * A package import was interrupted by an exception.
+			 *
+			 * @param \Throwable $e The cause.
+			 */
+			do_action( 'learning_ledger/import_error', $e ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+			return Import_Report::failed( array( self::error( 'import_failed', 'The import was interrupted (' . ( new \ReflectionClass( $e ) )->getShortName() . '). Run it again to resume.' ) ), $program_id, $created, $updated );
 		}
 
 		return new Import_Report( $program_id, $created, $updated, $drafted );
@@ -181,14 +188,16 @@ final class Package_Importer {
 	 * @return integer Post id, 0 on failure.
 	 */
 	private function program( string $key, Course_Structure $structure, array $course_json, ?string $placement ): int {
-		$title = self::pick( $structure->title(), $key );
+		$title = sanitize_text_field( self::pick( $structure->title(), $key ) );
 		$id    = $this->repo->find_by_key( $key );
 		if ( null === $id ) {
 			$new = wp_insert_post(
-				array(
-					'post_type'   => Program_Repository::POST_TYPE,
-					'post_status' => 'publish',
-					'post_title'  => $title,
+				wp_slash(
+					array(
+						'post_type'   => Program_Repository::POST_TYPE,
+						'post_status' => 'publish',
+						'post_title'  => $title,
+					)
 				),
 				true
 			);
@@ -197,18 +206,20 @@ final class Package_Importer {
 			}
 			$id = (int) $new;
 			update_post_meta( $id, '_lledger_stable_key', $key );
-		} elseif ( get_the_title( $id ) !== $title ) {
+		} elseif ( get_post_field( 'post_title', $id, 'raw' ) !== $title ) {
 			wp_update_post(
-				array(
-					'ID'         => $id,
-					'post_title' => $title,
+				wp_slash(
+					array(
+						'ID'         => $id,
+						'post_title' => $title,
+					)
 				)
 			);
 		}
 
 		update_post_meta( $id, '_lledger_course_iri', $structure->course_id() );
 		update_post_meta( $id, '_lledger_iri_base', self::iri_base( $structure ) );
-		update_post_meta( $id, '_lledger_rules', implode( "\n", array_map( 'strval', (array) ( $course_json['rules'] ?? array() ) ) ) );
+		update_post_meta( $id, '_lledger_rules', sanitize_textarea_field( implode( "\n", array_map( 'strval', (array) ( $course_json['rules'] ?? array() ) ) ) ) );
 		update_post_meta(
 			$id,
 			'_lledger_placement',
@@ -280,7 +291,7 @@ final class Package_Importer {
 				$meta[ $meta_key ] = Json::encode_exact( $path[ $field ] );
 			}
 		}
-		$title       = self::pick( $block->title(), $course['key'] );
+		$title       = sanitize_text_field( self::pick( $block->title(), $course['key'] ) );
 		$description = self::pick( self::description_of( $block ), '' );
 		$content     = self::paragraph( $description );
 		$spec        = new Course_Spec( $course['key'], $title, $content, 'publish', $meta );

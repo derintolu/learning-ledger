@@ -40,7 +40,7 @@ class Markdown_To_Blocks_Test extends \PHPUnit\Framework\TestCase {
 	public function test_code_with_language_is_escaped() {
 		$out = Markdown_To_Blocks::convert( "```json\n{\"a\": \"<b>\"}\n```" );
 		$this->assertStringContainsString( '<!-- wp:code -->', $out );
-		$this->assertStringContainsString( '<pre class="wp-block-code"><code lang="json">{&quot;a&quot;: &quot;&lt;b&gt;&quot;}</code></pre>', $out );
+		$this->assertStringContainsString( '<pre class="wp-block-code"><code>{&quot;a&quot;: &quot;&lt;b&gt;&quot;}</code></pre>', $out );
 	}
 
 	public function test_quote_wraps_inner_blocks() {

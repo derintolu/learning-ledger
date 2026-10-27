@@ -57,6 +57,15 @@ final class Package_Fetcher {
 			wp_delete_file( $path );
 			throw new Invalid_Input( 'The package server did not return the file.', 'fetch_status' );
 		}
+		$final = '';
+		$http  = $response['http_response'] ?? null;
+		if ( is_object( $http ) && method_exists( $http, 'get_response_object' ) ) {
+			$final = (string) ( $http->get_response_object()->url ?? '' );
+		}
+		if ( is_string( $final ) && '' !== $final && ! in_array( strtolower( (string) wp_parse_url( $final, PHP_URL_SCHEME ) ), $allowed, true ) ) {
+			wp_delete_file( $path );
+			throw new Invalid_Input( 'The package server redirected to a disallowed URL.', 'fetch_url' );
+		}
 		clearstatcache( true, $path );
 		if ( (int) filesize( $path ) > $l->max_bytes ) {
 			wp_delete_file( $path );

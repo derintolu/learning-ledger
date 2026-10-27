@@ -121,9 +121,7 @@ final class Markdown_To_Blocks {
 			return self::list_block( $node );
 		}
 		if ( $node instanceof FencedCode || $node instanceof IndentedCode ) {
-			$lang = $node instanceof FencedCode ? preg_replace( '/[^A-Za-z0-9_+#.-]/', '', (string) strtok( $node->getInfo() ?? '', " \t" ) ) : '';
-			$attr = '' === $lang ? '' : ' lang="' . $lang . '"';
-			return self::block( 'core/code', array(), '<pre class="wp-block-code"><code' . $attr . '>' . self::esc( rtrim( $node->getLiteral(), "\n" ) ) . '</code></pre>' );
+			return self::block( 'core/code', array(), '<pre class="wp-block-code"><code>' . self::esc( rtrim( $node->getLiteral(), "\n" ) ) . '</code></pre>' );
 		}
 		if ( $node instanceof BlockQuote ) {
 			$inner = implode( "\n\n", self::blocks( $node ) );
