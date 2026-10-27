@@ -1,0 +1,12 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "learning-ledger/my-record",
+	"title": "My learning record",
+	"category": "widgets",
+	"description": "Shows a signed-in learner their own completed and tested-out lessons, with a button to open their full record.",
+	"textdomain": "learning-ledger",
+	"supports": { "html": false },
+	"editorScript": "file:./index.js",
+	"render": "file:./render.php"
+}
