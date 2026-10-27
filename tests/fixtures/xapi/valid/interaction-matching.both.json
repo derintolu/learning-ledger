@@ -1,0 +1,1 @@
+{"actor":{"mbox":"mailto:learner@example.org"},"verb":{"id":"http://adlnet.gov/expapi/verbs/answered"},"object":{"id":"https://example.org/q/2","definition":{"interactionType":"matching","correctResponsesPattern":["ben[.]3[,]chris[.]2"],"source":[{"id":"ben"},{"id":"chris"}],"target":[{"id":"2"},{"id":"3"}]}}}

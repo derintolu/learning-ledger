@@ -1,0 +1,1 @@
+{"actor":{"openid":"https://id.example.org/1"},"verb":{"id":"https://example.org/verbs/mentored"},"object":{"objectType":"Agent","mbox":"mailto:mentee@example.org"}}

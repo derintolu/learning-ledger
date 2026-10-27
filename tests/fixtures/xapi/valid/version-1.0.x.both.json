@@ -1,0 +1,1 @@
+{"actor":{"mbox":"mailto:learner@example.org"},"verb":{"id":"http://adlnet.gov/expapi/verbs/experienced"},"object":{"id":"https://example.org/activities/1"},"version":"1.0.3","stored":"2026-10-27T10:00:00Z","authority":{"objectType":"Agent","account":{"homePage":"https://lrs.example.org","name":"client-1"}}}

@@ -1,0 +1,1 @@
+{"actor":{"objectType":"Group","member":[{"mbox":"mailto:a@example.org"},{"mbox":"mailto:b@example.org"}]},"verb":{"id":"https://example.org/verbs/joined"},"object":{"objectType":"Group","name":"G","account":{"homePage":"https://lms.example.org","name":"group-1"}}}

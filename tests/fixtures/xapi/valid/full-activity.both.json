@@ -1,0 +1,52 @@
+{
+  "id": "6F1C0E1A-4B2D-4C3E-9F00-0123456789AB",
+  "actor": {"objectType": "Agent", "name": "Learner", "account": {"homePage": "https://lms.example.org", "name": "u-42"}},
+  "verb": {"id": "http://adlnet.gov/expapi/verbs/completed", "display": {"en-US": "completed", "fr": "a termine"}},
+  "object": {
+    "objectType": "Activity",
+    "id": "https://example.org/activities/course-1",
+    "definition": {
+      "name": {"en": "Course 1"},
+      "description": {"en": "A course"},
+      "type": "http://adlnet.gov/expapi/activities/course",
+      "moreInfo": "https://example.org/course-1",
+      "extensions": {"https://example.org/ext/level": 3}
+    }
+  },
+  "result": {
+    "score": {"scaled": -0.5, "raw": 10, "min": 0, "max": 20},
+    "success": true,
+    "completion": false,
+    "response": "done",
+    "duration": "PT1H30M3.5S",
+    "extensions": {"https://example.org/ext/attempts": [1, 2]}
+  },
+  "context": {
+    "registration": "ec531277-b57b-4c15-8d91-d292c5b2b8f7",
+    "instructor": {"mbox_sha1sum": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"},
+    "team": {"objectType": "Group", "name": "Team A", "member": [{"mbox": "mailto:a@example.org"}]},
+    "contextActivities": {
+      "parent": {"id": "https://example.org/activities/program"},
+      "grouping": [{"objectType": "Activity", "id": "https://example.org/activities/g1"}],
+      "category": [],
+      "other": [{"id": "https://example.org/activities/o1", "definition": {"name": {"en": "Other"}}}]
+    },
+    "revision": "r2",
+    "platform": "Example LMS",
+    "language": "en-GB",
+    "statement": {"objectType": "StatementRef", "id": "0b7c4a0e-2d50-4b8f-8e49-1a8d62bd4f11"},
+    "extensions": {"https://example.org/ext/null-ok": null}
+  },
+  "timestamp": "2026-10-27T10:00:00.123+02:00",
+  "attachments": [
+    {
+      "usageType": "https://example.org/attachments/certificate",
+      "display": {"en": "Certificate"},
+      "description": {"en": "A certificate"},
+      "contentType": "application/pdf",
+      "length": 1024,
+      "sha2": "672fa5fa658017f1b72d65036f13379c6ab05d4ab3b6664908d8acf0b6a0c634",
+      "fileUrl": "https://example.org/cert.pdf"
+    }
+  ]
+}
