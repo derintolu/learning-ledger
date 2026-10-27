@@ -26,7 +26,7 @@ final class Queue_Module implements Module {
 	public const EVENT = 'lledger_cron_minute';
 
 	/**
-	 * Option holding the Unix time `learning_ledger/cron_quarter_hour` last fired.
+	 * Option holding the 15-minute bucket (Unix time / 900) `learning_ledger/cron_quarter_hour` last fired in.
 	 */
 	private const QUARTER_OPTION = 'lledger_cron_quarter_hour_last';
 
@@ -80,10 +80,9 @@ final class Queue_Module implements Module {
 		Job_Queue::run();
 		do_action( 'learning_ledger/cron_minute' ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
 
-		$now  = Clock::now()->getTimestamp();
-		$last = (int) get_option( self::QUARTER_OPTION, 0 );
-		if ( $now - $last >= 900 ) {
-			update_option( self::QUARTER_OPTION, $now, false );
+		$bucket = intdiv( Clock::now()->getTimestamp(), 900 );
+		if ( (int) get_option( self::QUARTER_OPTION, -1 ) !== $bucket ) {
+			update_option( self::QUARTER_OPTION, $bucket, false );
 			do_action( 'learning_ledger/cron_quarter_hour' ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
 		}
 	}

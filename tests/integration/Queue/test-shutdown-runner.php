@@ -77,8 +77,29 @@ class Shutdown_Runner_Test extends WP_UnitTestCase {
 				$ran = true;
 			}
 		);
+		$log = wp_tempnam( 'lledger-log' );
+		$old = ini_set( 'error_log', $log ); // phpcs:ignore WordPress.PHP.IniSet.Risky
 		Shutdown_Runner::on_shutdown();
+		ini_set( 'error_log', $old ); // phpcs:ignore WordPress.PHP.IniSet.Risky
 		$this->assertTrue( $ran );
+		$this->assertStringContainsString( 'shutdown callback failed: RuntimeException: boom', (string) file_get_contents( $log ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		unlink( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+	}
+
+	public function test_quarter_hour_fires_on_each_15_minute_boundary() {
+		$quarter = 0;
+		add_action(
+			'learning_ledger/cron_quarter_hour',
+			static function () use ( &$quarter ) {
+				++$quarter;
+			}
+		);
+		$module = new Queue_Module();
+		foreach ( array( '10:14:00', '10:15:00', '10:29:59', '10:30:00' ) as $time ) {
+			Clock::freeze( new \DateTimeImmutable( "2026-10-27 {$time}", new \DateTimeZone( 'UTC' ) ) );
+			$module->on_cron_minute();
+		}
+		$this->assertSame( 3, $quarter );
 	}
 
 	public function test_module_registers_minute_schedule_and_event() {

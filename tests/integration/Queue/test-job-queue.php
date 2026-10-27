@@ -54,6 +54,7 @@ class Job_Queue_Test extends WP_UnitTestCase {
 		Job_Queue::push( 'test', array(), null, 120 );
 		$this->assertSame( 0, Job_Queue::due_count() );
 		$this->assertSame( 0, Job_Queue::run() );
+		$this->assertNull( Job_Queue::last_run(), 'A run with nothing to do records nothing.' );
 	}
 
 	public function test_run_dispatches_and_marks_done() {
@@ -124,9 +125,11 @@ class Job_Queue_Test extends WP_UnitTestCase {
 	}
 
 	public function test_gives_up_after_72_hours_with_audit_row() {
+		$calls = 0;
 		add_action(
 			'learning_ledger/jobs/test',
-			static function () {
+			static function () use ( &$calls ) {
+				++$calls;
 				throw new \RuntimeException( 'still down' );
 			}
 		);
@@ -136,9 +139,12 @@ class Job_Queue_Test extends WP_UnitTestCase {
 		Clock::freeze( $start->modify( '+71 hours' ) );
 		Job_Queue::run();
 		$this->assertNull( $this->jobs()[0]->done_at );
+		$this->assertSame( 1, $calls );
 
+		// An attempted job that is 72 hours old is not tried again.
 		Clock::freeze( $start->modify( '+72 hours' ) );
-		Job_Queue::run();
+		$this->assertSame( 0, Job_Queue::run() );
+		$this->assertSame( 1, $calls );
 		$job = $this->jobs()[0];
 		$this->assertNotNull( $job->done_at );
 		$this->assertSame( 'still down', $job->last_error );
@@ -149,7 +155,7 @@ class Job_Queue_Test extends WP_UnitTestCase {
 			array(
 				'job'      => (int) $job->id,
 				'type'     => 'test',
-				'attempts' => 2,
+				'attempts' => 1,
 			),
 			json_decode( $audit->data, true )
 		);
@@ -157,6 +163,101 @@ class Job_Queue_Test extends WP_UnitTestCase {
 		// The key is free again.
 		Job_Queue::push( 'test', array(), 'give-up' );
 		$this->assertCount( 2, $this->jobs() );
+	}
+
+	public function test_first_failure_of_a_72_hour_old_job_abandons_it() {
+		add_action(
+			'learning_ledger/jobs/test',
+			static function () {
+				throw new \RuntimeException( 'down' );
+			}
+		);
+		$start = new \DateTimeImmutable( '2026-10-27 10:00:00', new \DateTimeZone( 'UTC' ) );
+		Clock::freeze( $start );
+		Job_Queue::push( 'test', array(), null, 72 * 3600 );
+		Clock::freeze( $start->modify( '+72 hours' ) );
+		$this->assertSame( 1, Job_Queue::run() );
+		$job = $this->jobs()[0];
+		$this->assertNotNull( $job->done_at );
+		$this->assertSame( '1', $job->attempts );
+		$this->assertSame( 'down', $job->last_error );
+		$this->assertSame( 1, (int) $GLOBALS['wpdb']->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'audit' ) . " WHERE event = 'job_abandoned'" ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
+	public function test_crashed_handler_backs_off_and_is_eventually_abandoned() {
+		// The handler dies without throwing (fatal, timeout, exit): from then on the
+		// process writes nothing more to the jobs table, so neither finish, fail
+		// nor release is recorded.
+		$calls   = 0;
+		$crashed = false;
+		add_action(
+			'learning_ledger/jobs/test',
+			static function () use ( &$calls, &$crashed ) {
+				++$calls;
+				$crashed = true;
+			}
+		);
+		add_filter(
+			'query',
+			static function ( $sql ) use ( &$crashed ) {
+				$jobs_write = 0 === strpos( ltrim( $sql ), 'UPDATE' ) && false !== strpos( $sql, Tables::name( 'jobs' ) );
+				return $crashed && $jobs_write ? 'SELECT 1' : $sql;
+			}
+		);
+		$start = new \DateTimeImmutable( '2026-10-27 10:00:00', new \DateTimeZone( 'UTC' ) );
+		$at    = $start;
+		Clock::freeze( $start );
+		Job_Queue::push( 'test', array(), 'poison' );
+
+		$expected = array( 60, 300, 900, 3600, 21600 );
+		foreach ( $expected as $i => $delay ) {
+			Clock::freeze( $at );
+			Job_Queue::run();
+			$crashed = false;
+			$job     = $this->jobs()[0];
+			$this->assertSame( $i + 1, $calls );
+			$this->assertSame( (string) ( $i + 1 ), $job->attempts );
+			$this->assertNull( $job->done_at );
+			$this->assertNotNull( $job->lock_token, 'The crash left the lock in place.' );
+			$this->assertSame( $delay, Timestamp::from_db( $job->run_after )->getTimestamp() - $at->getTimestamp() );
+
+			// Not reclaimed before its backoff and its lock have both expired.
+			Clock::freeze( $at->modify( '+59 seconds' ) );
+			$this->assertSame( 0, Job_Queue::run() );
+			$at = $at->modify( '+' . max( $delay, 61 ) . ' seconds' );
+		}
+
+		Clock::freeze( $start->modify( '+72 hours' ) );
+		$this->assertSame( 0, Job_Queue::run() );
+		$this->assertSame( 5, $calls );
+		$job = $this->jobs()[0];
+		$this->assertNotNull( $job->done_at );
+		$this->assertNull( $job->dedupe_key );
+		$this->assertSame( 'Handler did not finish.', $job->last_error );
+		$audit = $GLOBALS['wpdb']->get_row( 'SELECT * FROM ' . Tables::name( 'audit' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$this->assertSame( 'job_abandoned', $audit->event );
+		$this->assertSame( 5, json_decode( $audit->data, true )['attempts'] );
+	}
+
+	public function test_job_taken_by_another_runner_mid_batch_is_skipped() {
+		$seen = array();
+		add_action(
+			'learning_ledger/jobs/test',
+			static function ( $payload ) use ( &$seen ) {
+				$seen[] = $payload['i'];
+				if ( 0 === $payload['i'] ) {
+					// Another runner takes job 1 while this runner works on job 0.
+					$GLOBALS['wpdb']->query( $GLOBALS['wpdb']->prepare( 'UPDATE ' . Tables::name( 'jobs' ) . " SET lock_token = %s WHERE payload LIKE '%%\"i\":1%%'", str_repeat( 'b', 32 ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+				}
+			}
+		);
+		Job_Queue::push( 'test', array( 'i' => 0 ) );
+		Job_Queue::push( 'test', array( 'i' => 1 ) );
+		$this->assertSame( 1, Job_Queue::run() );
+		$this->assertSame( array( 0 ), $seen );
+		$job = $this->jobs()[1];
+		$this->assertSame( '0', $job->attempts );
+		$this->assertSame( str_repeat( 'b', 32 ), $job->lock_token );
 	}
 
 	public function test_two_runners_do_not_double_claim() {

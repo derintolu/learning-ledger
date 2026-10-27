@@ -99,19 +99,25 @@ final class Job_Queue {
 	public static function run( int $max_jobs = 50, int $max_seconds = 20 ): int {
 		$started = microtime( true );
 		$token   = bin2hex( random_bytes( 16 ) );
-		$jobs    = self::claim( $token, max( 1, $max_jobs ) );
-		$ran     = 0;
+		self::abandon_stale();
+		$jobs = self::claim( $token, max( 1, $max_jobs ) );
+		$ran  = 0;
 
 		foreach ( $jobs as $job ) {
 			if ( microtime( true ) - $started >= $max_seconds ) {
 				break;
+			}
+			if ( ! self::start( $job ) ) {
+				continue;
 			}
 			self::execute( $job );
 			++$ran;
 		}
 		self::release( $token );
 
-		update_option( self::LAST_RUN_OPTION, self::iso( Clock::now() ), false );
+		if ( $ran > 0 ) {
+			update_option( self::LAST_RUN_OPTION, self::iso( Clock::now() ), false );
+		}
 		return $ran;
 	}
 
@@ -182,9 +188,80 @@ final class Job_Queue {
 	}
 
 	/**
-	 * Dispatch one claimed job and record the outcome.
+	 * Abandon undone jobs that were already attempted and are now 72 hours old.
 	 *
-	 * @param object $job Row.
+	 * Catches jobs whose handler died without throwing (fatal error, timeout,
+	 * exit): they never reach fail(), but start() counted the attempt.
+	 *
+	 * @return void
+	 */
+	private static function abandon_stale(): void {
+		global $wpdb;
+		$table   = Tables::name( 'jobs' );
+		$now     = Timestamp::to_db( Clock::now() );
+		$cut_off = Timestamp::to_db( Clock::now()->modify( '-' . self::GIVE_UP_SECONDS . ' seconds' ) );
+
+		$rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				"SELECT id, type, attempts FROM {$table} WHERE done_at IS NULL AND attempts > 0 AND created_at <= %s AND run_after <= %s AND (locked_until IS NULL OR locked_until < %s) ORDER BY id LIMIT 100", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$cut_off,
+				$now,
+				$now
+			)
+		);
+		foreach ( $rows as $row ) {
+			$changed = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->prepare(
+					"UPDATE {$table} SET done_at = %s, dedupe_key = NULL, lock_token = NULL, locked_until = NULL, last_error = COALESCE(last_error, %s) WHERE id = %d AND done_at IS NULL AND (locked_until IS NULL OR locked_until < %s)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$now,
+					'Handler did not finish.',
+					(int) $row->id,
+					$now
+				)
+			);
+			if ( 1 === $changed ) {
+				self::audit_abandoned( (int) $row->id, (string) $row->type, (int) $row->attempts );
+			}
+		}
+	}
+
+	/**
+	 * Confirm this runner still holds the job, and count the attempt before dispatch.
+	 *
+	 * The attempt and its backoff are written first, so a handler that dies
+	 * without throwing still moves the job down the backoff schedule. The lock
+	 * is refreshed so later jobs in a long batch stay held.
+	 *
+	 * @param object $job Claimed row; `attempts` is updated in place.
+	 *
+	 * @return boolean False if another runner took the job.
+	 */
+	private static function start( object $job ): bool {
+		global $wpdb;
+		$table    = Tables::name( 'jobs' );
+		$attempts = (int) $job->attempts + 1;
+		$now      = Clock::now();
+		$changed  = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				"UPDATE {$table} SET attempts = %d, run_after = %s, locked_until = %s WHERE id = %d AND lock_token = %s AND done_at IS NULL", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$attempts,
+				Timestamp::to_db( $now->modify( '+' . self::backoff( $attempts ) . ' seconds' ) ),
+				Timestamp::to_db( $now->modify( '+' . self::LOCK_SECONDS . ' seconds' ) ),
+				(int) $job->id,
+				(string) $job->lock_token
+			)
+		);
+		if ( 1 !== $changed ) {
+			return false;
+		}
+		$job->attempts = $attempts;
+		return true;
+	}
+
+	/**
+	 * Dispatch one started job and record the outcome.
+	 *
+	 * @param object $job Row, with `attempts` already counted.
 	 *
 	 * @return void
 	 */
@@ -196,50 +273,35 @@ final class Job_Queue {
 			self::fail( $job, $e );
 			return;
 		}
-		self::finish( $job, array( 'attempts' => (int) $job->attempts + 1 ) );
+		self::finish( $job, array() );
 	}
 
 	/**
 	 * Record a failure: back off, or abandon once the job is 72 hours old.
 	 *
-	 * @param object     $job Row.
+	 * @param object     $job Row, with `attempts` already counted.
 	 * @param \Throwable $e   What the handler threw.
 	 *
 	 * @return void
 	 */
 	private static function fail( object $job, \Throwable $e ): void {
 		global $wpdb;
-		$attempts = (int) $job->attempts + 1;
+		$attempts = (int) $job->attempts;
 		$error    = mb_substr( $e->getMessage(), 0, self::MAX_ERROR_LENGTH );
 		$now      = Clock::now();
 		$age      = $now->getTimestamp() - Timestamp::from_db( (string) $job->created_at )->getTimestamp();
 
 		if ( $age >= self::GIVE_UP_SECONDS ) {
-			self::finish(
-				$job,
-				array(
-					'attempts'   => $attempts,
-					'last_error' => $error,
-				)
-			);
-			Audit_Log::record(
-				'job_abandoned',
-				array(
-					'job'      => (int) $job->id,
-					'type'     => (string) $job->type,
-					'attempts' => $attempts,
-				)
-			);
+			self::finish( $job, array( 'last_error' => $error ) );
+			self::audit_abandoned( (int) $job->id, (string) $job->type, $attempts );
 			return;
 		}
 
-		$delay = self::BACKOFF[ $attempts - 1 ] ?? self::BACKOFF_LATER;
 		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			Tables::name( 'jobs' ),
 			array(
-				'attempts'     => $attempts,
 				'last_error'   => $error,
-				'run_after'    => Timestamp::to_db( $now->modify( "+{$delay} seconds" ) ),
+				'run_after'    => Timestamp::to_db( $now->modify( '+' . self::backoff( $attempts ) . ' seconds' ) ),
 				'lock_token'   => null,
 				'locked_until' => null,
 			),
@@ -247,8 +309,39 @@ final class Job_Queue {
 				'id'         => (int) $job->id,
 				'lock_token' => (string) $job->lock_token,
 			),
-			array( '%d', '%s', '%s', '%s', '%s' ),
+			array( '%s', '%s', '%s', '%s' ),
 			array( '%d', '%s' )
+		);
+	}
+
+	/**
+	 * Seconds to wait before retrying after the given attempt.
+	 *
+	 * @param integer $attempts Attempts made so far (1 or more).
+	 *
+	 * @return integer
+	 */
+	private static function backoff( int $attempts ): int {
+		return self::BACKOFF[ $attempts - 1 ] ?? self::BACKOFF_LATER;
+	}
+
+	/**
+	 * Audit row for a job given up on.
+	 *
+	 * @param integer $id       Job id.
+	 * @param string  $type     Job type.
+	 * @param integer $attempts Attempts made.
+	 *
+	 * @return void
+	 */
+	private static function audit_abandoned( int $id, string $type, int $attempts ): void {
+		Audit_Log::record(
+			'job_abandoned',
+			array(
+				'job'      => $id,
+				'type'     => $type,
+				'attempts' => $attempts,
+			)
 		);
 	}
 
@@ -256,13 +349,13 @@ final class Job_Queue {
 	 * Mark a job done. Its dedupe key is released so the same work can be queued again.
 	 *
 	 * @param object $job    Row.
-	 * @param array  $fields Extra columns to set (`attempts`, `last_error`).
+	 * @param array  $fields Extra columns to set (`last_error`).
 	 *
 	 * @return void
 	 */
 	private static function finish( object $job, array $fields ): void {
 		global $wpdb;
-		$data    = array_merge(
+		$data = array_merge(
 			$fields,
 			array(
 				'done_at'      => Timestamp::to_db( Clock::now() ),
@@ -271,10 +364,6 @@ final class Job_Queue {
 				'locked_until' => null,
 			)
 		);
-		$formats = array();
-		foreach ( array_keys( $data ) as $column ) {
-			$formats[] = 'attempts' === $column ? '%d' : '%s';
-		}
 		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			Tables::name( 'jobs' ),
 			$data,
@@ -282,7 +371,7 @@ final class Job_Queue {
 				'id'         => (int) $job->id,
 				'lock_token' => (string) $job->lock_token,
 			),
-			$formats,
+			array_fill( 0, count( $data ), '%s' ),
 			array( '%d', '%s' )
 		);
 	}

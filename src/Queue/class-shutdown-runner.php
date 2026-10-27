@@ -85,7 +85,7 @@ final class Shutdown_Runner {
 				$cb();
 			} catch ( \Throwable $e ) {
 				// One failing callback must not stop the others; the response has already been sent.
-				unset( $e );
+				error_log( 'Learning Ledger: shutdown callback failed: ' . get_class( $e ) . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
 		}
 
