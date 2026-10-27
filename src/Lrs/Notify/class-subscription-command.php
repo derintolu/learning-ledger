@@ -23,8 +23,8 @@ final class Subscription_Command {
 	 *
 	 * ## OPTIONS
 	 *
-	 * --url=<url>
-	 * : Target URL (the connector's inbox), https.
+	 * --target=<url>
+	 * : Target URL (the connector's inbox), https. (Not `--url`, which is WP-CLI's global site flag.)
 	 *
 	 * [--actor-home-page=<iri>]
 	 * : Only statements whose actor account has this homePage.
@@ -44,10 +44,6 @@ final class Subscription_Command {
 	 * @return void
 	 */
 	public function create( array $args, array $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- WP-CLI signature.
-		// `--url` is also a WP-CLI global flag, which WP-CLI takes before the command sees it.
-		if ( ! isset( $assoc_args['url'] ) ) {
-			$assoc_args['url'] = (string) ( \WP_CLI::get_runner()->config['url'] ?? '' );
-		}
 		try {
 			$id = self::create_subscription( $assoc_args );
 		} catch ( Invalid_Input $e ) {
@@ -119,7 +115,7 @@ final class Subscription_Command {
 			'verbs'           => self::csv( $assoc['verb'] ?? '' ),
 			'registrations'   => self::csv( $assoc['registration'] ?? '' ),
 		);
-		return Notify_Module::create( (string) ( $assoc['url'] ?? '' ), $filters, self::ACTOR );
+		return Notify_Module::create( (string) ( $assoc['target'] ?? '' ), $filters, self::ACTOR );
 	}
 
 	/**

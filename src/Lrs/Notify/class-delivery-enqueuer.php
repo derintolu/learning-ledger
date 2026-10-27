@@ -23,6 +23,13 @@ use LearningLedger\Util\Timestamp;
 final class Delivery_Enqueuer {
 
 	/**
+	 * When this request last queued a delivery (Unix seconds with microseconds).
+	 *
+	 * @var float
+	 */
+	private static float $queued_at = 0.0;
+
+	/**
 	 * Queue deliveries.
 	 *
 	 * @param Stored_Statement[]|Stored_Statement $rows Statements just inserted. do_action() passes a
@@ -62,16 +69,32 @@ final class Delivery_Enqueuer {
 			}
 		}
 		if ( $added > 0 ) {
+			self::$queued_at = self::now();
 			Shutdown_Runner::add( array( self::class, 'deliver' ) );
 		}
 	}
 
 	/**
-	 * Shutdown callback: send what is due.
+	 * Shutdown callback: wait until the statements just stored are past the sender's settle time
+	 * (at most a second), then send what is due. Where fastcgi_finish_request() exists the response
+	 * has already gone; elsewhere this wait holds the connection like the rest of the shutdown work.
 	 *
 	 * @return void
 	 */
 	public static function deliver(): void {
+		$wait = self::$queued_at + Webhook_Sender::SETTLE_SECONDS - self::now();
+		if ( $wait > 0 ) {
+			usleep( (int) ceil( min( $wait, (float) Webhook_Sender::SETTLE_SECONDS ) * 1000000 ) + 1000 );
+		}
 		( new Webhook_Sender() )->run();
+	}
+
+	/**
+	 * Clock time as a float.
+	 *
+	 * @return float
+	 */
+	private static function now(): float {
+		return (float) Clock::now()->format( 'U.u' );
 	}
 }

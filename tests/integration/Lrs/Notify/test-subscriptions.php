@@ -22,7 +22,8 @@ use LearningLedger\Util\Invalid_Input;
 
 class Subscriptions_Test extends WP_UnitTestCase {
 
-	const URL  = 'https://connector.example/wp-json/learning-ledger/v1/inbox';
+	// The test site's own host: it resolves for wp_http_validate_url().
+	const URL  = 'https://example.org/wp-json/learning-ledger/v1/inbox';
 	const REG  = '6fbd600f-d17c-4c74-801a-2ec2e53231c7';
 	const VERB = 'http://adlnet.gov/expapi/verbs/completed';
 
@@ -147,6 +148,7 @@ class Subscriptions_Test extends WP_UnitTestCase {
 			array( self::URL, array( 'registrations' => array( 'not-a-uuid' ) ) ),
 			array( self::URL, array( 'actor_home_page' => 'no scheme' ) ),
 			array( self::URL, array( 'activity_prefix' => array( 'x' ) ) ),
+			array( self::URL, array( 'activity_prefix' => 'course-1' ) ),
 		);
 		foreach ( $bad as list( $url, $filters ) ) {
 			try {
@@ -169,7 +171,7 @@ class Subscriptions_Test extends WP_UnitTestCase {
 
 	public function test_private_and_link_local_targets_are_refused_unless_allowed() {
 		$repo = new Subscription_Repository();
-		foreach ( array( 'https://169.254.169.254/latest/meta-data', 'https://10.0.0.5/inbox', 'https://192.168.1.2/inbox', 'https://127.0.0.1:8443/inbox', 'https://[::1]/inbox', 'https://[fd00::1]/inbox' ) as $url ) {
+		foreach ( array( 'https://169.254.169.254/latest/meta-data', 'https://10.0.0.5/inbox', 'https://192.168.1.2/inbox', 'https://127.0.0.1:8443/inbox', 'https://[::1]/inbox', 'https://[fd00::1]/inbox', 'https://no-such-host.invalid/inbox', 'https://example.org:8443/inbox' ) as $url ) {
 			try {
 				$repo->create( $url, array() );
 				$this->fail( 'Accepted ' . $url );
@@ -255,7 +257,7 @@ class Subscriptions_Test extends WP_UnitTestCase {
 	public function test_cli_create_list_delete() {
 		$id  = Subscription_Command::create_subscription(
 			array(
-				'url'             => self::URL,
+				'target'          => self::URL,
 				'actor-home-page' => 'https://lms.example',
 				'activity-prefix' => 'https://lms.example/course/',
 				'verb'            => self::VERB . ',http://adlnet.gov/expapi/verbs/passed',

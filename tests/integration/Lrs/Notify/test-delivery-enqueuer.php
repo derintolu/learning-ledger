@@ -18,7 +18,7 @@ use LearningLedger\Util\Clock;
 
 class Delivery_Enqueuer_Test extends WP_UnitTestCase {
 
-	const URL = 'https://connector.example/wp-json/learning-ledger/v1/inbox';
+	const URL = 'https://example.org/wp-json/learning-ledger/v1/inbox';
 
 	private array $requests = array();
 
@@ -123,6 +123,7 @@ class Delivery_Enqueuer_Test extends WP_UnitTestCase {
 	public function test_nothing_is_sent_during_the_storing_request_only_at_shutdown() {
 		( new Subscription_Repository() )->create( self::URL, array() );
 
+		$started = microtime( true );
 		( new Statement_Store() )->store( array( self::statement( 'https://lms.example/course/1/a' ) ), self::principal(), '2.0.0' );
 
 		$this->assertSame( array(), $this->requests, 'No HTTP call in the storing request.' );
@@ -131,6 +132,8 @@ class Delivery_Enqueuer_Test extends WP_UnitTestCase {
 
 		Shutdown_Runner::on_shutdown();
 
+		// The shutdown run waits out the one-second settle time, then sends.
+		$this->assertGreaterThanOrEqual( 1.0, microtime( true ) - $started );
 		$this->assertCount( 1, $this->requests );
 		$this->assertSame( self::URL, $this->requests[0]['url'] );
 		$this->assertSame( 'delivered', self::outbox()[0]['status'] );

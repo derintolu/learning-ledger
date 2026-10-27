@@ -104,7 +104,8 @@ final class Inbox_Route {
 		}
 
 		try {
-			$envelope = Json::decode_strict( $body, self::MAX_BYTES, 64 );
+			// The LRS accepts statements nested 64 deep; the envelope object and its statements list add two.
+			$envelope = Json::decode_strict( $body, self::MAX_BYTES, 64 + 2 );
 		} catch ( Invalid_Input $e ) {
 			return self::error( 400, 'malformed' );
 		}

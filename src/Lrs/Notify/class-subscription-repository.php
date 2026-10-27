@@ -106,11 +106,20 @@ final class Subscription_Repository {
 	 * @param integer $id Id.
 	 *
 	 * @return boolean False when there was no such subscription.
+	 *
+	 * @throws \RuntimeException When the database write fails (nothing is deleted).
 	 */
 	public function delete( int $id ): bool {
 		global $wpdb;
-		$n = $wpdb->delete( Tables::name( 'subscriptions' ), array( 'id' => $id ), array( '%d' ) );
-		$wpdb->delete( Tables::name( 'outbox' ), array( 'subscription_id' => $id ), array( '%d' ) );
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+			throw new \RuntimeException( 'Could not start the subscription delete.' );
+		}
+		$n    = $wpdb->delete( Tables::name( 'subscriptions' ), array( 'id' => $id ), array( '%d' ) );
+		$rows = $wpdb->delete( Tables::name( 'outbox' ), array( 'subscription_id' => $id ), array( '%d' ) );
+		if ( false === $n || false === $rows || false === $wpdb->query( 'COMMIT' ) ) {
+			$wpdb->query( 'ROLLBACK' );
+			throw new \RuntimeException( 'Could not delete the subscription.' );
+		}
 		$this->cache = null;
 		return 1 === $n;
 	}
@@ -264,8 +273,8 @@ final class Subscription_Repository {
 					$out[ $key ] = $value;
 					break;
 				case 'activity_prefix':
-					if ( ! is_string( $value ) ) {
-						throw new Invalid_Input( 'activity_prefix must be a string.', 'invalid', 'filters.activity_prefix' );
+					if ( ! is_string( $value ) || ! self::is_iri( $value ) ) {
+						throw new Invalid_Input( 'activity_prefix must be an absolute IRI.', 'invalid', 'filters.activity_prefix' );
 					}
 					$out[ $key ] = $value;
 					break;
@@ -324,6 +333,10 @@ final class Subscription_Repository {
 		}
 		if ( ! Webhook_Sender::target_allowed( $url ) ) {
 			throw new Invalid_Input( 'The target is on a private, loopback or link-local address.', 'unsafe_url', 'url' );
+		}
+		// The checks wp_safe_remote_post() will apply at send time: the host resolves, the address and port are allowed.
+		if ( false === wp_http_validate_url( $url ) ) {
+			throw new Invalid_Input( 'The target host does not resolve, or its address or port is not allowed.', 'unsafe_url', 'url' );
 		}
 		return $url;
 	}

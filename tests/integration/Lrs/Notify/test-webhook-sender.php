@@ -5,6 +5,8 @@
  * @package LearningLedger
  */
 
+use LearningLedger\Connector\Inbox\Inbox_Route;
+use LearningLedger\Connector\Pairing\Connector_Settings;
 use LearningLedger\Crypto\Notification_Signature;
 use LearningLedger\Db\Installer;
 use LearningLedger\Db\Tables;
@@ -20,16 +22,24 @@ use LearningLedger\Queue\Shutdown_Runner;
 use LearningLedger\Tests\Client_Factory;
 use LearningLedger\Tests\Xapi_Test_Client;
 use LearningLedger\Util\Clock;
+use LearningLedger\Util\Json;
 use LearningLedger\Util\Timestamp;
 use LearningLedger\Util\Uuid;
 
 class Webhook_Sender_Test extends WP_UnitTestCase {
 
-	const URL = 'https://connector.example/wp-json/learning-ledger/v1/inbox';
+	const URL = 'https://example.org/wp-json/learning-ledger/v1/inbox';
 
 	private array $requests = array();
 
 	private int $status = 202;
+
+	/**
+	 * Optional responder: envelope array => HTTP status.
+	 *
+	 * @var callable|null
+	 */
+	private $responder = null;
 
 	private ?Principal $principal = null;
 
@@ -40,12 +50,13 @@ class Webhook_Sender_Test extends WP_UnitTestCase {
 		Installer::install();
 		Capabilities::install();
 		global $wpdb;
-		foreach ( array( 'statements', 'statement_refs', 'pending_voids', 'activities', 'agents', 'subscriptions', 'outbox', 'jobs', 'audit' ) as $t ) {
+		foreach ( array( 'statements', 'statement_refs', 'pending_voids', 'activities', 'agents', 'subscriptions', 'outbox', 'jobs', 'audit', 'conn_inbox', 'conn_events' ) as $t ) {
 			$wpdb->query( 'DELETE FROM ' . Tables::name( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		}
 		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE purpose = %s', Tables::name( 'keys' ), 'notify' ) );
 		$this->requests  = array();
 		$this->status    = 202;
+		$this->responder = null;
 		$this->principal = null;
 		$this->t0        = new DateTimeImmutable( '2026-10-27T10:00:00.000000Z' );
 		Clock::freeze( $this->t0 );
@@ -66,18 +77,31 @@ class Webhook_Sender_Test extends WP_UnitTestCase {
 			'url'  => $url,
 			'args' => $args,
 		);
+		$code             = null === $this->responder ? $this->status : (int) ( $this->responder )( json_decode( $args['body'], true ), $args );
 		return array(
 			'headers'  => array(),
 			'body'     => '{}',
 			'response' => array(
-				'code'    => $this->status,
+				'code'    => $code,
 				'message' => 'x',
 			),
 			'cookies'  => array(),
 		);
 	}
 
-	private function store( int $n, string $padding = '' ): void {
+	/**
+	 * Store statements one settle period before the frozen now, so they are ready to batch.
+	 */
+	private function store( int $n, string $padding = '', bool $settled = true, mixed $extension = null ): void {
+		$now = Clock::now();
+		if ( $settled ) {
+			Clock::freeze( $now->modify( '-1 second' ) );
+		}
+		$this->store_now( $n, $padding, $extension );
+		Clock::freeze( $now );
+	}
+
+	private function store_now( int $n, string $padding, mixed $extension ): void {
 		if ( null === $this->principal ) {
 			$c               = Client_Factory::create( array( 'statements/write' ) );
 			$this->principal = Principal::for_client( ( new Client_Repository() )->find( $c['id'] ) );
@@ -100,6 +124,9 @@ class Webhook_Sender_Test extends WP_UnitTestCase {
 			);
 			if ( '' !== $padding ) {
 				$st['result'] = array( 'extensions' => array( 'https://lms.example/ext/pad' => $padding ) );
+			}
+			if ( null !== $extension ) {
+				$st['result'] = array( 'extensions' => array( 'https://lms.example/ext/deep' => $extension ) );
 			}
 			$statements[] = $st;
 		}
@@ -341,6 +368,158 @@ class Webhook_Sender_Test extends WP_UnitTestCase {
 		$this->assertSame( array(), $this->requests );
 		$this->assertSame( 'pending', self::outbox()[0]['status'] );
 		$this->assertSame( 1, (int) self::outbox()[0]['attempts'] );
+	}
+
+	public function test_statements_younger_than_one_second_wait() {
+		( new Subscription_Repository() )->create( self::URL, array() );
+		$this->store( 1, '', false );
+
+		$this->assertSame( 0, ( new Webhook_Sender() )->run() );
+		Clock::freeze( $this->t0->modify( '+999999 microseconds' ) );
+		$this->assertSame( 0, ( new Webhook_Sender() )->run() );
+		Clock::freeze( $this->t0->modify( '+1 second' ) );
+		$this->assertSame( 1, ( new Webhook_Sender() )->run() );
+		$this->assertSame( 'delivered', self::outbox()[0]['status'] );
+	}
+
+	public function test_a_400_batch_is_resent_singly_and_a_refused_statement_is_skipped() {
+		$sub = ( new Subscription_Repository() )->create( self::URL, array() );
+		$this->store( 3 );
+		$rows = self::bodies();
+		$bad  = json_decode( $rows[1]['body'], true )['id'];
+
+		$this->responder = static function ( array $env ) use ( $bad ) {
+			if ( count( $env['statements'] ) > 1 || $bad === $env['statements'][0]['id'] ) {
+				return 400;
+			}
+			return 202;
+		};
+		$this->assertSame( 4, ( new Webhook_Sender() )->run() );
+
+		$this->assertCount( 4, $this->requests );
+		$this->assertCount( 3, $this->envelope( 0 )['statements'] );
+		$events = array( $this->envelope( 0 )['event_id'] );
+		foreach ( array( 1, 2, 3 ) as $i ) {
+			$env = $this->envelope( $i );
+			$this->assertCount( 1, $env['statements'] );
+			$this->assertSame( (int) $rows[ $i - 1 ]['seq'], $env['cursor'] );
+			$this->assertSame( json_decode( $rows[ $i - 1 ]['body'], true )['id'], $env['statements'][0]['id'] );
+			$events[] = $env['event_id'];
+		}
+		$this->assertSame( $events, array_unique( $events ), 'Each single-statement envelope has its own event id.' );
+
+		$this->assertSame( array( 'delivered', 'skipped', 'delivered' ), array_column( self::outbox(), 'status' ) );
+		$this->assertSame( (int) $rows[2]['seq'], ( new Subscription_Repository() )->find( $sub )['cursor'] );
+
+		global $wpdb;
+		$audit = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE event = %s', Tables::name( 'audit' ), 'webhook_statement_skipped' ), ARRAY_A );
+		$this->assertNotNull( $audit );
+		$data = json_decode( $audit['data'], true );
+		$this->assertSame(
+			array(
+				'subscription_id' => $sub,
+				'seq'             => (int) $rows[1]['seq'],
+				'status'          => 400,
+			),
+			$data
+		);
+
+		// The subscription is not wedged: later statements go out normally.
+		$this->responder = null;
+		$this->store( 2 );
+		$this->assertSame( 1, ( new Webhook_Sender() )->run() );
+		$this->assertCount( 2, $this->envelope( 4 )['statements'] );
+	}
+
+	public function test_a_single_that_fails_in_transport_stops_the_split_and_keeps_order() {
+		( new Subscription_Repository() )->create( self::URL, array() );
+		$this->store( 3 );
+		$rows            = self::bodies();
+		$ids             = array_map( static fn( $r ) => json_decode( $r['body'], true )['id'], $rows );
+		$second          = $ids[1];
+		$this->responder = static function ( array $env ) use ( $second ) {
+			if ( count( $env['statements'] ) > 1 ) {
+				return 400;
+			}
+			return $second === $env['statements'][0]['id'] ? 503 : 202;
+		};
+
+		$this->assertSame( 3, ( new Webhook_Sender() )->run() );
+		$this->assertSame( array( 'delivered', 'pending', 'pending' ), array_column( self::outbox(), 'status' ) );
+		$retry_event = $this->envelope( 2 )['event_id'];
+
+		Clock::freeze( $this->t0->modify( '+60 seconds' ) );
+		$this->responder = null;
+		$this->assertSame( 2, ( new Webhook_Sender() )->run() );
+		$this->assertSame( $retry_event, $this->envelope( 3 )['event_id'] );
+		$this->assertSame( $ids[1], $this->envelope( 3 )['statements'][0]['id'] );
+		$this->assertSame( $ids[2], $this->envelope( 4 )['statements'][0]['id'] );
+		$this->assertSame( array( 'delivered', 'delivered', 'delivered' ), array_column( self::outbox(), 'status' ) );
+	}
+
+	public function test_a_statement_at_the_lrs_depth_limit_is_accepted_by_the_inbox() {
+		( new Subscription_Repository() )->create( self::URL, array() );
+		$deep = 'leaf';
+		for ( $i = 0; $i < 61; $i++ ) {
+			$deep = array( $deep );
+		}
+		$this->store( 1, '', true, $deep );
+		$body = self::bodies()[0]['body'];
+		Json::decode_strict( $body, PHP_INT_MAX, 64 );
+		try {
+			Json::decode_strict( $body, PHP_INT_MAX, 63 );
+			$this->fail( 'The statement should be exactly 64 deep.' );
+		} catch ( \LearningLedger\Util\Invalid_Input $e ) {
+			$this->assertSame( 'too_deep', $e->error_code() );
+		}
+
+		$key = $this->about_key();
+		Connector_Settings::update(
+			array(
+				'notify_kid'        => $key['kid'],
+				'notify_public_key' => $key['public_key'],
+			)
+		);
+		$this->responder = static function ( array $env, array $args ) {
+			$request = new WP_REST_Request( 'POST', '/learning-ledger/v1/inbox' );
+			foreach ( $args['headers'] as $name => $value ) {
+				$request->set_header( $name, $value );
+			}
+			$request->set_body( $args['body'] );
+			return ( new Inbox_Route() )->handle( $request )->get_status();
+		};
+
+		$this->assertSame( 1, ( new Webhook_Sender() )->run() );
+		$this->assertSame( 'delivered', self::outbox()[0]['status'] );
+		global $wpdb;
+		$this->assertSame( 1, (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'conn_inbox' ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		Shutdown_Runner::on_shutdown();
+	}
+
+	public function test_an_erased_batch_moves_the_cursor_and_a_partly_erased_one_sends_the_rest() {
+		$sub = ( new Subscription_Repository() )->create( self::URL, array() );
+		$this->store( 2 );
+		global $wpdb;
+		$seqs = array_map( 'intval', array_column( self::bodies(), 'seq' ) );
+		$wpdb->query( 'DELETE FROM ' . Tables::name( 'statements' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+		$this->assertSame( 0, ( new Webhook_Sender() )->run() );
+		$this->assertSame( array(), $this->requests );
+		$this->assertSame( array( 'delivered', 'delivered' ), array_column( self::outbox(), 'status' ) );
+		$this->assertSame( max( $seqs ), ( new Subscription_Repository() )->find( $sub )['cursor'] );
+
+		$this->store( 3 );
+		$rows = self::bodies();
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE seq = %d', Tables::name( 'statements' ), (int) $rows[1]['seq'] ) );
+
+		$this->assertSame( 1, ( new Webhook_Sender() )->run() );
+		$env = $this->envelope( 0 );
+		$this->assertSame(
+			array( json_decode( $rows[0]['body'], true )['id'], json_decode( $rows[2]['body'], true )['id'] ),
+			array_column( $env['statements'], 'id' )
+		);
+		$this->assertSame( (int) $rows[2]['seq'], $env['cursor'] );
+		$this->assertSame( array( 'delivered', 'delivered', 'delivered', 'delivered', 'delivered' ), array_column( self::outbox(), 'status' ) );
 	}
 
 	public function test_cron_minute_sends_as_catch_up() {
