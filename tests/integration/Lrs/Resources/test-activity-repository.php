@@ -102,4 +102,40 @@ class Activity_Repository_Test extends WP_UnitTestCase {
 		$wpdb->query( $wpdb->prepare( 'UPDATE ' . Tables::name( 'activities' ) . ' SET iri = %s', 'https://example.com/other' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		$this->assertNull( $repo->get( self::IRI ) );
 	}
+
+	public function test_concurrent_define_keeps_both_language_keys() {
+		$repo = new Activity_Repository();
+		$repo->merge( self::IRI, array( 'name' => array( 'en-US' => 'One' ) ), false );
+		$fired = false;
+		$hook  = function ( $query ) use ( &$fired, &$hook, $repo ) {
+			if ( ! $fired && str_starts_with( ltrim( $query ), 'UPDATE' ) && str_contains( $query, 'lledger_activities' ) ) {
+				$fired = true;
+				remove_filter( 'query', $hook );
+				// A competing define lands after our stale read, before our write.
+				$repo->merge( self::IRI, array( 'name' => array( 'de' => 'Eins' ) ), true );
+			}
+			return $query;
+		};
+		add_filter( 'query', $hook );
+		$repo->merge( self::IRI, array( 'name' => array( 'fr' => 'Un' ) ), true );
+		remove_filter( 'query', $hook );
+		$this->assertTrue( $fired );
+		$this->assertSame(
+			array(
+				'en-US' => 'One',
+				'de'    => 'Eins',
+				'fr'    => 'Un',
+			),
+			$repo->get( self::IRI )['definition']['name']
+		);
+	}
+
+	public function test_empty_name_stays_an_object_through_a_merge() {
+		global $wpdb;
+		$repo = new Activity_Repository();
+		$repo->merge( self::IRI, array( 'name' => array() ), false );
+		$repo->merge( self::IRI, array( 'type' => 'http://adlnet.gov/expapi/activities/course' ), true );
+		$stored = $wpdb->get_var( 'SELECT definition FROM ' . Tables::name( 'activities' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$this->assertStringContainsString( '"name":{}', $stored );
+	}
 }

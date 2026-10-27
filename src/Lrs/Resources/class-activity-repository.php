@@ -45,7 +45,7 @@ final class Activity_Repository {
 		$now   = ( new \DateTimeImmutable( 'now', new \DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s.u' );
 
 		// A concurrent insert of the same IRI is a no-op, never an error.
-		$inserted = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->prepare(
 				"INSERT INTO {$table} (iri_hash, iri, definition, updated) VALUES (UNHEX(%s), %s, %s, %s) ON DUPLICATE KEY UPDATE iri_hash = iri_hash", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				$hash,
@@ -54,26 +54,36 @@ final class Activity_Repository {
 				$now
 			)
 		);
-		if ( 1 === $inserted || ! $may_define || null === $definition ) {
+		if ( ! $may_define || null === $definition ) {
 			return;
 		}
 
-		$row = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->prepare( "SELECT iri, definition FROM {$table} WHERE iri_hash = UNHEX(%s)", $hash ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			ARRAY_A
-		);
-		if ( null === $row || $row['iri'] !== $iri ) {
-			return;
+		// Optimistic compare-and-swap: a concurrent define makes the UPDATE match nothing, so re-read and merge again.
+		for ( $attempt = 0; $attempt < 10; $attempt++ ) {
+			$row = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prepare( "SELECT iri, definition FROM {$table} WHERE iri_hash = UNHEX(%s)", $hash ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				ARRAY_A
+			);
+			if ( null === $row || $row['iri'] !== $iri ) {
+				return;
+			}
+			$merged = self::encode( self::merge_definitions( self::decode( $row['definition'] ), $definition ) );
+			if ( $merged === $row['definition'] ) {
+				return;
+			}
+			$changed = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prepare(
+					"UPDATE {$table} SET definition = %s, updated = %s WHERE iri_hash = UNHEX(%s) AND definition = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$merged,
+					$now,
+					$hash,
+					$row['definition']
+				)
+			);
+			if ( $changed ) {
+				return;
+			}
 		}
-		$merged = self::merge_definitions( self::decode( $row['definition'] ), $definition );
-		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->prepare(
-				"UPDATE {$table} SET definition = %s, updated = %s WHERE iri_hash = UNHEX(%s)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				self::encode( $merged ),
-				$now,
-				$hash
-			)
-		);
 	}
 
 	/**

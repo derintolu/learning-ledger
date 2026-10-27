@@ -63,7 +63,7 @@ final class Agent_Repository {
 		);
 		$rows   = $wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->prepare(
-				"SELECT p.ifi FROM {$table} p WHERE p.person_id = ( SELECT person_id FROM {$table} WHERE ifi_hash = UNHEX(%s) ) ORDER BY p.id", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"SELECT p.ifi FROM {$table} p JOIN {$table} me ON me.ifi_hash = UNHEX(%s) WHERE p.person_id = IF(me.person_id = 0, me.id, me.person_id) OR (p.person_id = 0 AND p.id = me.id) ORDER BY p.id", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				bin2hex( $a->hash() )
 			)
 		);
