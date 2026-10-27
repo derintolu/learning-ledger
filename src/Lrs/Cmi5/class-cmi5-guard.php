@@ -181,14 +181,12 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 	/**
 	 * Record the session's termination on the token when its `terminated` statement is committed.
 	 *
-	 * @param mixed $rows Stored_Statement[] just committed. do_action() hands a listener the bare
-	 *                    object when the array holds exactly one, so a Stored_Statement is accepted too.
+	 * @param mixed $rows Stored_Statement[] just committed.
 	 *
 	 * @return void
 	 */
 	public function on_committed( mixed $rows ): void {
-		$rows = $rows instanceof Stored_Statement ? array( $rows ) : (array) $rows;
-		foreach ( $rows as $row ) {
+		foreach ( (array) $rows as $row ) {
 			if ( ! $row instanceof Stored_Statement || ! str_starts_with( $row->authority_client, 'tok:' ) ) {
 				continue;
 			}
