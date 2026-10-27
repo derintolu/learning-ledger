@@ -192,10 +192,32 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 	}
 
 	public function test_valid_sequence_in_one_batch_is_accepted() {
-		[ $au ] = $this->child();
-		$res    = self::post( $au, array( self::defined( Vocab::INITIALIZED ), self::allowed(), self::defined( Vocab::COMPLETED ), self::defined( Vocab::PASSED ), self::defined( Vocab::TERMINATED ) ) );
+		[ $au, $key ] = $this->child();
+		$res          = self::post( $au, array( self::defined( Vocab::INITIALIZED ), self::allowed(), self::defined( Vocab::COMPLETED ), self::defined( Vocab::PASSED ), self::defined( Vocab::TERMINATED ) ) );
 		$this->assert_status( 200, $res );
 		$this->assertSame( 5, self::count_rows() );
+		$this->assertSame( '2026-10-27T10:00:00+00:00', ( new Token_Repository() )->find( $key )->terminated_at->format( DATE_ATOM ) );
+	}
+
+	public function test_identical_resend_is_left_to_the_store() {
+		[ $au ] = $this->child();
+		$passed = self::defined( Vocab::PASSED );
+		$this->assert_status( 200, self::post( $au, array( $passed ) ), 'passed' );
+		$this->assert_status( 200, self::post( $au, array( $passed ) ), 'passed resent' );
+
+		$terminated = self::defined( Vocab::TERMINATED );
+		$this->assert_status( 200, self::post( $au, array( $terminated ) ), 'terminated' );
+		$this->assert_status( 200, self::post( $au, array( $terminated ) ), 'terminated resent' );
+		$this->assert_status( 204, $au->request( 'PUT', 'statements', array( 'statementId' => $passed['id'] ), Json::encode_exact( $passed ), array( 'Content-Type' => 'application/json' ) ), 'passed resent by PUT' );
+		$this->assertSame( 2, self::count_rows() );
+
+		$changed                       = $passed;
+		$changed['result']['duration'] = 'PT6M';
+		$this->assert_status( 409, self::post( $au, array( $changed ) ), 'same id, different content' );
+
+		// A new statement after terminated is still judged.
+		$this->assert_status( 403, self::post( $au, array( self::defined( Vocab::COMPLETED ) ) ), 'new defined statement' );
+		$this->assertSame( 2, self::count_rows() );
 	}
 
 	public function test_lms_only_verbs_are_rejected_403() {

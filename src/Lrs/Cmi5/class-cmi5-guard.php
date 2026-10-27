@@ -119,9 +119,13 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 		if ( null === $token || ! $p->guard_enabled() ) {
 			return;
 		}
-		$state = $this->state( $token );
+		// A statement already stored under this id is a resend: the store answers 204 when identical, 409 otherwise.
+		if ( isset( $statement['id'] ) && is_string( $statement['id'] ) && null !== $this->statements->find( $statement['id'] ) ) {
+			return;
+		}
 
-		if ( null !== $state['terminated_at'] && Clock::now()->getTimestamp() - $state['terminated_at']->getTimestamp() > self::GRACE_SECONDS ) {
+		$terminated_at = $this->terminated_at( $token );
+		if ( null !== $terminated_at && Clock::now()->getTimestamp() - $terminated_at->getTimestamp() > self::GRACE_SECONDS ) {
 			throw new Xapi_Error( 403, 'The AU session was terminated more than 10 minutes ago; no more statements are accepted for it.' );
 		}
 
@@ -145,6 +149,7 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 		if ( ! $category || ! in_array( $verb, Vocab::VERBS, true ) ) {
 			return;
 		}
+		$state = $this->state( $token );
 		if ( $state['terminated'] ) {
 			throw new Xapi_Error( 403, 'The AU session is terminated; no more cmi5 defined statements are accepted for it.' );
 		}
@@ -201,7 +206,22 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 	}
 
 	/**
-	 * What the token's registration and session already hold (loaded once per request).
+	 * When the token's session was terminated: the token's own record, or the registration's
+	 * statements when the token has none (another token of the session may have terminated it).
+	 *
+	 * @param Child_Token $token Token.
+	 *
+	 * @return \DateTimeImmutable|null
+	 */
+	private function terminated_at( Child_Token $token ): ?\DateTimeImmutable {
+		if ( null === $this->state && null !== $token->terminated_at ) {
+			return $token->terminated_at;
+		}
+		return $this->state( $token )['terminated_at'];
+	}
+
+	/**
+	 * What the token's registration and session already hold (loaded once per request, when first needed).
 	 *
 	 * Passed and completed count the learner's unvoided cmi5 defined statements about the AU;
 	 * the session counts as terminated once a cmi5 defined `terminated` with its session id is stored.
