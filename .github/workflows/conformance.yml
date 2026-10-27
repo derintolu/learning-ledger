@@ -1,0 +1,102 @@
+name: Conformance
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  WP_ENV_PORT: 8888
+  LLEDGER_SITE: http://localhost:8888
+
+jobs:
+  lrs:
+    name: ADL LRS suite (xAPI ${{ matrix.xapi }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        xapi: ['1.0.3', '2.0.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: composer install --no-progress --prefer-dist
+      - run: composer prefix
+      - run: npm ci
+      - run: npm run build
+      - run: npx wp-env start
+      - name: Enable the LRS role
+        run: npx wp-env run cli wp learning-ledger role enable lrs
+      - name: Register a conformance client (only the SHA-256 reaches WordPress)
+        run: |
+          umask 077
+          openssl rand -hex 32 | tr -d '\n' > "$RUNNER_TEMP/lrs-secret"
+          hash="$(sha256sum "$RUNNER_TEMP/lrs-secret" | cut -d' ' -f1)"
+          npx wp-env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define
+      - name: Run the ADL LRS suite
+        run: |
+          bin/conformance-lrs.sh --xapi "${{ matrix.xapi }}" \
+            --endpoint "$LLEDGER_SITE/wp-json/learning-ledger/xapi/" \
+            --key conformance --secret-file "$RUNNER_TEMP/lrs-secret"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-lrs-${{ matrix.xapi }}
+          path: conformance/raw/
+          if-no-files-found: warn
+      - run: npx wp-env stop
+        if: always()
+
+  catapult:
+    name: CATAPULT LTS (cmi5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: composer install --no-progress --prefer-dist
+      - run: composer prefix
+      - run: npm ci
+      - run: npm run build
+      - name: Write test-only settings and secrets
+        run: |
+          umask 077
+          openssl rand -hex 32 | tr -d '\n' > "$RUNNER_TEMP/lrs-secret"
+          openssl rand -hex 32 | tr -d '\n' > "$RUNNER_TEMP/catapult-test-secret"
+          jq -n --rawfile s "$RUNNER_TEMP/catapult-test-secret" \
+            '{config: {LLEDGER_CATAPULT_TEST_ROUTES: true, LLEDGER_CMI5_CONTENT_HOST: "127.0.0.1:8888", LLEDGER_CATAPULT_TEST_SECRET: $s}}' \
+            > .wp-env.override.json
+      - run: npx wp-env start
+      - name: Enable the LRS role and register a conformance client
+        run: |
+          npx wp-env run cli wp learning-ledger role enable lrs
+          hash="$(sha256sum "$RUNNER_TEMP/lrs-secret" | cut -d' ' -f1)"
+          npx wp-env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define
+      - name: Run the CATAPULT LTS
+        run: |
+          bin/catapult-lts.sh --site "$LLEDGER_SITE" \
+            --content-host http://127.0.0.1:8888 \
+            --key conformance --secret-file "$RUNNER_TEMP/lrs-secret" \
+            --test-secret-file "$RUNNER_TEMP/catapult-test-secret"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-catapult
+          path: conformance/raw/
+          if-no-files-found: warn
+      - run: npx wp-env stop
+        if: always()

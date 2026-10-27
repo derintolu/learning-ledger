@@ -1,0 +1,83 @@
+{
+    "name": "console",
+    "owner": null,
+    "flags": {
+        "endpoint": "http://localhost:8888/wp-json/learning-ledger/v1/xapi/",
+        "basicAuth": true,
+        "authUser": "conformance"
+    },
+    "uuid": "00000000-0000-4000-8000-000000000000",
+    "state": "finished",
+    "summary": { "total": 3, "passed": 1, "failed": 2, "version": "2.0.0" },
+    "log": {
+        "title": "All tests",
+        "name": "All tests",
+        "requirement": "",
+        "log": "",
+        "status": "failed",
+        "tests": [
+            {
+                "title": "Statements Requirements (Data 2.4)",
+                "name": "Statements Requirements",
+                "requirement": "Data 2.4",
+                "log": "",
+                "status": "failed",
+                "tests": [
+                    {
+                        "title": "An LRS accepts multipart statements with attachments (Attachments, Data 2.6, XAPI-00100)",
+                        "name": "An LRS accepts multipart statements with attachments",
+                        "requirement": "Attachments, Data 2.6, XAPI-00100",
+                        "log": "",
+                        "status": "failed",
+                        "tests": [
+                            {
+                                "title": "should accept a multipart request",
+                                "name": "should accept a multipart request",
+                                "requirement": "",
+                                "log": "",
+                                "status": "failed",
+                                "error": "expected 415 to equal 200",
+                                "tests": []
+                            }
+                        ]
+                    },
+                    {
+                        "title": "An LRS rejects a Statement with a malformed id (Statement ID, Data 2.4.1, XAPI-00200)",
+                        "name": "An LRS rejects a Statement with a malformed id",
+                        "requirement": "Statement ID, Data 2.4.1, XAPI-00200",
+                        "log": "",
+                        "status": "failed",
+                        "tests": [
+                            {
+                                "title": "fails when id is not a UUID",
+                                "name": "fails when id is not a UUID",
+                                "requirement": "",
+                                "log": "",
+                                "status": "failed",
+                                "error": "expected 200 to equal 400 | with a pipe",
+                                "tests": []
+                            }
+                        ]
+                    },
+                    {
+                        "title": "An LRS accepts a valid Statement (Statement, Data 2.4, XAPI-00300)",
+                        "name": "An LRS accepts a valid Statement",
+                        "requirement": "Statement, Data 2.4, XAPI-00300",
+                        "log": "",
+                        "status": "passed",
+                        "tests": [
+                            {
+                                "title": "accepts a minimal statement",
+                                "name": "accepts a minimal statement",
+                                "requirement": "",
+                                "log": "",
+                                "status": "passed",
+                                "tests": []
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+}
