@@ -1,0 +1,34 @@
+<?php
+/**
+ * Integration test bootstrap (WordPress test suite).
+ *
+ * @package LearningLedger
+ */
+
+$lledger_tests_dir = getenv( 'WP_TESTS_DIR' );
+if ( ! $lledger_tests_dir ) {
+	$lledger_tests_dir = getenv( 'WP_PHPUNIT__DIR' );
+}
+if ( ! $lledger_tests_dir ) {
+	$lledger_tests_dir = dirname( __DIR__ ) . '/vendor/wp-phpunit/wp-phpunit';
+}
+
+if ( ! file_exists( $lledger_tests_dir . '/includes/functions.php' ) ) {
+	exit( 'WordPress test suite not found. Set WP_TESTS_DIR or WP_PHPUNIT__DIR.' . PHP_EOL ); // phpcs:ignore WordPress.Security.EscapeOutput.ExitOutputNotEscaped
+}
+
+require_once dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/phpunitpolyfills-autoload.php';
+require_once $lledger_tests_dir . '/includes/functions.php';
+
+tests_add_filter(
+	'muplugins_loaded',
+	static function () {
+		$sensei = WP_PLUGIN_DIR . '/sensei-lms/sensei-lms.php';
+		if ( file_exists( $sensei ) ) {
+			require_once $sensei;
+		}
+		require_once dirname( __DIR__ ) . '/learning-ledger.php';
+	}
+);
+
+require $lledger_tests_dir . '/includes/bootstrap.php';

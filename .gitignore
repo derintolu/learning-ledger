@@ -2,3 +2,8 @@
 /vendor/
 /node_modules/
 .superpowers/
+/vendor-prefixed/
+/build/
+/.cache/
+/.wp-env.override.json
+/conformance/raw/tmp/

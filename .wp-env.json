@@ -1,0 +1,15 @@
+{
+	"phpVersion": "8.2",
+	"plugins": [ "." ],
+	"config": {
+		"LLEDGER_TESTING": true
+	},
+	"env": {
+		"tests": {
+			"plugins": [
+				".",
+				"https://downloads.wordpress.org/plugin/sensei-lms.4.26.4.zip"
+			]
+		}
+	}
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<phpunit bootstrap="tests/bootstrap-integration.php" colors="true" convertErrorsToExceptions="true" convertWarningsToExceptions="true" convertNoticesToExceptions="true" convertDeprecationsToExceptions="true">
+	<testsuites>
+		<testsuite name="integration">
+			<directory prefix="test-" suffix=".php">tests/integration</directory>
+		</testsuite>
+	</testsuites>
+	<groups>
+		<exclude>
+			<group>lifterlms-contract</group>
+			<group>tutor-contract</group>
+			<group>learnpress-contract</group>
+		</exclude>
+	</groups>
+</phpunit>
