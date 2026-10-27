@@ -8,7 +8,8 @@
 		"tests": {
 			"plugins": [
 				".",
-				"https://downloads.wordpress.org/plugin/sensei-lms.4.26.4.zip"
+				"https://downloads.wordpress.org/plugin/sensei-lms.4.26.4.zip",
+				"https://downloads.wordpress.org/plugin/sensei-certificates.2.6.0.zip"
 			]
 		}
 	}
