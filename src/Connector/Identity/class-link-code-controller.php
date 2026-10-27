@@ -11,8 +11,11 @@ use LearningLedger\Connector\Inbox\Inbox_Repository;
 use LearningLedger\Connector\Pairing\Connector_Keys;
 use LearningLedger\Connector\Pairing\Lrs_Client;
 use LearningLedger\Connector\Programs\Program_Repository;
+use LearningLedger\Db\Tables;
 use LearningLedger\Queue\Job_Queue;
+use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Util\Timestamp;
 use LearningLedger\Xapi\Agent_Identity;
 
 /**
@@ -75,9 +78,12 @@ final class Link_Code_Controller {
 	 * @return \WP_REST_Response
 	 */
 	public function handle( \WP_REST_Request $request ): \WP_REST_Response {
-		$user = get_current_user_id();
-		if ( ! self::take_attempt( $user ) ) {
-			return self::error( 429, 'too_many_attempts', 'Too many attempts. Try again in a few minutes.' );
+		$user  = get_current_user_id();
+		$retry = self::take_attempt( $user );
+		if ( $retry > 0 ) {
+			$res = self::error( 429, 'too_many_attempts', 'Too many attempts. Try again in a few minutes.' );
+			$res->header( 'Retry-After', (string) $retry );
+			return $res;
 		}
 
 		$code    = $request->get_param( 'code' );
@@ -101,7 +107,14 @@ final class Link_Code_Controller {
 			return self::failed();
 		}
 
-		( new Identity_Map() )->link( $identity, $user );
+		$map = new Identity_Map();
+		// Never take over a record another user holds, nor accept one of this site's own accounts.
+		$holder = $map->user_for_actor( $actor );
+		if ( ( null !== $holder && $holder !== $user ) || ( $identity->to_array()['account']['homePage'] ?? null ) === $map->home_page() ) {
+			return self::failed();
+		}
+
+		$map->link( $identity, $user );
 		( new Inbox_Repository() )->rematch_actor( $identity->hash() );
 		Job_Queue::push(
 			Link_Code_Module::JOB,
@@ -147,28 +160,41 @@ final class Link_Code_Controller {
 	}
 
 	/**
-	 * Count an attempt for a user.
+	 * Count an attempt for a user in a fixed window, atomically.
 	 *
 	 * @param integer $user User id.
 	 *
-	 * @return boolean False when the user is over the limit.
+	 * @return integer 0 when the attempt is allowed, else the seconds until the window ends.
 	 */
-	private static function take_attempt( int $user ): bool {
-		$key   = 'lledger_link_attempts_' . $user;
-		$state = get_transient( $key );
-		$now   = time();
-		if ( ! is_array( $state ) || (int) ( $state['reset'] ?? 0 ) <= $now ) {
-			$state = array(
-				'count' => 0,
-				'reset' => $now + self::WINDOW,
-			);
+	private static function take_attempt( int $user ): int {
+		global $wpdb;
+		$now    = Clock::now();
+		$at     = Timestamp::to_db( $now );
+		$cutoff = Timestamp::to_db( $now->modify( '-' . self::WINDOW . ' seconds' ) );
+		$bucket = 'link:' . $user;
+		$table  = Tables::name( 'ratelimit' );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery -- atomic upsert on a small plugin-owned table.
+		$wpdb->query(
+			$wpdb->prepare(
+				'INSERT INTO %i (bucket, tokens, updated_at) VALUES (%s, 1, %s)
+				ON DUPLICATE KEY UPDATE tokens = IF(updated_at <= %s, 1, tokens + 1), updated_at = IF(updated_at <= %s, %s, updated_at)',
+				$table,
+				$bucket,
+				$at,
+				$cutoff,
+				$cutoff,
+				$at
+			)
+		);
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT tokens, updated_at FROM %i WHERE bucket = %s', $table, $bucket ) );
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery
+		if ( ! $row || (int) $row->tokens <= self::ATTEMPTS ) {
+			return 0;
 		}
-		if ( (int) $state['count'] >= self::ATTEMPTS ) {
-			return false;
-		}
-		++$state['count'];
-		set_transient( $key, $state, max( 1, (int) $state['reset'] - $now ) );
-		return true;
+		$started = \DateTimeImmutable::createFromFormat( 'Y-m-d H:i:s.u', (string) $row->updated_at, new \DateTimeZone( 'UTC' ) );
+		$elapsed = $started ? $now->getTimestamp() - $started->getTimestamp() : 0;
+		return max( 1, self::WINDOW - $elapsed );
 	}
 
 	/**

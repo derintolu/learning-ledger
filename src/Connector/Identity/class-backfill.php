@@ -9,6 +9,7 @@ namespace LearningLedger\Connector\Identity;
 
 use LearningLedger\Connector\Inbox\Inbox_Processor;
 use LearningLedger\Connector\Inbox\Inbox_Repository;
+use LearningLedger\Connector\Inbox\More_Link;
 use LearningLedger\Connector\Pairing\Connector_Settings;
 use LearningLedger\Connector\Pairing\Lrs_Client;
 
@@ -65,6 +66,7 @@ final class Backfill {
 			'ascending' => 'true',
 		);
 		$added    = 0;
+		$complete = false;
 
 		for ( $page = 0; $page < self::MAX_PAGES; $page++ ) {
 			$res  = $this->client->xapi( 'GET', $resource, $query );
@@ -77,11 +79,19 @@ final class Backfill {
 					++$added;
 				}
 			}
-			$next = self::follow( is_string( $data['more'] ?? null ) ? $data['more'] : '', $settings );
-			if ( null === $next ) {
+			$more = is_string( $data['more'] ?? null ) ? $data['more'] : '';
+			if ( '' === $more ) {
+				$complete = true;
 				break;
 			}
+			$next = More_Link::resolve( $more, $settings );
+			if ( null === $next ) {
+				throw new \RuntimeException( 'The LRS returned a more link that cannot be followed.' );
+			}
 			list( $resource, $query ) = $next;
+		}
+		if ( ! $complete ) {
+			throw new \RuntimeException( 'The backfill reached its page limit before the end of the statements.' );
 		}
 
 		$processor = new Inbox_Processor();
@@ -90,77 +100,5 @@ final class Backfill {
 			$left = $processor->process_pending();
 		} while ( $left > 0 && ++$rounds < 100 );
 		return $added;
-	}
-
-	/**
-	 * Resource and query for a `more` IRL, or null when it is empty or leaves the LRS.
-	 *
-	 * @param string $more     The `more` value.
-	 * @param array  $settings Connector settings.
-	 *
-	 * @return array{0:string,1:array}|null
-	 */
-	private static function follow( string $more, array $settings ): ?array {
-		if ( '' === $more ) {
-			return null;
-		}
-		$parts = wp_parse_url( $more );
-		if ( ! is_array( $parts ) ) {
-			return null;
-		}
-		if ( isset( $parts['host'] ) || isset( $parts['scheme'] ) ) {
-			$allowed = false;
-			foreach ( array( $settings['lrs_url'], $settings['loopback_url'] ) as $candidate ) {
-				if ( '' !== $candidate && self::origin( $candidate ) === self::origin( $more ) ) {
-					$allowed = true;
-				}
-			}
-			if ( ! $allowed ) {
-				return null;
-			}
-		}
-
-		$path = (string) ( $parts['path'] ?? '' );
-		if ( '' !== $path && '/' === $path[0] ) {
-			$resource = null;
-			foreach ( array( $settings['loopback_url'], $settings['lrs_url'] ) as $candidate ) {
-				if ( '' === $candidate ) {
-					continue;
-				}
-				$prefix = trailingslashit( (string) wp_parse_url( $candidate, PHP_URL_PATH ) );
-				if ( 0 === strpos( $path, $prefix ) ) {
-					$resource = substr( $path, strlen( $prefix ) );
-					break;
-				}
-			}
-			if ( null === $resource ) {
-				return null;
-			}
-		} else {
-			$resource = $path;
-		}
-		if ( '' === $resource || false !== strpos( $resource, '..' ) ) {
-			return null;
-		}
-		$query = array();
-		parse_str( (string) ( $parts['query'] ?? '' ), $query );
-		return array( $resource, $query );
-	}
-
-	/**
-	 * Scheme, host and port of a URL.
-	 *
-	 * @param string $url URL.
-	 *
-	 * @return string
-	 */
-	private static function origin( string $url ): string {
-		$p = wp_parse_url( $url );
-		if ( ! is_array( $p ) || ! isset( $p['host'] ) ) {
-			return '';
-		}
-		$scheme = strtolower( (string) ( $p['scheme'] ?? '' ) );
-		$port   = $p['port'] ?? ( 'https' === $scheme ? 443 : 80 );
-		return $scheme . '://' . strtolower( $p['host'] ) . ':' . $port;
 	}
 }

@@ -125,10 +125,20 @@ class Backfill_Test extends WP_UnitTestCase {
 		}
 	}
 
-	public function test_a_foreign_more_link_is_not_followed() {
+	public function test_a_foreign_more_link_is_not_followed_and_the_run_fails() {
 		$this->replies = array( $this->page( array( $this->statement() ), 'https://evil.test/xapi/statements?x=1' ) );
+		try {
+			( new Backfill() )->run( self::factory()->user->create(), $this->actor );
+			$this->fail( 'expected a RuntimeException' );
+		} catch ( RuntimeException $e ) {
+			$this->assertCount( 1, $this->calls, 'the foreign link was not requested' );
+		}
+	}
+
+	public function test_hitting_the_page_cap_fails_the_run() {
+		$this->replies = array_fill( 0, Backfill::MAX_PAGES + 1, $this->page( array(), '/xapi/statements?cursor=n' ) );
+		$this->expectException( RuntimeException::class );
 		( new Backfill() )->run( self::factory()->user->create(), $this->actor );
-		$this->assertCount( 1, $this->calls );
 	}
 
 	public function test_an_lrs_error_throws_so_the_job_is_retried() {

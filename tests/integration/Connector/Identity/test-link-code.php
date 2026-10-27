@@ -44,7 +44,7 @@ class Link_Code_Test extends WP_UnitTestCase {
 		parent::set_up();
 		Installer::install();
 		global $wpdb, $wp_rest_server;
-		foreach ( array( 'conn_inbox', 'identity_links', 'jobs' ) as $t ) {
+		foreach ( array( 'conn_inbox', 'identity_links', 'jobs', 'ratelimit' ) as $t ) {
 			$wpdb->query( 'DELETE FROM ' . Tables::name( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
 		delete_option( Connector_Settings::OPTION );
@@ -250,7 +250,11 @@ class Link_Code_Test extends WP_UnitTestCase {
 		for ( $i = 0; $i < 5; $i++ ) {
 			$this->assertSame( 400, $this->post( $body )->get_status() );
 		}
-		$this->assertSame( 429, $this->post( $body )->get_status() );
+		$sixth = $this->post( $body );
+		$this->assertSame( 429, $sixth->get_status() );
+		$retry = (int) $sixth->get_headers()['Retry-After'];
+		$this->assertGreaterThan( 0, $retry );
+		$this->assertLessThanOrEqual( 600, $retry );
 		$this->assertCount( 5, $this->calls );
 
 		$other = self::factory()->user->create();
@@ -270,6 +274,50 @@ class Link_Code_Test extends WP_UnitTestCase {
 			$this->assertStringStartsWith( self::SERVER, $call['url'] );
 		}
 		$this->assertCount( 1, $this->calls, 'only the course server is called while linking' );
+	}
+
+	public function test_a_record_linked_to_another_user_is_not_taken_over() {
+		$owner = self::factory()->user->create();
+		( new Identity_Map() )->link( Agent_Identity::from_array( $this->actor ), $owner );
+
+		$this->login();
+		$res = $this->post(
+			array(
+				'code'    => 'ABCD-1234',
+				'program' => $this->program,
+			)
+		);
+
+		$this->assertSame( 400, $res->get_status() );
+		$this->assertSame( 'link_failed', $res->get_data()['code'] );
+		$this->assertSame( $owner, ( new Identity_Map() )->user_for_actor( $this->actor ) );
+	}
+
+	public function test_relinking_your_own_record_is_fine() {
+		$user = $this->login();
+		( new Identity_Map() )->link( Agent_Identity::from_array( $this->actor ), $user );
+		$res = $this->post(
+			array(
+				'code'    => 'ABCD-1234',
+				'program' => $this->program,
+			)
+		);
+		$this->assertSame( 200, $res->get_status() );
+	}
+
+	public function test_an_actor_of_this_site_is_refused() {
+		$other               = self::factory()->user->create();
+		$own                 = ( new Identity_Map() )->actor_for_user( $other );
+		$this->reply['body'] = wp_json_encode( array( 'actor' => $own ) );
+		$this->login();
+		$res = $this->post(
+			array(
+				'code'    => 'ABCD-1234',
+				'program' => $this->program,
+			)
+		);
+		$this->assertSame( 400, $res->get_status() );
+		$this->assertSame( $other, ( new Identity_Map() )->user_for_actor( $own ) );
 	}
 
 	public function test_the_job_handler_is_registered() {
