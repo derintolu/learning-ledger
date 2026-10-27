@@ -1,0 +1,15 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "learning-ledger/link-record",
+	"title": "Link my record",
+	"category": "widgets",
+	"description": "A form where a signed-in learner links a course-server record with a one-time code.",
+	"textdomain": "learning-ledger",
+	"attributes": {
+		"program": { "type": "integer", "default": 0 }
+	},
+	"supports": { "html": false },
+	"editorScript": "file:./index.js",
+	"render": "file:./render.php"
+}
