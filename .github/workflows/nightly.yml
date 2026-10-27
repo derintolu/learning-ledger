@@ -1,0 +1,71 @@
+name: Nightly LMS contracts
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lms:
+          - dir: sensei
+            slug: sensei-lms
+          - dir: lifterlms
+            slug: lifterlms
+          - dir: tutor
+            slug: tutor
+          - dir: learnpress
+            slug: learnpress
+    name: ${{ matrix.lms.slug }} (latest)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for the integration
+        id: present
+        run: |
+          if [ -f "integrations/${{ matrix.lms.dir }}/bootstrap.php" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "integrations/${{ matrix.lms.dir }}/bootstrap.php is absent; skipping."
+          fi
+      - if: steps.present.outputs.present == 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.present.outputs.present == 'true'
+        name: Install the latest wordpress.org release into the tests environment
+        run: |
+          cat > .wp-env.override.json <<'JSON'
+          {
+            "env": {
+              "tests": {
+                "plugins": [
+                  ".",
+                  "https://downloads.wordpress.org/plugin/${{ matrix.lms.slug }}.latest-stable.zip"
+                ]
+              }
+            }
+          }
+          JSON
+      - if: steps.present.outputs.present == 'true'
+        run: composer install --no-progress --prefer-dist
+      - if: steps.present.outputs.present == 'true'
+        run: composer prefix
+      - if: steps.present.outputs.present == 'true'
+        run: npm ci
+      - if: steps.present.outputs.present == 'true'
+        run: npm run build
+      - if: steps.present.outputs.present == 'true'
+        run: npx wp-env start
+      - if: steps.present.outputs.present == 'true'
+        run: composer test:integration -- --group ${{ matrix.lms.dir }}-contract
