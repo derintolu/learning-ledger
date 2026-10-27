@@ -336,7 +336,7 @@ final class Statement_Store {
 				$voids[ $k ][1] = $seqs[ $voiding_seq ] ?? $this->repo->find_by_seq( $voiding_seq );
 			}
 
-			do_action( 'learning_ledger/statements_stored', $rows, $p );
+			do_action_ref_array( 'learning_ledger/statements_stored', array( $rows, $p ) );
 
 			if ( false === $wpdb->query( 'COMMIT' ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 				throw new \RuntimeException( 'Could not commit the statements.' );
@@ -348,7 +348,7 @@ final class Statement_Store {
 
 		self::note_duration( microtime( true ) - $started, count( $rows ) );
 
-		do_action( 'learning_ledger/statements_committed', $rows );
+		do_action_ref_array( 'learning_ledger/statements_committed', array( $rows ) );
 		foreach ( $voids as [ $target, $voiding ] ) {
 			if ( $voiding instanceof Stored_Statement ) {
 				do_action( 'learning_ledger/statement_voided', $target, $voiding );

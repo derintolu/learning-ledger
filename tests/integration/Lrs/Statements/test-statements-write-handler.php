@@ -13,6 +13,7 @@ use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Http\Xapi_Request;
 use LearningLedger\Lrs\Http\Xapi_Response;
 use LearningLedger\Lrs\Statements\Statement_Repository;
+use LearningLedger\Lrs\Statements\Stored_Statement;
 use LearningLedger\Lrs\Statements\Statements_Write_Handler;
 use LearningLedger\Tests\Client_Factory;
 use LearningLedger\Util\Clock;
@@ -38,6 +39,8 @@ class Statements_Write_Handler_Test extends WP_UnitTestCase {
 	public function tear_down() {
 		Clock::freeze( null );
 		remove_all_filters( 'query' );
+		remove_all_actions( 'learning_ledger/statements_stored' );
+		remove_all_actions( 'learning_ledger/statements_committed' );
 		parent::tear_down();
 	}
 
@@ -111,6 +114,33 @@ class Statements_Write_Handler_Test extends WP_UnitTestCase {
 		$this->assertSame( 204, $this->send( 'PUT', array( 'statementId' => $id2 ), Json::encode_exact( $timed ) )->status() );
 		$timed['timestamp'] = '2026-10-27T11:00:00Z';
 		$this->assertSame( 409, $this->send( 'PUT', array( 'statementId' => $id2 ), Json::encode_exact( $timed ) )->status() );
+	}
+
+	public function test_single_statement_put_hands_listeners_a_row_list() {
+		$seen = array();
+		add_action(
+			'learning_ledger/statements_stored',
+			static function ( array $rows, Principal $p ) use ( &$seen ) {
+				$seen['stored']    = $rows;
+				$seen['principal'] = $p->client_id();
+			},
+			10,
+			2
+		);
+		add_action(
+			'learning_ledger/statements_committed',
+			static function ( array $rows ) use ( &$seen ) {
+				$seen['committed'] = $rows;
+			}
+		);
+		$id = Uuid::v4();
+		$this->assertSame( 204, $this->send( 'PUT', array( 'statementId' => $id ), Json::encode_exact( self::statement() ) )->status() );
+		$this->assertSame( $this->p->client_id(), $seen['principal'] );
+		foreach ( array( 'stored', 'committed' ) as $hook ) {
+			$this->assertCount( 1, $seen[ $hook ], $hook );
+			$this->assertInstanceOf( Stored_Statement::class, $seen[ $hook ][0], $hook );
+			$this->assertSame( $id, $seen[ $hook ][0]->id, $hook );
+		}
 	}
 
 	public function test_put_needs_matching_statement_id() {
