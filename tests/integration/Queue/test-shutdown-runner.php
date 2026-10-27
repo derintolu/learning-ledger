@@ -107,7 +107,8 @@ class Shutdown_Runner_Test extends WP_UnitTestCase {
 		$module->register();
 		$schedules = wp_get_schedules();
 		$this->assertSame( 60, $schedules['lledger_minute']['interval'] );
-		$this->assertNotFalse( has_action( 'init', array( $module, 'schedule' ) ) );
+		$this->assertTrue( has_filter( 'cron_schedules' ) );
+		$this->assertNotFalse( has_action( 'lledger_cron_minute' ) );
 		$module->schedule();
 		$module->schedule();
 		$this->assertCount( 1, _get_cron_array() ? array_filter( _get_cron_array(), static fn( $hooks ) => isset( $hooks['lledger_cron_minute'] ) ) : array() );
@@ -148,5 +149,19 @@ class Shutdown_Runner_Test extends WP_UnitTestCase {
 		$this->assertSame( 1, $jobs );
 		$this->assertSame( 31, $minute );
 		$this->assertSame( 3, $quarter );
+	}
+
+	public function test_registering_twice_does_not_double_fire_cron_minute() {
+		$minute = 0;
+		add_action(
+			'learning_ledger/cron_minute',
+			static function () use ( &$minute ) {
+				++$minute;
+			}
+		);
+		( new Queue_Module() )->register();
+		( new Queue_Module() )->register();
+		do_action( 'lledger_cron_minute' );
+		$this->assertSame( 1, $minute );
 	}
 }

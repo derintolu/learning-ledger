@@ -36,6 +36,9 @@ final class Queue_Module implements Module {
 	 * @return void
 	 */
 	public function register(): void {
+		if ( self::is_registered() ) {
+			return;
+		}
 		add_filter( 'cron_schedules', array( $this, 'add_schedule' ) ); // phpcs:ignore WordPress.WP.CronInterval.CronSchedulesInterval
 		add_action( 'init', array( $this, 'schedule' ) );
 		add_action( self::EVENT, array( $this, 'on_cron_minute' ) );
@@ -43,6 +46,26 @@ final class Queue_Module implements Module {
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\WP_CLI' ) ) {
 			\WP_CLI::add_command( 'learning-ledger cron', Cron_Command::class );
 		}
+	}
+
+	/**
+	 * Whether any instance of this module already has the cron action hooked.
+	 *
+	 * @return boolean
+	 */
+	private static function is_registered(): bool {
+		global $wp_filter;
+		if ( ! isset( $wp_filter[ self::EVENT ] ) ) {
+			return false;
+		}
+		foreach ( $wp_filter[ self::EVENT ]->callbacks as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				if ( is_array( $callback['function'] ) && ( $callback['function'][0] ?? null ) instanceof self ) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/**
