@@ -62,14 +62,23 @@ final class Program_Command {
 				if ( 'custody' === $flag && ! in_array( $value, Program_Module::CUSTODY, true ) ) {
 					\WP_CLI::error( 'custody must be one of: ' . implode( ', ', Program_Module::CUSTODY ) );
 				}
-				if ( 'iri-base' === $flag && '' === Program_Module::sanitize_iri_base( $value ) ) {
-					\WP_CLI::error( 'iri-base must be an absolute http(s) IRI.' );
+				if ( 'iri-base' === $flag ) {
+					$value = Program_Module::sanitize_iri_base( $value );
+					if ( '' === $value ) {
+						\WP_CLI::error( 'iri-base must be an absolute http(s) IRI.' );
+					}
 				}
-				if ( in_array( $flag, array( 'course-iri', 'course-server-url' ), true ) && '' === esc_url_raw( $value, array( 'http', 'https' ) ) ) {
-					\WP_CLI::error( $flag . ' must be an absolute http(s) URL.' );
+				if ( in_array( $flag, array( 'course-iri', 'course-server-url' ), true ) ) {
+					$value = Program_Module::sanitize_url( $value );
+					if ( '' === $value ) {
+						\WP_CLI::error( $flag . ' must be an absolute http(s) URL.' );
+					}
 				}
-				if ( 'au-url-template' === $flag && ! str_contains( $value, '{key}' ) ) {
-					\WP_CLI::error( 'au-url-template must contain {key}.' );
+				if ( 'au-url-template' === $flag ) {
+					$value = Program_Module::sanitize_au_url_template( $value );
+					if ( '' === $value ) {
+						\WP_CLI::error( 'au-url-template must be an http(s) URL containing {key}.' );
+					}
 				}
 				$set[ $meta_key ] = $value;
 			}
