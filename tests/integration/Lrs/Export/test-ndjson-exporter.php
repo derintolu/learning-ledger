@@ -330,12 +330,28 @@ class Ndjson_Exporter_Test extends WP_UnitTestCase {
 		$output = ob_get_clean();
 		$this->assertCount( 1, explode( "\n", rtrim( $output, "\n" ) ) );
 
-		$row  = $GLOBALS['wpdb']->get_row( 'SELECT event, actor, data FROM ' . Tables::name( 'audit' ) . " WHERE event = 'statements.export'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
-		$data = json_decode( $row['data'], true );
-		$this->assertSame( 'user:' . $user, $row['actor'] );
-		$this->assertSame( 1, $data['count'] );
-		$this->assertSame( self::REGISTRATION, $data['filters']['registration'] );
-		$this->assertStringNotContainsString( 'learner', $row['data'] );
+		$rows = $GLOBALS['wpdb']->get_results( 'SELECT event, actor, data FROM ' . Tables::name( 'audit' ) . " WHERE event LIKE 'statements.export%' ORDER BY id", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
+		$this->assertSame( array( 'statements.export', 'statements.export_done' ), array_column( $rows, 'event' ) );
+		$start = json_decode( $rows[0]['data'], true );
+		$end   = json_decode( $rows[1]['data'], true );
+		$this->assertSame( 'user:' . $user, $rows[0]['actor'] );
+		$this->assertSame( self::REGISTRATION, $start['filters']['registration'] );
+		$this->assertSame( 1, $end['count'] );
+		$this->assertTrue( $end['complete'] );
+		$this->assertStringNotContainsString( 'learner', $rows[0]['data'] . $rows[1]['data'] );
+	}
+
+	public function test_a_head_request_streams_nothing_and_audits_nothing() {
+		$this->add( 1 );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		$response = $this->call();
+		$request  = new WP_REST_Request( 'HEAD', '/learning-ledger/v1/export' );
+		ob_start();
+		$served = ( new Export_Module() )->serve( false, $response, $request, rest_get_server() );
+		$output = ob_get_clean();
+		$this->assertTrue( $served );
+		$this->assertSame( '', $output );
+		$this->assertSame( 0, (int) $GLOBALS['wpdb']->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'audit' ) . " WHERE event LIKE 'statements.export%'" ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 	}
 
 	// WP-CLI.
@@ -348,7 +364,8 @@ class Ndjson_Exporter_Test extends WP_UnitTestCase {
 		$this->assertSame( 2, $count );
 		$this->assertSame( 2, count( file( $this->file ) ) );
 		$this->assertSame( '0600', substr( sprintf( '%o', fileperms( $this->file ) ), -4 ) );
-		$this->assertSame( 1, (int) $GLOBALS['wpdb']->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'audit' ) . " WHERE event = 'statements.export' AND actor = 'cli'" ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
+		$rows = $GLOBALS['wpdb']->get_col( 'SELECT event FROM ' . Tables::name( 'audit' ) . " WHERE actor = 'cli' AND event LIKE 'statements.export%' ORDER BY id" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
+		$this->assertSame( array( 'statements.export', 'statements.export_done' ), $rows );
 	}
 
 	public function test_cli_export_refuses_the_web_root_and_existing_files() {

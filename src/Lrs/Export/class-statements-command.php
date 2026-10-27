@@ -48,7 +48,7 @@ final class Statements_Command {
 	public function export( array $args, array $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- WP-CLI signature.
 		try {
 			$count = self::export_to_file( (string) ( $assoc_args['file'] ?? '' ), array_intersect_key( $assoc_args, array_flip( Export_Controller::FILTERS ) ) );
-		} catch ( Invalid_Input $e ) {
+		} catch ( Invalid_Input | \RuntimeException $e ) {
 			\WP_CLI::error( $e->getMessage() );
 		}
 		\WP_CLI::success( 'Exported ' . $count . ' statements.' );
@@ -103,24 +103,34 @@ final class Statements_Command {
 		}
 		chmod( $path, 0600 );
 
-		$count = 0;
+		Export_Module::audit_export_start( 'cli', $described, self::ACTOR );
+		$count    = 0;
+		$complete = false;
 		try {
 			( new Ndjson_Exporter() )->stream(
 				$filters,
 				static function ( string $line ) use ( $handle, &$count ): void {
-					if ( false === fwrite( $handle, $line ) ) {
+					if ( strlen( $line ) !== fwrite( $handle, $line ) ) {
 						throw new Invalid_Input( 'The export file could not be written.', 'write_failed' );
 					}
 					++$count;
 				}
 			);
+			if ( ! fclose( $handle ) ) {
+				$handle = null;
+				throw new Invalid_Input( 'The export file could not be written.', 'write_failed' );
+			}
+			$handle   = null;
+			$complete = true;
 		} catch ( \Throwable $e ) {
-			fclose( $handle );
+			if ( is_resource( $handle ) ) {
+				fclose( $handle );
+			}
 			unlink( $path );
 			throw $e;
+		} finally {
+			Export_Module::audit_export_end( 'cli', $count, $complete, self::ACTOR );
 		}
-		fclose( $handle );
-		Export_Module::audit_export( 'cli', $count, $described, self::ACTOR );
 		return $count;
 	}
 
@@ -144,9 +154,10 @@ final class Statements_Command {
 			throw new Invalid_Input( 'The file already exists; it is not overwritten.', 'file_exists' );
 		}
 		$uploads = wp_upload_dir( null, false );
+		// Compared case-insensitively: on a case-insensitive file system a differently cased path is the same directory.
 		foreach ( array( ABSPATH, WP_CONTENT_DIR, (string) ( $uploads['basedir'] ?? '' ) ) as $root ) {
 			$root = '' === $root ? false : realpath( $root );
-			if ( false !== $root && ( $dir === $root || str_starts_with( $dir . '/', rtrim( $root, '/' ) . '/' ) ) ) {
+			if ( false !== $root && str_starts_with( strtolower( $dir ) . '/', strtolower( rtrim( $root, '/' ) ) . '/' ) ) {
 				throw new Invalid_Input( 'The file would be inside the web root; choose a directory outside WordPress.', 'unsafe_path' );
 			}
 		}

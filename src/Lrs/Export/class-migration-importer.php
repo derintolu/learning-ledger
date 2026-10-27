@@ -9,15 +9,13 @@ namespace LearningLedger\Lrs\Export;
 
 use LearningLedger\Audit\Audit_Log;
 use LearningLedger\Db\Tables;
-use LearningLedger\Lrs\Resources\Activity_Repository;
-use LearningLedger\Lrs\Resources\Agent_Repository;
 use LearningLedger\Lrs\Statements\Ref_Indexer;
 use LearningLedger\Lrs\Statements\Statement_Repository;
+use LearningLedger\Lrs\Statements\Statement_Store;
 use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Json;
 use LearningLedger\Util\Timestamp;
 use LearningLedger\Util\Uuid;
-use LearningLedger\Xapi\Agent_Identity;
 
 // phpcs:disable WordPress.DB.DirectDatabaseQuery -- transaction control.
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages are never echoed raw.
@@ -38,6 +36,11 @@ final class Migration_Importer {
 	public const AUTHORITY_KEY = 'import';
 
 	/**
+	 * Longest line accepted, newline excluded (the largest request the LRS takes).
+	 */
+	public const MAX_LINE_BYTES = 2097152;
+
+	/**
 	 * Most problems kept for the caller.
 	 */
 	private const MAX_PROBLEMS = 100;
@@ -55,6 +58,20 @@ final class Migration_Importer {
 	private Statement_Repository $repo;
 
 	/**
+	 * Statement store, for the index fields, the resource records and the pending-void check.
+	 *
+	 * @var Statement_Store
+	 */
+	private Statement_Store $store;
+
+	/**
+	 * Targets of voiding statements imported in this run before the target itself.
+	 *
+	 * @var array<string,int>
+	 */
+	private array $awaiting_target = array();
+
+	/**
 	 * Why lines were rejected.
 	 *
 	 * @var array<array{line:int,reason:string}>
@@ -67,7 +84,8 @@ final class Migration_Importer {
 	 * @param Statement_Repository|null $repo Statement rows.
 	 */
 	public function __construct( ?Statement_Repository $repo = null ) {
-		$this->repo = $repo ?? new Statement_Repository();
+		$this->repo  = $repo ?? new Statement_Repository();
+		$this->store = new Statement_Store( $this->repo );
 	}
 
 	/**
@@ -88,20 +106,31 @@ final class Migration_Importer {
 			throw new Invalid_Input( 'The file cannot be read.', 'unreadable_file' );
 		}
 
-		$this->problems = array();
-		$result         = array(
+		$this->problems        = array();
+		$this->awaiting_target = array();
+		$result                = array(
 			'imported' => 0,
 			'skipped'  => 0,
 			'rejected' => 0,
 		);
-		$number         = 0;
-		while ( false !== ( $line = fgets( $handle ) ) ) { // phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition -- reading line by line.
+		$number                = 0;
+		while ( false !== ( $line = fgets( $handle, self::MAX_LINE_BYTES + 2 ) ) ) { // phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition -- reading line by line.
 			++$number;
+			$too_long = ! str_ends_with( $line, "\n" ) && ! feof( $handle );
+			if ( $too_long ) {
+				// Skip the rest of the line without keeping it.
+				while ( false !== ( $rest = fgets( $handle, 65536 ) ) && ! str_ends_with( $rest, "\n" ) ) { // phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition -- draining one line.
+					unset( $rest );
+				}
+			}
 			$line = rtrim( $line, "\r\n" );
-			if ( '' === trim( $line ) ) {
+			if ( ! $too_long && '' === trim( $line ) ) {
 				continue;
 			}
 			try {
+				if ( $too_long ) {
+					throw new Invalid_Input( 'The line is longer than ' . self::MAX_LINE_BYTES . ' bytes.', 'line_too_long' );
+				}
 				$outcome = $this->import_line( $line );
 			} catch ( Invalid_Input $e ) {
 				$outcome = $e->getMessage();
@@ -241,53 +270,41 @@ final class Migration_Importer {
 		}
 
 		$object = $st['object'];
-		$kind   = is_string( $object['objectType'] ?? null ) ? $object['objectType'] : 'Activity';
-		switch ( $kind ) {
-			case 'Agent':
-			case 'Group':
-				$object_hash = Ref_Indexer::agent_hash( $object ) ?? sha1( 'anon:', true );
-				break;
-			case 'StatementRef':
-				$object_hash = sha1( 'ref:' . strtolower( (string) ( $object['id'] ?? '' ) ), true );
-				break;
-			case 'SubStatement':
-				$object_hash = sha1( 'sub:' . strtolower( $id ), true );
-				break;
-			default:
-				$object_hash = sha1( (string) ( $object['id'] ?? '' ), true );
+		$kind   = $object['objectType'] ?? 'Activity';
+		if ( ! is_string( $kind ) || ( ! in_array( $kind, array( 'Agent', 'Group', 'SubStatement' ), true ) && ! is_string( $object['id'] ?? null ) ) ) {
+			throw new Invalid_Input( 'The statement object is invalid.', 'invalid_statement' );
+		}
+		if ( isset( $st['context'] ) && ! is_array( $st['context'] ) ) {
+			throw new Invalid_Input( 'The statement context is invalid.', 'invalid_statement' );
 		}
 
-		$home = null;
-		try {
-			$identity = Agent_Identity::from_array( $st['actor'] );
-			$home     = null === $identity->home_page() ? null : Agent_Identity::home_hash( $identity->home_page() );
-		} catch ( Invalid_Input $e ) {
-			unset( $e );
-		}
-
-		$voids        = null;
-		$registration = $st['context']['registration'] ?? null;
+		$voids = null;
 		if ( 'http://adlnet.gov/expapi/verbs/voided' === $st['verb']['id'] && 'StatementRef' === $kind && is_string( $object['id'] ?? null ) && Uuid::is_valid( $object['id'] ) ) {
 			$voids = strtolower( $object['id'] );
 		}
 
-		return array(
-			'statement_id'     => strtolower( $id ),
-			'stored'           => Timestamp::to_db( $stored ),
-			'timestamp'        => Timestamp::to_db( $timestamp ),
-			'version'          => $version,
-			'verb_hash'        => sha1( $st['verb']['id'], true ),
-			'actor_hash'       => Ref_Indexer::agent_hash( $st['actor'] ) ?? sha1( 'anon:', true ),
-			'actor_home_hash'  => $home,
-			'object_kind'      => $kind,
-			'object_hash'      => $object_hash,
-			'registration'     => is_string( $registration ) && Uuid::is_valid( $registration ) ? strtolower( $registration ) : null,
-			'authority_client' => self::AUTHORITY_KEY,
-			'is_voiding'       => null !== $voids,
-			'voids_id'         => $voids,
-			'voided'           => false,
-			'content_sha256'   => hex2bin( $sha ),
-			'body'             => $raw,
+		$st['id'] = strtolower( $id );
+		$index    = Statement_Store::index_fields( $st );
+		if ( null !== $index['registration'] && ! Uuid::is_valid( $index['registration'] ) ) {
+			$index['registration'] = null;
+		}
+
+		return array_merge(
+			array(
+				'statement_id' => strtolower( $id ),
+				'stored'       => Timestamp::to_db( $stored ),
+				'timestamp'    => Timestamp::to_db( $timestamp ),
+				'version'      => $version,
+			),
+			$index,
+			array(
+				'authority_client' => self::AUTHORITY_KEY,
+				'is_voiding'       => null !== $voids,
+				'voids_id'         => $voids,
+				'voided'           => false,
+				'content_sha256'   => hex2bin( $sha ),
+				'body'             => $raw,
+			)
 		);
 	}
 
@@ -302,6 +319,7 @@ final class Migration_Importer {
 	 */
 	private function store( array $st, array $row ): void {
 		global $wpdb;
+		$awaiting = array();
 		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
 			throw new \RuntimeException( 'Could not start the import transaction.' );
 		}
@@ -314,58 +332,34 @@ final class Migration_Importer {
 
 			if ( null !== $row['voids_id'] ) {
 				if ( ! $this->repo->mark_voided( $row['voids_id'] ) && null === $this->repo->find( $row['voids_id'] ) ) {
-					$this->repo->add_pending_void( $row['voids_id'], $seq );
+					// The target comes later in this file (kept in memory, the import has no authority to leave a pending void behind).
+					$awaiting[ $row['voids_id'] ] = true;
 				}
-			} elseif ( array() !== $this->repo->take_pending_voids( $row['statement_id'] ) ) {
-				$this->repo->mark_voided( $row['statement_id'] );
+			} else {
+				$voided = isset( $this->awaiting_target[ $row['statement_id'] ] );
+				// Voids left pending by live writes apply only if their writer may still void this statement.
+				foreach ( $this->repo->take_pending_voids( $row['statement_id'] ) as $voiding_seq ) {
+					$voided = $voided || $this->store->pending_void_allowed(
+						$voiding_seq,
+						array(
+							'row' => array( 'statement' => $st ),
+							'id'  => $row['statement_id'],
+						)
+					);
+				}
+				if ( $voided ) {
+					$this->repo->mark_voided( $row['statement_id'] );
+				}
 			}
 
-			$this->record_activities_and_agents( $st );
+			$this->store->record_activities_and_agents( $st, false );
 			if ( false === $wpdb->query( 'COMMIT' ) ) {
 				throw new \RuntimeException( 'Could not commit the imported statement.' );
 			}
+			$this->awaiting_target = array_merge( array_diff_key( $this->awaiting_target, array( $row['statement_id'] => true ) ), $awaiting );
 		} catch ( \Throwable $e ) {
 			$wpdb->query( 'ROLLBACK' );
 			throw $e;
-		}
-	}
-
-	/**
-	 * Record the activities and agents a statement mentions, so the resource endpoints know them.
-	 *
-	 * @param array $st Decoded statement.
-	 *
-	 * @return void
-	 */
-	private function record_activities_and_agents( array $st ): void {
-		$activities = new Activity_Repository();
-		$agents     = new Agent_Repository();
-		$agent_list = array( $st['actor'], $st['authority'] );
-		$context    = is_array( $st['context'] ?? null ) ? $st['context'] : array();
-
-		$object = $st['object'];
-		$kind   = is_string( $object['objectType'] ?? null ) ? $object['objectType'] : 'Activity';
-		if ( 'Activity' === $kind && is_string( $object['id'] ?? null ) ) {
-			$activities->merge( $object['id'], is_array( $object['definition'] ?? null ) ? $object['definition'] : null, true );
-		} elseif ( 'Agent' === $kind || 'Group' === $kind ) {
-			$agent_list[] = $object;
-		}
-		foreach ( array( 'parent', 'grouping', 'category', 'other' ) as $key ) {
-			foreach ( Ref_Indexer::activity_list( $context['contextActivities'][ $key ] ?? null ) as $activity ) {
-				$activities->merge( $activity['id'], is_array( $activity['definition'] ?? null ) ? $activity['definition'] : null, true );
-			}
-		}
-		foreach ( array( 'instructor', 'team' ) as $key ) {
-			if ( is_array( $context[ $key ] ?? null ) ) {
-				$agent_list[] = $context[ $key ];
-			}
-		}
-		foreach ( $agent_list as $agent ) {
-			try {
-				$agents->record( Agent_Identity::from_array( $agent ) );
-			} catch ( Invalid_Input $e ) {
-				unset( $e );
-			}
 		}
 	}
 }

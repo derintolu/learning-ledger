@@ -367,7 +367,7 @@ final class Statement_Store {
 	 *
 	 * @return boolean
 	 */
-	private function pending_void_allowed( int $voiding_seq, array $item ): bool {
+	public function pending_void_allowed( int $voiding_seq, array $item ): bool {
 		$voiding = $this->repo->find_by_seq( $voiding_seq );
 		$voider  = null === $voiding ? null : self::principal_for( $voiding->authority_client );
 		if ( null !== $voider && $voider->can( Scopes::VOID ) && $voider->bindings()->allows_statement( $item['row']['statement'] ) ) {
@@ -429,6 +429,41 @@ final class Statement_Store {
 	 * @return array
 	 */
 	private function row( array $st, string $body, Principal $p, string $version, ?string $target ): array {
+		try {
+			$timestamp = Timestamp::parse( $st['timestamp'], $version );
+		} catch ( Invalid_Input $e ) {
+			$timestamp = Timestamp::parse( $st['timestamp'], '1.0.3' );
+		}
+
+		return array_merge(
+			array(
+				'statement'    => $st,
+				'statement_id' => $st['id'],
+				'stored'       => Timestamp::to_db( Timestamp::parse( $st['stored'], '2.0.0' ) ),
+				'timestamp'    => Timestamp::to_db( $timestamp ),
+				'version'      => $st['version'],
+			),
+			self::index_fields( $st ),
+			array(
+				'authority_client' => $p->authority_key(),
+				'is_voiding'       => null !== $target,
+				'voids_id'         => $target,
+				'voided'           => false,
+				'content_sha256'   => hash( 'sha256', $body, true ),
+				'body'             => $body,
+			)
+		);
+	}
+
+	/**
+	 * The indexed columns derived from a normalised statement (shared with the migration importer).
+	 *
+	 * @param array $st Normalised statement.
+	 *
+	 * @return array{verb_hash:string,actor_hash:string,actor_home_hash:?string,object_kind:string,object_hash:string,registration:?string}
+	 *               Hashes as raw bytes, registration as a lowercase UUID.
+	 */
+	public static function index_fields( array $st ): array {
 		$home = null;
 		try {
 			$identity = Agent_Identity::from_array( $st['actor'] );
@@ -455,30 +490,13 @@ final class Statement_Store {
 		}
 
 		$registration = $st['context']['registration'] ?? null;
-		try {
-			$timestamp = Timestamp::parse( $st['timestamp'], $version );
-		} catch ( Invalid_Input $e ) {
-			$timestamp = Timestamp::parse( $st['timestamp'], '1.0.3' );
-		}
-
 		return array(
-			'statement'        => $st,
-			'statement_id'     => $st['id'],
-			'stored'           => Timestamp::to_db( Timestamp::parse( $st['stored'], '2.0.0' ) ),
-			'timestamp'        => Timestamp::to_db( $timestamp ),
-			'version'          => $st['version'],
-			'verb_hash'        => sha1( $st['verb']['id'], true ),
-			'actor_hash'       => Ref_Indexer::agent_hash( $st['actor'] ) ?? sha1( 'anon:', true ),
-			'actor_home_hash'  => $home,
-			'object_kind'      => $kind,
-			'object_hash'      => $object_hash,
-			'registration'     => is_string( $registration ) ? strtolower( $registration ) : null,
-			'authority_client' => $p->authority_key(),
-			'is_voiding'       => null !== $target,
-			'voids_id'         => $target,
-			'voided'           => false,
-			'content_sha256'   => hash( 'sha256', $body, true ),
-			'body'             => $body,
+			'verb_hash'       => sha1( $st['verb']['id'], true ),
+			'actor_hash'      => Ref_Indexer::agent_hash( $st['actor'] ) ?? sha1( 'anon:', true ),
+			'actor_home_hash' => $home,
+			'object_kind'     => $kind,
+			'object_hash'     => $object_hash,
+			'registration'    => is_string( $registration ) ? strtolower( $registration ) : null,
 		);
 	}
 
@@ -515,7 +533,7 @@ final class Statement_Store {
 	 *
 	 * @return void
 	 */
-	private function record_activities_and_agents( array $st, bool $may_define ): void {
+	public function record_activities_and_agents( array $st, bool $may_define ): void {
 		$parts = array( $st );
 		if ( 'SubStatement' === ( $st['object']['objectType'] ?? null ) ) {
 			$parts[] = $st['object'];

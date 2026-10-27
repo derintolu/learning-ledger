@@ -47,6 +47,9 @@ final class Export_Module implements Module {
 		if ( $served || Export_Controller::ROUTE !== $request->get_route() || ! $result instanceof \WP_REST_Response || 200 !== $result->get_status() || ! current_user_can( Capabilities::EXPORT ) ) {
 			return $served;
 		}
+		if ( 'HEAD' === $request->get_method() ) {
+			return true; // Headers only: nothing is read and nothing is exported.
+		}
 		$filters = Export_Controller::filters( $request );
 		try {
 			$described = Ndjson_Exporter::describe( $filters );
@@ -57,7 +60,10 @@ final class Export_Module implements Module {
 		if ( function_exists( 'set_time_limit' ) ) {
 			@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, Squiz.PHP.DiscouragedFunctions.Discouraged -- a large export outlasts the default limit; may be disabled by the host.
 		}
+		$actor   = 'user:' . get_current_user_id();
 		$written = 0;
+		$done    = false;
+		self::audit_export_start( 'rest', $described, $actor );
 		try {
 			( new Ndjson_Exporter() )->stream(
 				$filters,
@@ -69,29 +75,50 @@ final class Export_Module implements Module {
 					}
 				}
 			);
+			$done = true;
 		} finally {
-			self::audit_export( 'rest', $written, $described, 'user:' . get_current_user_id() );
+			self::audit_export_end( 'rest', $written, $done, $actor );
 		}
 		return true;
 	}
 
 	/**
-	 * Record an export in the audit log (counts and filter values only, never statements).
+	 * Record that an export began (counts and filter values only, never statements).
 	 *
-	 * @param string  $channel Either `rest` or `cli`.
-	 * @param integer $count   Lines written.
-	 * @param array   $filters Ndjson_Exporter::describe().
-	 * @param string  $actor   Audit actor.
+	 * @param string $channel Either `rest` or `cli`.
+	 * @param array  $filters Ndjson_Exporter::describe().
+	 * @param string $actor   Audit actor.
 	 *
 	 * @return void
 	 */
-	public static function audit_export( string $channel, int $count, array $filters, string $actor ): void {
+	public static function audit_export_start( string $channel, array $filters, string $actor ): void {
 		Audit_Log::record(
 			'statements.export',
 			array(
 				'channel' => $channel,
-				'count'   => $count,
 				'filters' => $filters,
+			),
+			$actor
+		);
+	}
+
+	/**
+	 * Record how an export ended.
+	 *
+	 * @param string  $channel  Either `rest` or `cli`.
+	 * @param integer $count    Lines written.
+	 * @param boolean $complete Whether every matching statement was written.
+	 * @param string  $actor    Audit actor.
+	 *
+	 * @return void
+	 */
+	public static function audit_export_end( string $channel, int $count, bool $complete, string $actor ): void {
+		Audit_Log::record(
+			'statements.export_done',
+			array(
+				'channel'  => $channel,
+				'count'    => $count,
+				'complete' => $complete,
 			),
 			$actor
 		);
