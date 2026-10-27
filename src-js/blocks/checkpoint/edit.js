@@ -4,6 +4,7 @@ import {
 	InspectorControls,
 	useBlockProps,
 } from '@wordpress/block-editor';
+import { useRef } from '@wordpress/element';
 import {
 	Button,
 	PanelBody,
@@ -21,6 +22,13 @@ import {
  * @param {Array}    props.fields  Field descriptors: { name, label, options? }.
  */
 function Rows( { rows, onChange, blank, fields } ) {
+	// Stable per-row keys, kept parallel to rows (never stored in attributes).
+	const keys = useRef( [] );
+	const next = useRef( 0 );
+	while ( keys.current.length < rows.length ) {
+		keys.current.push( next.current++ );
+	}
+	keys.current.length = rows.length;
 	const update = ( i, name, value ) =>
 		onChange(
 			rows.map( ( r, j ) => ( j === i ? { ...r, [ name ]: value } : r ) )
@@ -28,15 +36,17 @@ function Rows( { rows, onChange, blank, fields } ) {
 	return (
 		<>
 			{ rows.map( ( row, i ) => (
-				<div key={ i } className="lledger-row">
+				<div key={ keys.current[ i ] } className="lledger-row">
 					{ fields.map( ( f ) =>
 						f.options ? (
 							<SelectControl
 								key={ f.name }
 								label={ f.label }
-								value={ row[ f.name ] ?? f.options[ 0 ].value }
+								value={ String( row[ f.name ] ?? f.options[ 0 ].value ) }
 								options={ f.options }
-								onChange={ ( v ) => update( i, f.name, v ) }
+								onChange={ ( v ) =>
+									update( i, f.name, f.boolean ? v === 'true' : v )
+								}
 							/>
 						) : (
 							<TextControl
@@ -50,7 +60,10 @@ function Rows( { rows, onChange, blank, fields } ) {
 					<Button
 						variant="link"
 						isDestructive
-						onClick={ () => onChange( rows.filter( ( _, j ) => j !== i ) ) }
+						onClick={ () => {
+							keys.current.splice( i, 1 );
+							onChange( rows.filter( ( _, j ) => j !== i ) );
+						} }
 					>
 						{ __( 'Remove', 'learning-ledger' ) }
 					</Button>
@@ -124,10 +137,11 @@ export default function Edit( { attributes, setAttributes } ) {
 							{ name: 'when', label: __( 'When', 'learning-ledger' ) },
 							{
 								name: 'success',
+								boolean: true,
 								label: __( 'Success', 'learning-ledger' ),
 								options: [
-									{ label: 'false', value: false },
-									{ label: 'true', value: true },
+									{ label: 'false', value: 'false' },
+									{ label: 'true', value: 'true' },
 								],
 							},
 							{ name: 'to', label: __( 'To', 'learning-ledger' ) },

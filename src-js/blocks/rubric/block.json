@@ -10,7 +10,7 @@
 	"attributes": {
 		"text": { "type": "string", "default": "" }
 	},
-	"supports": { "html": false, "inserter": true },
+	"supports": { "html": false },
 	"editorScript": "file:./index.js",
 	"render": "file:./render.php"
 }

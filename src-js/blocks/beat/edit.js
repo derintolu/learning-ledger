@@ -7,7 +7,7 @@ import {
 import { Notice, PanelBody, TextControl } from '@wordpress/components';
 import { useSelect } from '@wordpress/data';
 
-// Mirror of LearningLedger\Blocks\Markdown_Allowlist::BLOCKS.
+// Mirrors LearningLedger\Blocks\Markdown_Allowlist::BLOCKS, plus the checkpoint block (not exported as Markdown).
 export const ALLOWED = [
 	'core/paragraph',
 	'core/heading',
