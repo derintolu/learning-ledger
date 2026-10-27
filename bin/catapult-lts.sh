@@ -46,6 +46,8 @@ fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=versions.env
 . "$root/bin/versions.env"
+# shellcheck source=redact.sh
+. "$root/bin/redact.sh"
 catapult_dir="$root/.cache/catapult"
 lts_dir="$catapult_dir/lts"
 out_dir="$root/conformance/raw"
@@ -72,6 +74,7 @@ if [ -n "$test_secret_file" ]; then
 	test_secret="$(tr -d '\r\n' < "$test_secret_file")"
 fi
 
+console_log="$root/.cache/catapult-last-run.txt"
 status=0
 (
 	cd "$lts_dir"
@@ -82,18 +85,14 @@ status=0
 	LLEDGER_LRS_SECRET="$lrs_secret" \
 	LLEDGER_CATAPULT_TEST_SECRET="$test_secret" \
 	npx jest --json --outputFile="$out_file"
-) || status=$?
+) > "$console_log" 2>&1 || status=$?
 
+lledger_redact "$console_log" "$key" "$lrs_secret" "$test_secret"
+cat "$console_log"
 if [ ! -s "$out_file" ]; then
 	echo "The LTS produced no report." >&2
 	exit 1
 fi
-for s in "$lrs_secret" "$test_secret"; do
-	if [ -n "$s" ] && grep -qF -- "$s" "$out_file"; then
-		rm -f "$out_file"
-		echo "Refusing to save a report that contains a secret." >&2
-		exit 1
-	fi
-done
+lledger_redact "$out_file" "$key" "$lrs_secret" "$test_secret"
 echo "Wrote ${out_file#"$root"/} (suite exit status: $status)"
 exit "$status"

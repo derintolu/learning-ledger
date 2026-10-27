@@ -46,6 +46,8 @@ esac
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=versions.env
 . "$root/bin/versions.env"
+# shellcheck source=redact.sh
+. "$root/bin/redact.sh"
 suite_dir="$root/.cache/lrs-conformance"
 out_dir="$root/conformance/raw"
 out_file="$out_dir/lrs-${xapi}-$(date +%Y%m%d).json"
@@ -81,19 +83,17 @@ status=0
 secret="$(tr -d '\r\n' < "$secret_file")"
 (cd "$suite_dir" && LLEDGER_SUITE_PASSWORD="$secret" node -r "$preload" bin/console_runner.js "${args[@]}" > "$root/.cache/lrs-last-run.txt" 2>&1) || status=$?
 
+# Only a log written by this run counts (the marker predates the run); never fall back to an old one.
 log="$(find "$suite_dir/logs" -name '*.log' -newer "$marker" -type f 2>/dev/null | head -n 1)"
 if [ -z "$log" ]; then
-	# The marker was created after the run; fall back to the newest log file.
-	log="$(ls -t "$suite_dir"/logs/*.log 2>/dev/null | head -n 1 || true)"
-fi
-if [ -z "$log" ]; then
-	echo "The suite produced no run log. Console output is in .cache/lrs-last-run.txt" >&2
-	exit 1
-fi
-if [ -n "$secret" ] && grep -qF -- "$secret" "$log"; then
-	echo "Refusing to save a run log that contains the secret." >&2
+	lledger_redact "$root/.cache/lrs-last-run.txt" "$key" "$secret" || true
+	cat "$root/.cache/lrs-last-run.txt" >&2
+	echo "The suite produced no new run log." >&2
 	exit 1
 fi
 cp "$log" "$out_file"
+lledger_redact "$out_file" "$key" "$secret"
+lledger_redact "$root/.cache/lrs-last-run.txt" "$key" "$secret"
+tail -n 40 "$root/.cache/lrs-last-run.txt"
 echo "Wrote ${out_file#"$root"/} (suite exit status: $status)"
 exit "$status"

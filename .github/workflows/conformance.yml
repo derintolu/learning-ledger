@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 env:
   WP_ENV_PORT: 8888
   LLEDGER_SITE: http://localhost:8888
