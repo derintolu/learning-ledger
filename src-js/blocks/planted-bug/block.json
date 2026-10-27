@@ -1,0 +1,21 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "learning-ledger/planted-bug",
+	"title": "Planted bug",
+	"category": "text",
+	"description": "A file with a deliberate bug the learner finds and fixes.",
+	"textdomain": "learning-ledger",
+	"attributes": {
+		"key": { "type": "string", "default": "" },
+		"file": { "type": "string", "default": "" },
+		"code": { "type": "string", "default": "" },
+		"hint": { "type": "string", "default": "" },
+		"revealAfter": { "type": [ "integer", "null" ], "default": null },
+		"explanation": { "type": "string", "default": "" },
+		"fixChecks": { "type": "array", "default": [] }
+	},
+	"supports": { "html": false },
+	"editorScript": "file:./index.js",
+	"render": "file:./render.php"
+}
