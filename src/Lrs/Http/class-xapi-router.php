@@ -245,6 +245,9 @@ final class Xapi_Router implements Module {
 			$res = $e->to_response();
 		} catch ( Invalid_Input $e ) {
 			$res = ( new Xapi_Error( 400, $e->getMessage() ) )->to_response();
+		} catch ( \Throwable $e ) {
+			error_log( 'Learning Ledger xAPI handler failed: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- the only trace of a failure the response must not reveal.
+			$res = ( new Xapi_Error( 500, 'Internal server error.' ) )->to_response();
 		}
 
 		$principal = null === $xapi ? null : $xapi->principal();

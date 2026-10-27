@@ -33,8 +33,18 @@ class Xapi_Router_Test_Handler implements Resource_Handler {
 	 */
 	public static ?Xapi_Response $reply = null;
 
+	/**
+	 * Throwable to throw instead of answering.
+	 *
+	 * @var Throwable|null
+	 */
+	public static ?Throwable $throw = null;
+
 	public function handle( Xapi_Request $r ): Xapi_Response {
 		self::$seen[] = $r;
+		if ( null !== self::$throw ) {
+			throw self::$throw;
+		}
 		return self::$reply ?? Xapi_Response::json( 200, array( 'ok' => true ) );
 	}
 }
@@ -48,6 +58,7 @@ class Xapi_Router_Test extends WP_UnitTestCase {
 		$this->server_backup             = $_SERVER;
 		Xapi_Router_Test_Handler::$seen  = array();
 		Xapi_Router_Test_Handler::$reply = null;
+		Xapi_Router_Test_Handler::$throw = null;
 		( new Xapi_Router() )->register();
 		add_filter(
 			'learning_ledger/xapi_handlers',
@@ -90,6 +101,23 @@ class Xapi_Router_Test extends WP_UnitTestCase {
 		$this->assertSame( 'Basic realm="Learning Ledger"', $res->headers()['WWW-Authenticate'] );
 		$this->assertTrue( json_decode( $res->body(), true )['error'] );
 		$this->assertCount( 1, Xapi_Router_Test_Handler::$seen );
+	}
+
+	public function test_unexpected_handler_throwable_is_an_xapi_500_without_details() {
+		Xapi_Router_Test_Handler::$throw = new RuntimeException( 'secret-db-detail at /var/www/x.php' );
+		$log                             = tempnam( sys_get_temp_dir(), 'llerr' );
+		$previous                        = ini_set( 'error_log', $log ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		$res                             = ( new Xapi_Test_Client() )->request( 'GET', 'about', array(), null, array( 'X-Experience-API-Version' => '1.0.3' ) );
+		ini_set( 'error_log', (string) $previous ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		$logged = (string) file_get_contents( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		unlink( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+		$this->assertSame( 500, $res->status() );
+		$this->assertSame( '2.0.0', $res->headers()['X-Experience-API-Version'] );
+		$this->assertTrue( json_decode( $res->body(), true )['error'] );
+		$this->assertStringNotContainsString( 'secret-db-detail', $res->body() );
+		$this->assertStringNotContainsString( 'RuntimeException', $res->body() );
+		$this->assertStringContainsString( 'secret-db-detail', $logged );
 	}
 
 	public function test_unknown_resource_404_and_unsupported_method_405() {
