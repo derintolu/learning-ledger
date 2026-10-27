@@ -7,6 +7,7 @@
 
 namespace LearningLedger\Integrations\Sensei;
 
+use LearningLedger\Cmi5\Satisfaction_Result;
 use LearningLedger\Connector\Ledger\Waiver_Ledger;
 
 /**
@@ -34,6 +35,13 @@ final class Sensei_Tested_Out_Display {
 	 * @var array<int,bool>
 	 */
 	private array $analysis_waived = array();
+
+	/**
+	 * Lessons credited by testing out, by user: lesson ID => true. Loaded once per user per request.
+	 *
+	 * @var array<int,array<int,bool>>
+	 */
+	private array $tested_out = array();
 
 	/**
 	 * Hook into Sensei.
@@ -73,7 +81,9 @@ final class Sensei_Tested_Out_Display {
 	 */
 	public function status_icon( mixed $icon, mixed $status = '' ): mixed {
 		unset( $status );
-		if ( ! is_string( $icon ) || ! $this->is_waived_for_current_user( $this->last_lesson ) ) {
+		$lesson            = $this->last_lesson;
+		$this->last_lesson = 0;
+		if ( ! is_string( $icon ) || ! $this->is_tested_out( get_current_user_id(), $lesson ) ) {
 			return $icon;
 		}
 		$label = __( 'Tested out', 'learning-ledger' );
@@ -98,8 +108,8 @@ final class Sensei_Tested_Out_Display {
 			return $html;
 		}
 		$urls = array();
-		foreach ( $this->ledger->for_user( $user ) as $waiver ) {
-			$url = get_permalink( $waiver['lesson_id'] );
+		foreach ( array_keys( $this->tested_out_lessons( $user ) ) as $lesson ) {
+			$url = get_permalink( $lesson );
 			if ( $url ) {
 				$urls[ esc_url( $url ) ] = true;
 			}
@@ -113,7 +123,13 @@ final class Sensei_Tested_Out_Display {
 		$out = preg_replace_callback(
 			'#<a href="([^"]*)"([^>]*wp-block-sensei-lms-course-outline-lesson[^>]*)>(.*?)</a>#s',
 			static function ( array $m ) use ( $urls, $badge ): string {
-				return isset( $urls[ $m[1] ] ) ? '<a href="' . $m[1] . '"' . $m[2] . '>' . $m[3] . $badge . '</a>' : $m[0];
+				if ( ! isset( $urls[ $m[1] ] ) ) {
+					return $m[0];
+				}
+				// Before Sensei's chevron icon when there is one, so the chevron stays last.
+				$inner = preg_replace( '#<svg[^>]*wp-block-sensei-lms-course-outline-lesson__chevron#', $badge . '$0', $m[3], 1, $count );
+				$inner = $count ? $inner : $m[3] . $badge;
+				return '<a href="' . $m[1] . '"' . $m[2] . '>' . $inner . '</a>';
 			},
 			$html
 		);
@@ -131,7 +147,7 @@ final class Sensei_Tested_Out_Display {
 	 * @return mixed
 	 */
 	public function analysis_lesson( mixed $args, mixed $item = null, mixed $user_id = 0 ): mixed {
-		if ( $item instanceof \WP_Post && $this->ledger->is_waived( (int) $user_id, $item->ID ) ) {
+		if ( $item instanceof \WP_Post && $this->is_tested_out( (int) $user_id, $item->ID ) ) {
 			$this->analysis_waived[ $item->ID ] = true;
 		}
 		return $args;
@@ -168,14 +184,37 @@ final class Sensei_Tested_Out_Display {
 	}
 
 	/**
-	 * Whether a lesson is waived for the current user.
+	 * Whether a lesson counts as tested out for a user: a waiver with reason "Tested Out" that
+	 * was not carried over from an earlier registration.
 	 *
+	 * @param integer $user   User ID.
 	 * @param integer $lesson Lesson ID.
 	 *
 	 * @return boolean
 	 */
-	private function is_waived_for_current_user( int $lesson ): bool {
-		$user = get_current_user_id();
-		return $lesson > 0 && $user > 0 && $this->ledger->is_waived( $user, $lesson );
+	private function is_tested_out( int $user, int $lesson ): bool {
+		return $lesson > 0 && isset( $this->tested_out_lessons( $user )[ $lesson ] );
+	}
+
+	/**
+	 * Tested-out lessons of a user, loaded once per request.
+	 *
+	 * @param integer $user User ID.
+	 *
+	 * @return array<int,bool> Lesson ID => true.
+	 */
+	private function tested_out_lessons( int $user ): array {
+		if ( $user <= 0 ) {
+			return array();
+		}
+		if ( ! isset( $this->tested_out[ $user ] ) ) {
+			$this->tested_out[ $user ] = array();
+			foreach ( $this->ledger->for_user( $user ) as $waiver ) {
+				if ( Satisfaction_Result::TESTED_OUT === $waiver['reason'] && ! $waiver['carried_over'] ) {
+					$this->tested_out[ $user ][ $waiver['lesson_id'] ] = true;
+				}
+			}
+		}
+		return $this->tested_out[ $user ];
 	}
 }

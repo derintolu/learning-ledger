@@ -123,5 +123,68 @@ class Sensei_Tested_Out_Display_Test extends WP_UnitTestCase {
 		$html   = $this->icon_for( $this->waived ) . $this->render( $this->outline( $this->waived ), 'sensei-lms/course-outline' );
 		remove_filter( 'gettext_learning-ledger', $filter, 10 );
 		$this->assertStringNotContainsString( '<script>', $html );
+		$this->assertStringContainsString( '&lt;script&gt;', $html );
+	}
+
+	public function test_other_reason_and_carried_over_waivers_are_not_labelled() {
+		$ledger  = new Waiver_Ledger();
+		$other   = $this->lesson( 'Other reason' );
+		$carried = $this->lesson( 'Carried over' );
+		$ledger->record( $this->user, $other, Uuid::v4(), Uuid::v4(), 'Prior Learning', false );
+		$ledger->record( $this->user, $carried, Uuid::v4(), Uuid::v4(), 'Tested Out', true );
+		$display = new Sensei_Tested_Out_Display();
+		$this->assertSame( '<svg class="icon"></svg>', $this->icon_for( $other ) );
+		$this->assertSame( '<svg class="icon"></svg>', $this->icon_for( $carried ) );
+		$this->assertSame( $this->outline( $other ), $this->render( $this->outline( $other ), 'sensei-lms/course-outline' ) );
+		$this->assertSame( $this->outline( $carried ), $this->render( $this->outline( $carried ), 'sensei-lms/course-outline' ) );
+		$data = $this->row( $other, $this->user, '<span class="graded">Completed</span>' );
+		$this->assertSame( '<span class="graded">Completed</span>', $data['user_status'] );
+		unset( $display );
+	}
+
+	public function test_last_lesson_is_forgotten_after_one_icon() {
+		$this->assertStringContainsString( 'Tested out', $this->icon_for( $this->waived ) );
+		$this->assertSame( '<svg class="icon"></svg>', apply_filters( 'sensei_learning_mode_lesson_status_icon', '<svg class="icon"></svg>', 'complete' ) );
+	}
+
+	public function test_badge_goes_before_the_chevron() {
+		$html = '<a href="' . esc_url( get_permalink( $this->waived ) ) . '" class="wp-block-sensei-lms-course-outline-lesson"><span>L</span><svg class="wp-block-sensei-lms-course-outline-lesson__chevron"></svg></a>';
+		$out  = $this->render( $html, 'sensei-lms/course-outline' );
+		$this->assertMatchesRegularExpression( '#Tested out</span><svg class="wp-block-sensei-lms-course-outline-lesson__chevron"#', $out );
+	}
+
+	private function course_with_lessons(): array {
+		$course = self::factory()->post->create(
+			array(
+				'post_type'    => 'course',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:sensei-lms/course-outline /-->',
+			)
+		);
+		foreach ( array( $this->waived, $this->normal ) as $i => $lesson ) {
+			update_post_meta( $lesson, '_lesson_course', $course );
+			update_post_meta( $lesson, '_order_' . $course, $i + 1 );
+		}
+		return array( $course );
+	}
+
+	public function test_real_course_outline_badges_only_the_waived_lesson() {
+		list( $course ) = $this->course_with_lessons();
+		$this->go_to( get_permalink( $course ) );
+		$html = do_blocks( get_post( $course )->post_content );
+		$this->assertSame( 1, substr_count( $html, 'Tested out' ), $html );
+		$this->assertMatchesRegularExpression( '#<a href="' . preg_quote( esc_url( get_permalink( $this->waived ) ), '#' ) . '"[^>]*>(?:(?!</a>).)*Tested out#s', $html );
+		$this->assertDoesNotMatchRegularExpression( '#<a href="' . preg_quote( esc_url( get_permalink( $this->normal ) ), '#' ) . '"[^>]*>(?:(?!</a>).)*Tested out#s', $html );
+	}
+
+	public function test_real_learning_mode_navigation_labels_only_the_waived_lesson() {
+		list( $course ) = $this->course_with_lessons();
+		$this->go_to( get_permalink( $this->normal ) );
+		$nav  = ( new ReflectionClass( \Sensei\Blocks\Course_Theme\Course_Navigation::class ) )->newInstanceWithoutConstructor();
+		$html = $nav->render_course_navigation();
+		$this->assertSame( 1, substr_count( $html, 'class="learning-ledger-tested-out"' ), $html );
+		$this->assertMatchesRegularExpression( '#<a href="' . preg_quote( esc_url( get_permalink( $this->waived ) ), '#' ) . '"[^>]*>(?:(?!</a>).)*Tested out#s', $html );
+		$this->assertDoesNotMatchRegularExpression( '#<a href="' . preg_quote( esc_url( get_permalink( $this->normal ) ), '#' ) . '"[^>]*>(?:(?!</a>).)*Tested out#s', $html );
+		unset( $course );
 	}
 }
