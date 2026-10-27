@@ -1,0 +1,49 @@
+{
+  "minutes": 5,
+  "sources": [
+    {
+      "title": "RFC 8259",
+      "url": "https://www.rfc-editor.org/rfc/rfc8259"
+    }
+  ],
+  "starterFiles": {
+    "config.json": "{\"port\": \"8080\"}\n"
+  },
+  "beats": [
+    {
+      "key": "six-types",
+      "goal": "Name the six JSON value types.",
+      "content": "JSON has string, number, boolean, null, array and object.",
+      "question": "Which type is 8080 in {\"port\": 8080}?"
+    }
+  ],
+  "bug": {
+    "key": "port-string",
+    "file": "config.json",
+    "code": "{\"port\": \"8080\"}\n",
+    "hint": "Look at the quotes.",
+    "revealAfter": 3
+  },
+  "checkpoint": {
+    "key": "types-check",
+    "kind": "free-text",
+    "question": "Explain the difference between 8080 and \"8080\" in JSON.",
+    "branches": [
+      {
+        "key": "got-it",
+        "when": "The learner distinguishes number from string.",
+        "success": true,
+        "to": "json-syntax",
+        "message": "Correct."
+      },
+      {
+        "key": "retry",
+        "when": "The learner does not.",
+        "success": false,
+        "to": null,
+        "message": "Look again at the quotes."
+      }
+    ],
+    "maxAttempts": 3
+  }
+}

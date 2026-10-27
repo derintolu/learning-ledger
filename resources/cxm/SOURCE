@@ -1,0 +1,7 @@
+Provisional JSON Schemas for course-xapi-mcp 1.0 packages.
+
+Derived from the standard's design document, sections 6.1-6.2 (package shape and mapping) and 11 (Open Badges):
+  /Users/cedarstone/Projects/learning-mcp/docs/superpowers/specs/2026-10-27-course-xapi-mcp-design.md
+Copied from the standard repository's draft schemas (learning-mcp/schema/draft/course.schema.json and lesson.schema.json), with only the $id path changed from /schema/draft/ to /schema/1.0/.
+
+These are replaced by the standard's published /schema/1.0/*.schema.json when those exist. The validator loads them by path only, so replacing the files needs no code change.

@@ -1,0 +1,13 @@
+{
+  "specVersion": "1.0",
+  "flavour": "authoring",
+  "version": "0.1.0",
+  "language": "en",
+  "license": "CC-BY-4.0",
+  "rules": ["Ask the learner to read JSON back as data types before commenting."],
+  "placement": {"intro": "Ask at most two short questions about prior JSON experience.", "maxQuestions": 2},
+  "custody": "server-kept",
+  "paths": {
+    "json": {"tagline": "From value types to fixing a config file.", "placementHints": "Start at what-is-json unless the learner edits JSON by hand."}
+  }
+}

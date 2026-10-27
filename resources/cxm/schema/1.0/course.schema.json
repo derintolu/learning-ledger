@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://course-xapi-mcp.sqwrlz.com/schema/1.0/course.schema.json",
+  "title": "course-xapi-mcp course.json",
+  "type": "object",
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "flavour": {
+      "type": "string",
+      "enum": [
+        "authoring",
+        "distribution"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rules": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "placement": {
+      "type": "object",
+      "properties": {
+        "intro": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxQuestions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "intro",
+        "maxQuestions"
+      ],
+      "additionalProperties": false
+    },
+    "custody": {
+      "type": "string",
+      "enum": [
+        "lms-launched",
+        "author-lrs",
+        "server-kept",
+        "practice"
+      ]
+    },
+    "allowPractice": {
+      "default": false,
+      "type": "boolean"
+    },
+    "paths": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "tagline": {
+                "type": "string",
+                "minLength": 1
+              },
+              "placementHints": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "tagline"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "coming-soon"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tagline": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "status",
+              "title",
+              "tagline"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "badges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uri"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "criteria": {
+            "type": "object",
+            "properties": {
+              "narrative": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "narrative"
+            ],
+            "additionalProperties": false
+          },
+          "image": {
+            "type": "string",
+            "format": "uri"
+          },
+          "achievementType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "alignment": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "targetName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targetUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "targetDescription": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targetFramework": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targetCode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targetType": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "targetName",
+                "targetUrl"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "awardOn": {
+            "type": "string",
+            "enum": [
+              "au-moveon",
+              "block-satisfied",
+              "course-satisfied",
+              "any-path"
+            ]
+          },
+          "for": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "countWaived": {
+            "default": false,
+            "type": "boolean"
+          },
+          "includeScore": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "criteria",
+          "achievementType",
+          "awardOn"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "badgeIssuer": {
+      "type": "object",
+      "properties": {
+        "signer": {
+          "type": "string",
+          "enum": [
+            "record-holder",
+            "course-server"
+          ]
+        },
+        "claimPage": {
+          "type": "string",
+          "format": "uri"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "signer",
+        "claimPage"
+      ],
+      "additionalProperties": false
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\/\\S+|[a-z0-9-]+(?:\\.[a-z0-9-]+)+\\/\\S+)$"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "specVersion",
+    "flavour",
+    "version",
+    "language",
+    "placement",
+    "custody",
+    "paths"
+  ],
+  "additionalProperties": false
+}

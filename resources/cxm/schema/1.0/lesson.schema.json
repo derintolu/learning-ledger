@@ -1,0 +1,459 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://course-xapi-mcp.sqwrlz.com/schema/1.0/lesson.schema.json",
+  "title": "course-xapi-mcp lesson JSON",
+  "type": "object",
+  "properties": {
+    "minutes": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "starterFiles": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "beats": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "key",
+          "goal",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "bug": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revealAfter": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "x-cxm-secret": true
+        },
+        "fixChecks": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "contains",
+                      "notContains"
+                    ]
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "file",
+                  "value",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "regex"
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+                  },
+                  "pattern": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "flags": {
+                    "type": "string",
+                    "pattern": "^[imsu]*$"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "file",
+                  "pattern",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "json"
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+                  },
+                  "pointer": {
+                    "type": "string"
+                  },
+                  "equals": {},
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "file",
+                  "pointer",
+                  "equals",
+                  "message"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "x-cxm-secret": true
+        }
+      },
+      "required": [
+        "key",
+        "file",
+        "code",
+        "explanation",
+        "fixChecks"
+      ],
+      "additionalProperties": false
+    },
+    "checkpoint": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "free-text",
+            "code"
+          ]
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rubric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "contains",
+                      "notContains"
+                    ]
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "file",
+                  "value",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "regex"
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+                  },
+                  "pattern": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "flags": {
+                    "type": "string",
+                    "pattern": "^[imsu]*$"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "file",
+                  "pattern",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "json"
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+                  },
+                  "pointer": {
+                    "type": "string"
+                  },
+                  "equals": {},
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "file",
+                  "pointer",
+                  "equals",
+                  "message"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "branches": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "when": {
+                "type": "string",
+                "minLength": 1
+              },
+              "success": {
+                "type": "boolean"
+              },
+              "to": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "key",
+              "when",
+              "success",
+              "to",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "question",
+        "rubric",
+        "branches"
+      ],
+      "additionalProperties": false
+    },
+    "referenceSolution": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s/\\\\][^/\\\\]*(\\/[^\\s/\\\\][^/\\\\]*)*$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "bugFix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "additionalProperties": false,
+      "x-cxm-secret": true
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\/\\S+|[a-z0-9-]+(?:\\.[a-z0-9-]+)+\\/\\S+)$"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "minutes",
+    "beats"
+  ],
+  "additionalProperties": false
+}

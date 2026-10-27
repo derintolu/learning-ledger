@@ -1,0 +1,6 @@
+{
+  "minutes": 4,
+  "beats": [
+    {"key": "quotes", "goal": "Use double quotes for keys.", "content": "Keys and strings use double quotes. Single quotes are not valid JSON."}
+  ]
+}
