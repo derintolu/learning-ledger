@@ -78,8 +78,17 @@ class Issuer_Module implements Module {
 		if ( '' === (string) get_query_var( self::QUERY_VAR ) ) {
 			return;
 		}
-		$body = wp_json_encode( Did_Document::document(), JSON_UNESCAPED_SLASHES );
-		$this->send_headers( self::DID_HEADERS );
+		try {
+			$body = wp_json_encode( Did_Document::document(), JSON_UNESCAPED_SLASHES );
+		} catch ( \RuntimeException $e ) {
+			$body = false;
+		}
+		if ( ! is_string( $body ) ) {
+			$this->send_headers( 500, array( 'Cache-Control' => 'no-store' ) );
+			$this->finish();
+			return;
+		}
+		$this->send_headers( 200, self::DID_HEADERS );
 		echo $body; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON document served as application/json.
 		$this->finish();
 	}
@@ -145,15 +154,16 @@ class Issuer_Module implements Module {
 	/**
 	 * Send the status and headers, unless output has already started.
 	 *
+	 * @param integer               $status  HTTP status.
 	 * @param array<string, string> $headers Headers.
 	 *
 	 * @return void
 	 */
-	protected function send_headers( array $headers ): void {
+	protected function send_headers( int $status, array $headers ): void {
 		if ( headers_sent() ) {
 			return;
 		}
-		status_header( 200 );
+		status_header( $status );
 		foreach ( $headers as $name => $value ) {
 			header( $name . ': ' . $value );
 		}

@@ -32,14 +32,33 @@ class Did_Document_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Run maybe_serve_did() and return its output; it must finish the request.
+	 */
+	private function serve( Issuer_Module $module ): string {
+		ob_start();
+		try {
+			$module->maybe_serve_did();
+			$this->fail( 'Expected the response to finish' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'finished', $e->getMessage() );
+		} finally {
+			$body = ob_get_clean();
+		}
+		return $body;
+	}
+
+	/**
 	 * Module that records headers and returns instead of exiting.
 	 */
 	private function recording_module(): Issuer_Module {
 		return new class() extends Issuer_Module {
 			public array $sent = array();
 
-			protected function send_headers( array $headers ): void {
-				$this->sent = $headers;
+			public int $status = 0;
+
+			protected function send_headers( int $status, array $headers ): void {
+				$this->status = $status;
+				$this->sent   = $headers;
 			}
 
 			protected function finish(): void {
@@ -119,15 +138,8 @@ class Did_Document_Test extends WP_UnitTestCase {
 			$this->go_to( home_url( $path ) );
 			$this->assertNotSame( '', (string) get_query_var( Issuer_Module::QUERY_VAR ), $path );
 			$module->sent = array();
-			ob_start();
-			try {
-				$module->maybe_serve_did();
-				$this->fail( 'Expected the response to finish' );
-			} catch ( RuntimeException $e ) {
-				$this->assertSame( 'finished', $e->getMessage() );
-			} finally {
-				$body = ob_get_clean();
-			}
+			$body         = $this->serve( $module );
+			$this->assertSame( 200, $module->status );
 			$this->assertSame( Did_Document::document(), json_decode( $body, true ), $path );
 			$this->assertSame(
 				array(
@@ -144,6 +156,28 @@ class Did_Document_Test extends WP_UnitTestCase {
 		ob_start();
 		$module->maybe_serve_did();
 		$this->assertSame( '', ob_get_clean() );
+	}
+
+	public function test_did_json_unencodable_document_is_500() {
+		Key_Store::generate();
+		$module = $this->recording_module();
+		$module->register();
+		$module->add_rewrites();
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->go_to( home_url( '/.well-known/did.json' ) );
+		$cb = static function ( $methods ) {
+			$methods[] = array(
+				'id'  => 'did:web:example.org#bad',
+				'nan' => NAN,
+			);
+			return $methods;
+		};
+		add_filter( 'learning_ledger/did_verification_methods', $cb );
+		$body = $this->serve( $module );
+		remove_filter( 'learning_ledger/did_verification_methods', $cb );
+		$this->assertSame( 500, $module->status );
+		$this->assertSame( '', $body );
+		$this->assertSame( array( 'Cache-Control' => 'no-store' ), $module->sent );
 	}
 
 	public function test_issuer_profile_route() {

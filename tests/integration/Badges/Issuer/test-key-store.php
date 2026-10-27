@@ -106,6 +106,7 @@ class Key_Store_Test extends WP_UnitTestCase {
 		Key_Store::remove( $old->kid );
 
 		$this->assertNotNull( $this->key_row( $old->kid )->removed_at );
+		$this->assertNull( $this->key_row( $old->kid )->secret_sealed );
 		$this->assertNull( Key_Store::find( $old->kid ) );
 		$this->assertSame( array( $new->kid ), $this->kids( Key_Store::published() ) );
 		$this->assertSame( $new->kid, Key_Store::active()->kid );
@@ -117,6 +118,214 @@ class Key_Store_Test extends WP_UnitTestCase {
 
 		$this->expectException( Invalid_Input::class );
 		Key_Store::remove( $old->kid );
+	}
+
+	/**
+	 * Make every query against the keys table that starts with $verb fail.
+	 */
+	private function fail_keys_writes( string $verb ): callable {
+		$table = Tables::name( 'keys' );
+		$cb    = static function ( $query ) use ( $verb, $table ) {
+			return ( str_starts_with( $query, $verb ) && str_contains( $query, $table ) ) ? 'SELECT * FROM lledger_no_such_table_t21' : $query;
+		};
+		add_filter( 'query', $cb );
+		$GLOBALS['wpdb']->suppress_errors( true );
+		return $cb;
+	}
+
+	private function restore_writes( callable $cb ): void {
+		remove_filter( 'query', $cb );
+		$GLOBALS['wpdb']->suppress_errors( false );
+	}
+
+	public function test_generate_fails_loudly_when_insert_fails() {
+		$cb = $this->fail_keys_writes( 'INSERT' );
+		try {
+			Key_Store::generate();
+			$this->fail( 'Expected RuntimeException' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'Could not store the new badge key.', $e->getMessage() );
+		} finally {
+			$this->restore_writes( $cb );
+		}
+		$this->assertNull( Key_Store::active() );
+		$this->assertSame( array(), $this->audit_events() );
+	}
+
+	public function test_rotate_rolls_back_when_retire_fails() {
+		$old = Key_Store::generate();
+		$cb  = $this->fail_keys_writes( 'UPDATE' );
+		try {
+			Key_Store::rotate();
+			$this->fail( 'Expected RuntimeException' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'Could not retire the previous badge key.', $e->getMessage() );
+		} finally {
+			$this->restore_writes( $cb );
+		}
+		$this->assertSame( array( $old->kid ), $this->kids( Key_Store::published() ) );
+		$this->assertSame( $old->kid, Key_Store::active()->kid );
+		$this->assertSame( array( 'badge_key_generated' ), $this->audit_events() );
+	}
+
+	public function test_remove_fails_loudly_when_update_fails() {
+		$key = Key_Store::generate();
+		$cb  = $this->fail_keys_writes( 'UPDATE' );
+		try {
+			Key_Store::remove( $key->kid );
+			$this->fail( 'Expected RuntimeException' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'Could not remove the badge key.', $e->getMessage() );
+		} finally {
+			$this->restore_writes( $cb );
+		}
+		$this->assertSame( array( $key->kid ), $this->kids( Key_Store::published() ) );
+		$this->assertSame( array( 'badge_key_generated' ), $this->audit_events() );
+	}
+
+	/**
+	 * Write a key file and point LLEDGER_BADGE_KEY_FILE at it (separate-process tests only).
+	 */
+	private function key_file( string $dir, string $json, int $mode ): string {
+		wp_mkdir_p( $dir );
+		$path = $dir . '/lledger-t21-' . wp_generate_password( 8, false ) . '.json';
+		file_put_contents( $path, $json ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		chmod( $path, $mode ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+		clearstatcache();
+		define( 'LLEDGER_BADGE_KEY_FILE', $path );
+		return $path;
+	}
+
+	private function file_json( string $seed_old, string $seed_new ): string {
+		return wp_json_encode(
+			array(
+				array(
+					'kid'        => 'old-key',
+					'seed_b64'   => base64_encode( $seed_old ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+					'created_at' => '2026-01-01 00:00:00.000000',
+					'retired_at' => '2026-06-01 00:00:00.000000',
+				),
+				array(
+					'kid'        => 'new-key',
+					'seed_b64'   => base64_encode( $seed_new ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+					'created_at' => '2026-06-01 00:00:00.000000',
+					'retired_at' => null,
+				),
+			)
+		);
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_key_file_0600_outside_abspath_is_used() {
+		$old  = random_bytes( 32 );
+		$new  = random_bytes( 32 );
+		$path = $this->key_file( sys_get_temp_dir(), $this->file_json( $old, $new ), 0600 );
+		try {
+			$this->assertSame( 'file', Key_Store::tier() );
+			$this->assertSame( array( 'old-key', 'new-key' ), $this->kids( Key_Store::published() ) );
+			$active = Key_Store::active();
+			$this->assertSame( 'new-key', $active->kid );
+			$this->assertSame( Ed25519::from_seed( $new )['public'], $active->public );
+			$this->assertTrue( Ed25519::verify( Ed25519::sign( 'm', $active->secret() ), 'm', $active->public ) );
+			$this->assertSame( '2026-06-01 00:00:00.000000', Key_Store::find( 'old-key' )->retired_at );
+			$this->assertSame( 'new-key', Key_Store::generate()->kid );
+			$this->assertSame( 0, (int) $GLOBALS['wpdb']->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'keys' ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			$this->expectException( RuntimeException::class );
+			Key_Store::rotate();
+		} finally {
+			wp_delete_file( $path );
+		}
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_key_file_readable_by_others_falls_back_to_database() {
+		$path = $this->key_file( sys_get_temp_dir(), $this->file_json( random_bytes( 32 ), random_bytes( 32 ) ), 0644 );
+		try {
+			$this->assertSame( 'database', Key_Store::tier() );
+			$this->assertNull( Key_Store::active() );
+		} finally {
+			wp_delete_file( $path );
+		}
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_key_file_inside_abspath_is_rejected() {
+		$path = $this->key_file( WP_CONTENT_DIR . '/uploads/lledger-t21', $this->file_json( random_bytes( 32 ), random_bytes( 32 ) ), 0600 );
+		try {
+			$this->assertStringStartsWith( wp_normalize_path( realpath( ABSPATH ) ), wp_normalize_path( realpath( $path ) ) );
+			$this->assertSame( 'database', Key_Store::tier() );
+		} finally {
+			wp_delete_file( $path );
+		}
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_malformed_key_file_fails_loudly() {
+		$bad  = wp_json_encode(
+			array(
+				array(
+					'kid'      => 'k1',
+					'seed_b64' => base64_encode( 'too short' ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+				),
+			)
+		);
+		$path = $this->key_file( sys_get_temp_dir(), $bad, 0600 );
+		try {
+			$this->assertSame( 'file', Key_Store::tier() );
+			$this->expectException( RuntimeException::class );
+			$this->expectExceptionMessage( 'LLEDGER_BADGE_KEY_FILE must hold base64 of a 32-byte seed.' );
+			Key_Store::published();
+		} finally {
+			wp_delete_file( $path );
+		}
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_key_file_that_is_not_a_list_fails_loudly() {
+		$path = $this->key_file( sys_get_temp_dir(), '{"kid":"k1"}', 0600 );
+		try {
+			$this->expectException( RuntimeException::class );
+			$this->expectExceptionMessage( 'LLEDGER_BADGE_KEY_FILE must hold a JSON list of keys.' );
+			Key_Store::active();
+		} finally {
+			wp_delete_file( $path );
+		}
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_constant_tier() {
+		$seed = random_bytes( 32 );
+		define( 'LLEDGER_BADGE_KEY', base64_encode( $seed ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		$this->assertSame( 'constant', Key_Store::tier() );
+		$public = Ed25519::from_seed( $seed )['public'];
+		$key    = Key_Store::active();
+		$this->assertSame( Ed25519::key_id( $public ), $key->kid );
+		$this->assertSame( $public, $key->public );
+		$this->assertTrue( Ed25519::verify( Ed25519::sign( 'm', $key->secret() ), 'm', $public ) );
+		$this->assertSame( $key->kid, Key_Store::generate()->kid );
+		$this->assertSame( array( $key->kid ), $this->kids( Key_Store::published() ) );
+		$this->assertSame( 0, (int) $GLOBALS['wpdb']->get_var( 'SELECT COUNT(*) FROM ' . Tables::name( 'keys' ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$this->assertStringNotContainsString( base64_encode( $seed ), print_r( $key, true ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions, WordPress.PHP.DevelopmentFunctions.error_log_print_r
+		$this->expectException( RuntimeException::class );
+		Key_Store::remove( $key->kid );
 	}
 
 	public function test_removing_active_key_leaves_none_active() {

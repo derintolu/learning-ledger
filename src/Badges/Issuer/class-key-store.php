@@ -107,7 +107,7 @@ final class Key_Store {
 	 *
 	 * @return Issuer_Key
 	 *
-	 * @throws \RuntimeException When the tier is managed outside WordPress and holds no active key.
+	 * @throws \RuntimeException When the tier is managed outside WordPress and holds no active key, or the insert fails.
 	 */
 	public static function generate(): Issuer_Key {
 		$active = self::active();
@@ -130,7 +130,12 @@ final class Key_Store {
 	/**
 	 * Add a new active key and retire the previous one, which stays published.
 	 *
+	 * The insert and the retirement run in one transaction, so a failure leaves the
+	 * previous key active and nothing stored.
+	 *
 	 * @return Issuer_Key The new active key.
+	 *
+	 * @throws \RuntimeException When the database write fails.
 	 */
 	public static function rotate(): Issuer_Key {
 		self::assert_managed();
@@ -140,16 +145,28 @@ final class Key_Store {
 				$previous[] = $key->kid;
 			}
 		}
-		$key = self::insert_new();
 		global $wpdb;
-		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->prepare(
-				'UPDATE ' . Tables::name( 'keys' ) . ' SET retired_at = %s WHERE purpose = %s AND kid <> %s AND retired_at IS NULL AND removed_at IS NULL', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name.
-				self::now(),
-				self::PURPOSE,
-				$key->kid
-			)
-		);
+		$wpdb->query( 'START TRANSACTION' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		try {
+			$key     = self::insert_new();
+			$retired = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prepare(
+					'UPDATE ' . Tables::name( 'keys' ) . ' SET retired_at = %s WHERE purpose = %s AND kid <> %s AND retired_at IS NULL AND removed_at IS NULL', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name.
+					self::now(),
+					self::PURPOSE,
+					$key->kid
+				)
+			);
+			if ( false === $retired ) {
+				throw new \RuntimeException( 'Could not retire the previous badge key.' );
+			}
+			if ( false === $wpdb->query( 'COMMIT' ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				throw new \RuntimeException( 'Could not commit the badge key rotation.' );
+			}
+		} catch ( \Throwable $e ) {
+			$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			throw $e;
+		}
 		Audit_Log::record(
 			'badge_key_rotated',
 			array(
@@ -169,6 +186,7 @@ final class Key_Store {
 	 * @return void
 	 *
 	 * @throws Invalid_Input When no published key has this id.
+	 * @throws \RuntimeException When the database write fails.
 	 */
 	public static function remove( string $kid ): void {
 		self::assert_managed();
@@ -177,15 +195,21 @@ final class Key_Store {
 		}
 		$now = self::now();
 		global $wpdb;
-		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$updated = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->prepare(
-				'UPDATE ' . Tables::name( 'keys' ) . ' SET removed_at = %s, retired_at = COALESCE(retired_at, %s) WHERE purpose = %s AND kid = %s AND removed_at IS NULL', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name.
+				'UPDATE ' . Tables::name( 'keys' ) . ' SET removed_at = %s, retired_at = COALESCE(retired_at, %s), secret_sealed = NULL WHERE purpose = %s AND kid = %s AND removed_at IS NULL', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name.
 				$now,
 				$now,
 				self::PURPOSE,
 				$kid
 			)
 		);
+		if ( false === $updated ) {
+			throw new \RuntimeException( 'Could not remove the badge key.' );
+		}
+		if ( 0 === $updated ) {
+			throw new Invalid_Input( 'No published badge key has this id.', 'not_found', 'kid' );
+		}
 		Audit_Log::record( 'badge_key_removed', array( 'kid' => $kid ), self::audit_actor() );
 	}
 
@@ -193,6 +217,8 @@ final class Key_Store {
 	 * Insert a fresh key with its seed sealed.
 	 *
 	 * @return Issuer_Key
+	 *
+	 * @throws \RuntimeException When the insert fails.
 	 */
 	private static function insert_new(): Issuer_Key {
 		$seed = random_bytes( 32 );
@@ -200,7 +226,7 @@ final class Key_Store {
 		$kid  = Ed25519::key_id( $pair['public'] );
 		$now  = self::now();
 		global $wpdb;
-		$wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+		$inserted = $wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
 			Tables::name( 'keys' ),
 			array(
 				'kid'           => $kid,
@@ -214,6 +240,9 @@ final class Key_Store {
 		if ( function_exists( 'sodium_memzero' ) ) {
 			sodium_memzero( $seed );
 			sodium_memzero( $pair['secret'] );
+		}
+		if ( 1 !== $inserted ) {
+			throw new \RuntimeException( 'Could not store the new badge key.' );
 		}
 		return self::database_key( $kid, $pair['public'], $now, null );
 	}
@@ -416,7 +445,7 @@ final class Key_Store {
 	 *
 	 * @throws \RuntimeException When it is not base64 of 32 bytes.
 	 */
-	private static function decode_seed( string $b64, string $source ): string {
+	private static function decode_seed( #[\SensitiveParameter] string $b64, string $source ): string {
 		$seed = base64_decode( $b64, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- key encoding.
 		if ( false === $seed || 32 !== strlen( $seed ) ) {
 			throw new \RuntimeException( esc_html( $source ) . ' must hold base64 of a 32-byte seed.' );
@@ -431,7 +460,7 @@ final class Key_Store {
 	 *
 	 * @return string
 	 */
-	private static function secret_from_seed( string $seed ): string {
+	private static function secret_from_seed( #[\SensitiveParameter] string $seed ): string {
 		return Ed25519::from_seed( $seed )['secret'];
 	}
 
