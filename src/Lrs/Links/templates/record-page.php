@@ -78,7 +78,7 @@ $lledger_title = $lledger_gone ? __( 'This link has expired', 'learning-ledger' 
 				);
 				?>
 			</p>
-			<pre><?php echo esc_html( $lledger_statement['json'] ); ?></pre>
+			<pre><?php echo htmlspecialchars( (string) $lledger_statement['json'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8', true ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped with double_encode on, so literal entities in the stored JSON show exactly (esc_html would leave them as markup). ?></pre>
 		</article>
 	<?php endforeach; ?>
 	<?php if ( '' !== $lledger_view['newest_url'] || '' !== $lledger_view['next_url'] ) : ?>

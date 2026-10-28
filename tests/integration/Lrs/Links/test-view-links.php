@@ -262,6 +262,18 @@ class View_Links_Test extends WP_UnitTestCase {
 		$this->assertStringContainsString( '&lt;script&gt;alert(', $body );
 	}
 
+	public function test_page_shows_literal_entities_in_stored_json_exactly() {
+		self::store( array( self::statement( self::agent( 'alice' ), 'Tom &amp; Jerry &lt;b&gt;' ) ) );
+		$token = $this->mint( self::agent( 'alice' ) );
+		$this->later( 5 );
+
+		$body = $this->serve( $this->page(), $token );
+
+		$this->assertSame( 1, preg_match( '#<pre>(.*?)</pre>#s', $body, $m ) );
+		$this->assertStringContainsString( 'Tom &amp;amp; Jerry &amp;lt;b&amp;gt;', $m[1], 'a stored "&amp;" must display as "&amp;", not "&"' );
+		$this->assertStringNotContainsString( 'Tom &amp; Jerry', $m[1] );
+	}
+
 	public function test_page_lists_newest_first_100_per_page() {
 		$statements = array();
 		for ( $i = 0; $i < 101; $i++ ) {
