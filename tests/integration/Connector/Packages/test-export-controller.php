@@ -251,6 +251,8 @@ class Export_Controller_Test extends WP_UnitTestCase {
 		}
 		update_post_meta( $this->courses['path-a'], '_lledger_preview', wp_slash( '{"kind":"html","files":[{"path":"index.html","content":"<p>hi</p>"}]}' ) );
 		update_post_meta( $this->courses['path-a'], '_lledger_landing', wp_slash( '{"headline":"Learn A"}' ) );
+		update_post_meta( $this->courses['path-a'], '_lledger_final_files', wp_slash( '[{"path":"config.json","content":"{\\"port\\": 8080}"}]' ) );
+		update_post_meta( $this->courses['path-b'], '_lledger_placement_hints', 'Start here if you know JSON.' );
 
 		$this->lesson_post( $this->courses['path-a'], 'lesson-one', 'Lesson One', $this->beat( 'quotes', $this->para( 'Keys use <strong>double</strong> quotes.' ) ) . $this->checkpoint(), 1 );
 		$this->lesson_post( $this->courses['path-a'], 'lesson-two', 'Lesson Two', $this->beat( 'types', $this->para( 'Six types.' ) ) . $this->bug(), 2 );
@@ -383,11 +385,10 @@ class Export_Controller_Test extends WP_UnitTestCase {
 	/**
 	 * Exports the program, imports the package into an empty LMS and exports again.
 	 *
-	 * Compared: every lesson (beats, checkpoint with rubric, planted bug, minutes, sources), custody, rules,
-	 * placement guide, path keys and the course structure. Not carried through an import, so left out of the
-	 * comparison: a lesson's `referenceSolution` (nothing stores it), a path's `tagline` and `placementHints`,
-	 * the program-level `license`, and, because Package_Importer reads other places than Package_Builder
-	 * writes, each lesson's `starterFiles` and each path's preview, landing and final files.
+	 * Compared: every lesson (beats, checkpoint with rubric, planted bug, minutes, sources, starter files,
+	 * extensions), the whole course document (license, custody, rules, placement guide, paths with tagline
+	 * and placement hints, path previews, landing pages and final files) and the course structure.
+	 * Only a lesson's `referenceSolution` is not carried through an import: nothing in the LMS stores it.
 	 * The AU URL template and course server URL are set by the operator after an import.
 	 */
 	public function test_round_trip_export_equals_import() {
@@ -429,25 +430,18 @@ class Export_Controller_Test extends WP_UnitTestCase {
 		// Lessons: identical, apart from the reference solution.
 		$this->assertSame( $first->lesson_keys(), $second->lesson_keys() );
 		$this->assertArrayHasKey( 'referenceSolution', $lesson_one );
+		$this->assertSame( array( 'config.json' => '{}' ), $first->lesson_json( 'lesson-one' )['starterFiles'] );
 		foreach ( $first->lesson_keys() as $key ) {
-			$expected = $first->lesson_json( $key );
-			$actual   = $second->lesson_json( $key );
-			// The importer stores `starterFiles` as the schema's path => content map; the builder reads the
-			// editor's list of {path, content} rows, so the files do not come back out (see the task report).
-			unset( $expected['extensions'], $actual['extensions'], $expected['starterFiles'], $actual['starterFiles'] );
-			$this->assertSame( $expected, $actual, $key );
-			$this->assertArrayNotHasKey( 'referenceSolution', $actual );
+			$this->assertSame( $first->lesson_json( $key ), $second->lesson_json( $key ), $key );
+			$this->assertArrayNotHasKey( 'referenceSolution', $second->lesson_json( $key ) );
 		}
 
-		// Course document.
+		// Course document: identical.
 		$a = $first->course_json();
-		$b = $second->course_json();
-		foreach ( array( 'specVersion', 'flavour', 'version', 'custody', 'rules', 'placement' ) as $field ) {
-			$this->assertSame( $a[ $field ], $b[ $field ], $field );
-		}
-		$this->assertSame( array_keys( $a['paths'] ), array_keys( $b['paths'] ) );
-		// Path previews, landing pages and final files live under `extensions`, where the importer does not
-		// look for them (it reads paths.<key>, which the schema forbids), so they are not compared (see the task report).
+		$this->assertSame( 'CC-BY-4.0', $a['license'] );
+		$this->assertSame( 'Start here if you know JSON.', $a['paths']['path-b']['placementHints'] );
+		$this->assertSame( array( 'preview', 'finalFiles', 'landing' ), array_keys( $a['extensions'][ Package_Builder::EXTENSION ]['paths']['path-a'] ) );
+		$this->assertSame( $a, $second->course_json() );
 
 		// Course structure: same blocks and AUs, ids, order, titles and moveOn.
 		$summary = static function ( Package $p ): array {

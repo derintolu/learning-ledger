@@ -200,6 +200,11 @@ final class Package_Importer {
 		if ( in_array( $course_json['custody'] ?? null, Program_Module::CUSTODY, true ) ) {
 			update_post_meta( $id, '_lledger_custody', $course_json['custody'] );
 		}
+		if ( isset( $course_json['license'] ) ) {
+			update_post_meta( $id, '_lledger_licence', sanitize_text_field( (string) $course_json['license'] ) );
+		} else {
+			delete_post_meta( $id, '_lledger_licence' );
+		}
 		return $id;
 	}
 
@@ -244,23 +249,50 @@ final class Package_Importer {
 	private function write_course( LMS_Adapter $adapter, int $program_id, array &$hashes, array $course, array $course_json, array &$created, array &$updated ): int {
 		$block = $course['block'];
 		$path  = (array) ( $course_json['paths'][ $course['key'] ] ?? array() );
+		$ext   = (array) ( $course_json['extensions'][ Package_Builder::EXTENSION ]['paths'][ $course['key'] ] ?? array() );
 		$meta  = array();
 		foreach ( array(
 			'preview'    => '_lledger_preview',
 			'finalFiles' => '_lledger_final_files',
 			'landing'    => '_lledger_landing',
 		) as $field => $meta_key ) {
-			if ( isset( $path[ $field ] ) ) {
-				$meta[ $meta_key ] = Json::encode_exact( $path[ $field ] );
+			if ( isset( $ext[ $field ] ) ) {
+				$meta[ $meta_key ] = Json::encode_exact( $ext[ $field ] );
 			}
 		}
+		if ( isset( $path['placementHints'] ) ) {
+			$meta['_lledger_placement_hints'] = sanitize_textarea_field( (string) $path['placementHints'] );
+		}
 		$title       = sanitize_text_field( Import_Writer::pick( $block->title(), $course['key'] ) );
+		$tagline     = sanitize_text_field( (string) ( $path['tagline'] ?? '' ) );
 		$description = Import_Writer::pick( Import_Writer::description_of( $block ), '' );
 		$content     = Import_Writer::paragraph( $description );
 		$spec        = new Course_Spec( $course['key'], $title, $content, 'publish', $meta );
-		$hash        = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $content, $meta ) ) );
+		$hash        = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $tagline, $content, $meta ) ) );
 
-		return $this->writer->write_item( $program_id, $hashes, 'course:' . $course['key'], $hash, $created, $updated, fn(): int => $adapter->upsert_course( $spec ) );
+		return $this->writer->write_item(
+			$program_id,
+			$hashes,
+			'course:' . $course['key'],
+			$hash,
+			$created,
+			$updated,
+			static function () use ( $adapter, $spec, $tagline ): int {
+				$id = $adapter->upsert_course( $spec );
+				// The path tagline is the course excerpt, which Package_Builder exports.
+				if ( $id > 0 && get_post( $id ) && get_post_field( 'post_excerpt', $id, 'raw' ) !== $tagline ) {
+					wp_update_post(
+						wp_slash(
+							array(
+								'ID'           => $id,
+								'post_excerpt' => $tagline,
+							)
+						)
+					);
+				}
+				return $id;
+			}
+		);
 	}
 
 	/**
@@ -295,16 +327,35 @@ final class Package_Importer {
 				$meta['_lledger_sources'] = Json::encode_exact( $lesson['sources'] );
 			}
 			if ( isset( $lesson['starterFiles'] ) ) {
-				$meta['_lledger_starter_files'] = Json::encode_exact( $lesson['starterFiles'] );
+				$meta['_lledger_starter_files'] = Json::encode_exact( self::file_rows( (array) $lesson['starterFiles'] ) );
 			}
-		}
-		if ( isset( $course_json['license'] ) ) {
-			$meta['_lledger_licence'] = sanitize_text_field( (string) $course_json['license'] );
+			$licence = $lesson['extensions'][ Lesson_Json_Builder::EXTENSION ]['license'] ?? null;
+			if ( is_string( $licence ) && '' !== $licence ) {
+				$meta['_lledger_licence'] = sanitize_text_field( $licence );
+			}
 		}
 
 		$spec = new Lesson_Spec( $key, $title, $content, $order, 'publish', $meta );
 		$hash = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $course_id, $title, $content, $order, $meta ) ) );
 		$this->writer->write_item( $program_id, $hashes, 'lesson:' . $key, $hash, $created, $updated, fn(): int => $adapter->upsert_lesson( $course_id, $spec ) );
+	}
+
+	/**
+	 * The schema's path => content map as the {path, content} rows the lesson editor and builder use.
+	 *
+	 * @param array<string,string> $files Path => content.
+	 *
+	 * @return array<int,array{path:string,content:string}>
+	 */
+	private static function file_rows( array $files ): array {
+		$rows = array();
+		foreach ( $files as $path => $content ) {
+			$rows[] = array(
+				'path'    => (string) $path,
+				'content' => (string) $content,
+			);
+		}
+		return $rows;
 	}
 
 	/**
