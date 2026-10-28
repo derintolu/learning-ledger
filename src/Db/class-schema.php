@@ -24,8 +24,11 @@ final class Schema {
 
 	/**
 	 * Schema version, stored in option `lledger_schema_version`.
+	 *
+	 * 2: statements gain `kind_seq` and `kind_stored`, so StatementRef referrers are found
+	 * without reading every statement a filter matches (load test, Task 68).
 	 */
-	public const VERSION = 1;
+	public const VERSION = 2;
 
 	/**
 	 * Short table name => `CREATE TABLE` statement.
@@ -76,7 +79,9 @@ KEY object_seq (object_hash,seq),
 KEY registration_seq (registration,seq),
 KEY stored_at (`stored`),
 KEY voided_seq (voided,seq),
-KEY voids_id (voids_id)',
+KEY voids_id (voids_id),
+KEY kind_seq (object_kind,seq),
+KEY kind_stored (object_kind,`stored`)',
 
 			'statement_refs' => 'ref_hash binary(20) NOT NULL,
 ref_kind varchar(32) NOT NULL,

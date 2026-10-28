@@ -243,6 +243,64 @@ class Statement_Query_Test extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_related_queries_page_in_seq_order_across_ref_kinds() {
+		$course = 'https://site.example/course/1';
+		$with   = static function ( array $activities, ?array $instructor = null ) {
+			$st                                 = self::statement( 'u1', 'https://site.example/lesson/1' );
+			$st['context']['contextActivities'] = $activities;
+			if ( null !== $instructor ) {
+				$st['context']['instructor'] = $instructor;
+			}
+			return $st;
+		};
+		[ $s1 ] = $this->store_at( '2026-10-27T08:00:01Z', array( self::statement( 'u1', $course ) ) );
+		[ $s2 ] = $this->store_at( '2026-10-27T08:00:02Z', array( $with( array( 'parent' => array( array( 'id' => $course ) ) ) ) ) );
+		[ $s3 ] = $this->store_at( '2026-10-27T08:00:03Z', array( $with( array( 'grouping' => array( array( 'id' => $course ) ) ) ) ) );
+		[ $s4 ] = $this->store_at(
+			'2026-10-27T08:00:04Z',
+			array(
+				$with(
+					array(
+						'parent'   => array( array( 'id' => $course ) ),
+						'grouping' => array( array( 'id' => $course ) ),
+					)
+				),
+			)
+		);
+		$this->store_at( '2026-10-27T08:00:05Z', array( self::statement( 'u1', 'https://site.example/other' ) ) );
+		[ $s6 ] = $this->store_at( '2026-10-27T08:00:06Z', array( $with( array( 'category' => array( array( 'id' => $course ) ) ), self::agent( 'teacher' ) ) ) );
+		[ $v ]  = $this->store_at( '2026-10-27T08:00:07Z', array( self::ref_to( $s3 ) ) );
+
+		$related = array(
+			'activity'           => $course,
+			'related_activities' => 'true',
+			'limit'              => '2',
+		);
+		$pages   = function ( array $params ): array {
+			$out  = array();
+			$page = $this->query( $params );
+			while ( true ) {
+				$out[] = self::ids( $page );
+				if ( null === $page['more'] ) {
+					return $out;
+				}
+				$page = $this->query( array(), null, More_Cursor::decode( $page['more'] ) );
+			}
+		};
+
+		// s3 is voided; its voiding statement matches through it. s4 matches on two kinds, once.
+		$this->assertSame( array( array( $v, $s6 ), array( $s4, $s2 ), array( $s1 ) ), $pages( $related ) );
+		$this->assertSame( array( array( $s1, $s2 ), array( $s4, $s6 ), array( $v ) ), $pages( array( 'ascending' => 'true' ) + $related ) );
+		$this->assertSame( array( array( $v, $s6, $s4, $s2, $s1 ) ), $pages( array( 'limit' => '10' ) + $related ), 'a first page the direct rows do not fill' );
+
+		$both = array(
+			'agent'          => Json::encode_exact( self::agent( 'teacher' ) ),
+			'related_agents' => 'true',
+		) + $related;
+		$this->assertSame( array( array( $s6 ) ), $pages( $both ) );
+		$this->assertSame( array( array( $v, $s6 ), array( $s4, $s2 ) ), $pages( array( 'since' => '2026-10-27T08:00:01Z' ) + $related ) );
+	}
+
 	public function test_voided_excluded_voiding_included() {
 		[ $target, $other ] = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement(), self::statement( 'u2' ) ) );
 		$voiding            = self::statement( 'u1' );
@@ -419,10 +477,66 @@ class Statement_Query_Test extends WP_UnitTestCase {
 		$this->assertSame( array( $ref_2, $ref_1 ), self::ids( $page ) );
 		$this->assertSame( array( $base ), self::ids( $this->query( array(), null, More_Cursor::decode( $page['more'] ) ) ) );
 
-		// The referring statement itself must pass the caller's read filter.
-		$bound = self::principal( array( 'statements/read' ), array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u3' ) ) );
-		$this->assertSame( array( $ref_1 ), self::ids( $this->query( array( 'verb' => $attempted ), $bound ) ) );
+		// The referring statements must pass the caller's read filter.
+		$bound = self::principal( array( 'statements/read' ), array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u2' ) ) );
+		$this->assertSame( array( $base ), self::ids( $this->query( array( 'verb' => $attempted ), $bound ) ) );
 		unset( $other );
+	}
+
+	public function test_statement_ref_targets_must_pass_the_read_filter() {
+		[ $hidden ]     = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement( 'u2', 'https://site.example/act/1', 'completed', self::REG_1 ) ) );
+		[ $to_hidden ]  = $this->store_at( '2026-10-27T08:00:01Z', array( self::ref_to( $hidden, 'u1', 'commented' ) ) );
+		[ $own ]        = $this->store_at( '2026-10-27T08:00:02Z', array( self::statement( 'u1', 'https://site.example/act/2', 'completed', self::REG_1 ) ) );
+		[ $to_own ]     = $this->store_at( '2026-10-27T08:00:03Z', array( self::ref_to( strtoupper( $own ), 'u1', 'liked' ) ) );
+		[ $via_hidden ] = $this->store_at( '2026-10-27T08:00:04Z', array( self::ref_to( $own, 'u2', 'shared' ) ) );
+		[ $chained ]    = $this->store_at( '2026-10-27T08:00:05Z', array( self::ref_to( $via_hidden, 'u1', 'liked' ) ) );
+		$completed      = 'http://adlnet.gov/expapi/verbs/completed';
+		$bound          = self::principal( array( 'statements/read' ), array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u1' ) ) );
+
+		// Unbound, every chain matches: by verb (referrer-driven) and by registration (target-driven).
+		$all = array( $chained, $via_hidden, $to_own, $own, $to_hidden, $hidden );
+		$this->assertSame( $all, self::ids( $this->query( array( 'verb' => $completed ) ) ) );
+		$this->assertSame( $all, self::ids( $this->query( array( 'registration' => self::REG_1 ) ) ) );
+
+		// Bound to u1: a statement the caller cannot read never makes a referrer match, at any depth,
+		// whether the search starts from the matches or (with since) from the referrers.
+		$this->assertSame( array( $to_own, $own ), self::ids( $this->query( array( 'verb' => $completed ), $bound ) ) );
+		$this->assertSame(
+			array( $to_own, $own ),
+			self::ids(
+				$this->query(
+					array(
+						'verb'  => $completed,
+						'since' => '2026-10-27T07:00:00Z',
+					),
+					$bound
+				)
+			)
+		);
+		$this->assertSame(
+			$all,
+			self::ids(
+				$this->query(
+					array(
+						'verb'  => $completed,
+						'since' => '2026-10-27T07:00:00Z',
+					)
+				)
+			)
+		);
+		$this->assertSame( array( $to_own, $own ), self::ids( $this->query( array( 'registration' => self::REG_1 ), $bound ) ) );
+		$this->assertSame(
+			array( $to_own, $own ),
+			self::ids(
+				$this->query(
+					array(
+						'agent' => Json::encode_exact( self::agent( 'u1' ) ),
+						'verb'  => $completed,
+					),
+					$bound
+				)
+			)
+		);
 	}
 
 	public function test_child_token_reads_only_its_own_in_its_registration() {

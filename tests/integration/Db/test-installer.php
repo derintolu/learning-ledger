@@ -81,8 +81,8 @@ class Installer_Test extends WP_UnitTestCase {
 		foreach ( array_keys( Schema::tables() ) as $short ) {
 			$this->assertSame( Tables::name( $short ), $GLOBALS['wpdb']->get_var( $GLOBALS['wpdb']->prepare( 'SHOW TABLES LIKE %s', Tables::name( $short ) ) ) );
 		}
-		$this->assertSame( 1, (int) get_option( 'lledger_schema_version' ) );
-		$this->assertSame( 1, Schema::VERSION );
+		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 2, Schema::VERSION );
 		$autoload = $GLOBALS['wpdb']->get_var( $GLOBALS['wpdb']->prepare( "SELECT autoload FROM {$GLOBALS['wpdb']->options} WHERE option_name = %s", 'lledger_schema_version' ) );
 		$this->assertContains( $autoload, array( 'no', 'off' ) );
 	}
@@ -141,7 +141,7 @@ class Installer_Test extends WP_UnitTestCase {
 		$this->assertSame( '', $wpdb->last_error );
 		$this->assertSame( $before, count( $this->columns( 'statements' ) ) );
 		$this->assertSame( 17, $before );
-		$this->assertSame( 1, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
 	}
 
 	public function test_statement_indexes_exist() {
@@ -154,7 +154,24 @@ class Installer_Test extends WP_UnitTestCase {
 		}
 		$this->assertTrue( $this->has_index( $indexes, array( 'stored' ) ), '(stored)' );
 		$this->assertTrue( $this->has_index( $indexes, array( 'voids_id' ) ), '(voids_id)' );
-		$this->assertCount( 10, $indexes );
+		$this->assertTrue( $this->has_index( $indexes, array( 'object_kind', 'seq' ) ), '(object_kind,seq) for StatementRef referrers' );
+		$this->assertTrue( $this->has_index( $indexes, array( 'object_kind', 'stored' ) ), '(object_kind,stored) for StatementRef referrers' );
+		$this->assertCount( 12, $indexes );
+	}
+
+	public function test_upgrade_from_version_1_adds_the_statement_ref_indexes() {
+		global $wpdb;
+		$this->install_real_tables();
+		$wpdb->query( 'ALTER TABLE ' . Tables::name( 'statements' ) . ' DROP INDEX kind_seq, DROP INDEX kind_stored' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$this->assertCount( 10, $this->indexes( 'statements' ), 'the version 1 indexes' );
+		update_option( 'lledger_schema_version', 1, false );
+
+		Installer::maybe_upgrade();
+
+		$indexes = $this->indexes( 'statements' );
+		$this->assertTrue( $this->has_index( $indexes, array( 'object_kind', 'seq' ) ) );
+		$this->assertTrue( $this->has_index( $indexes, array( 'object_kind', 'stored' ) ) );
+		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
 	}
 
 	public function test_statement_column_types() {
@@ -278,7 +295,7 @@ class Installer_Test extends WP_UnitTestCase {
 		update_option( 'lledger_schema_version', 0, false );
 		Installer::maybe_upgrade();
 		$this->assertSame( 1, $queries );
-		$this->assertSame( 1, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
 	}
 
 	public function test_db_requirements() {
