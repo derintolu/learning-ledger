@@ -290,6 +290,19 @@ class Player_Importer_Test extends WP_UnitTestCase {
 		$this->assert_refused_whole( $this->importer()->import( $this->xml_file( $this->fixture( '205-3-duplicated-au.xml' ) ) ), 'duplicate_id' );
 	}
 
+	/**
+	 * CATAPULT 205-2-duplicated-objective, cmi5 13.1.3.0-1: objective ids are unique.
+	 */
+	public function test_duplicate_objective_ids_are_rejected() {
+		$objective  = '<objective id="https://example.org/objective/1"><title><langstring lang="en">O</langstring></title><description><langstring lang="en">O</langstring></description></objective>';
+		$objectives = '</course><objectives>' . $objective . $objective . '</objectives>';
+		$xml        = str_replace( '</course>', $objectives, $this->fixture( '001-essentials/cmi5.xml' ) );
+		$this->assert_refused_whole( $this->importer()->import( $this->zip( $xml ) ), 'duplicate_id' );
+
+		$once = str_replace( '</course>', '</course><objectives>' . $objective . '</objectives>', $this->fixture( '001-essentials/cmi5.xml' ) );
+		$this->assertTrue( $this->importer()->import( $this->zip( $once ) )->ok(), 'one objective is fine' );
+	}
+
 	public function test_invalid_au_url_is_rejected() {
 		$this->assert_refused_whole( $this->importer()->import( $this->xml_file( $this->fixture( '206-1-invalid-au-url.xml' ) ) ), 'au_url' );
 		$js = str_replace( 'https://example.org/aus/a1.html', 'javascript:alert(1)', $this->nested_xml() );

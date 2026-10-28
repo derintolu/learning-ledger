@@ -79,6 +79,11 @@ final class Player_Importer {
 	private const SWEEP_ATTEMPTS = 1440;
 
 	/**
+	 * The cmi5 course structure XML namespace.
+	 */
+	private const CMI5_NS = 'https://w3id.org/xapi/profiles/cmi5/v1/CourseStructure.xsd';
+
+	/**
 	 * Query parameters the LMS adds at launch, which an AU URL must not carry (cmi5 8.1).
 	 */
 	private const LAUNCH_PARAMS = array( 'endpoint', 'fetch', 'actor', 'registration', 'activityId' );
@@ -135,7 +140,7 @@ final class Player_Importer {
 			return Import_Report::failed( array( self::from_exception( $e ) ) );
 		}
 
-		$errors = array_merge( self::duplicate_errors( $structure ), self::url_errors( $structure, $paths, ! $is_cxm ) );
+		$errors = array_merge( self::duplicate_errors( $structure ), self::objective_errors( $package->cmi5_xml() ), self::url_errors( $structure, $paths, ! $is_cxm ) );
 		if ( $errors ) {
 			return Import_Report::failed( $errors );
 		}
@@ -359,6 +364,33 @@ final class Player_Importer {
 			$id = $item->id();
 			if ( isset( $seen[ $id ] ) ) {
 				$errors[] = Import_Writer::error( 'duplicate_id', '/' . ( $item instanceof Au ? 'au' : 'block' ), 'The id "' . $id . '" is used more than once.' );
+			}
+			$seen[ $id ] = true;
+		}
+		return $errors;
+	}
+
+	/**
+	 * Errors for objective ids defined more than once (cmi5 13.1.3). The structure does not keep
+	 * objectives, so they are read from the (already validated) cmi5.xml.
+	 *
+	 * @param string $xml cmi5.xml.
+	 *
+	 * @return array<array{code:string,path:string,message:string}>
+	 */
+	private static function objective_errors( string $xml ): array {
+		$doc = new \DOMDocument();
+		if ( ! $doc->loadXML( $xml, LIBXML_NONET ) ) {
+			return array();
+		}
+		$xpath = new \DOMXPath( $doc );
+		$xpath->registerNamespace( 'c', self::CMI5_NS );
+		$seen   = array();
+		$errors = array();
+		foreach ( $xpath->query( '/c:courseStructure/c:objectives/c:objective/@id' ) as $attr ) {
+			$id = trim( $attr->nodeValue );
+			if ( isset( $seen[ $id ] ) ) {
+				$errors[] = Import_Writer::error( 'duplicate_id', '/objective', 'The objective id "' . $id . '" is used more than once.' );
 			}
 			$seen[ $id ] = true;
 		}
