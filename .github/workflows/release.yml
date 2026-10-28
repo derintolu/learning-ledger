@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Read the version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      # bin/build-zip.sh runs composer install, composer prefix, npm ci and
+      # npm run build, then zips the plugin without the paths in .distignore.
+      - name: Build the zip
+        run: bin/build-zip.sh "$VERSION"
+      - name: Unpack the zip for Plugin Check
+        run: unzip -q "dist/learning-ledger-$VERSION.zip" -d dist/check
+      - name: Point wp-env at the unpacked zip
+        run: |
+          cat > .wp-env.override.json <<'JSON'
+          {
+            "plugins": [ "./dist/check/learning-ledger" ],
+            "config": { "LLEDGER_TESTING": false },
+            "env": {
+              "tests": {
+                "plugins": [ "./dist/check/learning-ledger" ]
+              }
+            }
+          }
+          JSON
+      - run: npx @wordpress/env start
+      - name: Install Plugin Check
+        run: npx @wordpress/env run cli wp plugin install plugin-check --activate
+      # wp plugin check exits 0 even when it reports errors, so the step reads
+      # the CSV and fails on any ERROR row. Warnings are shown but do not fail.
+      - name: Run Plugin Check
+        run: |
+          npx @wordpress/env run cli wp plugin check learning-ledger --format=csv > plugin-check.csv
+          cat plugin-check.csv
+          if grep -q '^[0-9]*,[0-9]*,ERROR,' plugin-check.csv; then
+            echo "::error::Plugin Check reported errors."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learning-ledger-zip
+          path: dist/learning-ledger-${{ env.VERSION }}.zip
+          if-no-files-found: error
+      - name: Attach the zip to a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "dist/learning-ledger-$VERSION.zip" --title "Learning Ledger $VERSION" --generate-notes --verify-tag
+
+  wordpress-org:
+    needs: build
+    if: ${{ vars.WPORG_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: learning-ledger-zip
+          path: dist
+      - name: Unpack the checked zip
+        run: unzip -q "dist/learning-ledger-$VERSION.zip" -d dist/svn
+      - name: Deploy to wordpress.org SVN
+        uses: 10up/action-wordpress-plugin-deploy@2.3.0
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: learning-ledger
+          VERSION: ${{ env.VERSION }}
+          BUILD_DIR: dist/svn/learning-ledger

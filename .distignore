@@ -1,0 +1,34 @@
+# Paths left out of the release zip and the wordpress.org SVN trunk.
+# Read by bin/build-zip.sh with rsync --exclude-from; a leading slash anchors a
+# pattern to the plugin root.
+
+# Hidden files and directories anywhere, vendor-prefixed included
+# (.git, .github, .gitignore, .distignore, .wp-env.json, .editorconfig, ...).
+.*
+
+# Development dependencies and build output that is not shipped.
+# vendor/ holds the un-prefixed copies and the dev tools; the plugin runs from
+# vendor-prefixed/ alone.
+/vendor
+/node_modules
+/dist
+
+# Sources of the compiled blocks and editor fields (build/ is shipped).
+/src-js
+
+# Tests, conformance results, scripts and plans.
+/tests
+/conformance
+/bin
+/docs
+
+# Tool configuration.
+/composer.json
+/composer.lock
+/package.json
+/package-lock.json
+/phpcs.xml.dist
+/phpunit.xml.dist
+/phpunit-unit.xml.dist
+/phpunit-http.xml.dist
+/webpack.config.js
