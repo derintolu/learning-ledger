@@ -123,6 +123,41 @@ class Lesson_Fields_Test extends WP_UnitTestCase {
 		$this->assertSame( '{"anything":{"goes":[1,2]}}', get_post_meta( $post, '_lledger_landing', true ) );
 	}
 
+	public function test_final_files_are_read_only_by_users_who_can_edit_the_course() {
+		$post  = self::factory()->post->create(
+			array(
+				'post_type'   => 'lledger_path',
+				'post_status' => 'publish',
+			)
+		);
+		$files = '[{"path":"a.html","content":"answer"}]';
+		update_post_meta( $post, '_lledger_final_files', $files );
+		update_post_meta( $post, '_lledger_landing', '{"a":1}' );
+		$get = static function ( string $context ) use ( $post ): WP_REST_Response {
+			$req = new WP_REST_Request( 'GET', "/wp/v2/lledger_path/$post" );
+			$req->set_param( 'context', $context );
+			return rest_get_server()->dispatch( $req );
+		};
+
+		wp_set_current_user( 0 );
+		$anon = $get( 'view' );
+		$this->assertSame( 200, $anon->get_status() );
+		$this->assertArrayNotHasKey( '_lledger_final_files', $anon->get_data()['meta'], 'anonymous' );
+		$this->assertSame( '{"a":1}', $anon->get_data()['meta']['_lledger_landing'], 'other course meta stays public' );
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+		$this->assertArrayNotHasKey( '_lledger_final_files', $get( 'view' )->get_data()['meta'], 'subscriber' );
+
+		$collection = new WP_REST_Request( 'GET', '/wp/v2/lledger_path' );
+		$listed     = rest_get_server()->dispatch( $collection )->get_data();
+		$this->assertArrayNotHasKey( '_lledger_final_files', $listed[0]['meta'], 'subscriber, collection' );
+
+		$this->editor();
+		$edit = $get( 'edit' );
+		$this->assertSame( 200, $edit->get_status() );
+		$this->assertSame( $files, $edit->get_data()['meta']['_lledger_final_files'], 'editor' );
+	}
+
 	public function test_subscriber_cannot_update() {
 		$post = self::factory()->post->create( array( 'post_type' => 'lledger_lesson' ) );
 		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );

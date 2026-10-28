@@ -30,6 +30,11 @@ final class Lesson_Fields_Module implements Module {
 	);
 
 	/**
+	 * Course meta readable over REST only by users who can edit the course (final files are answers).
+	 */
+	private const COURSE_PRIVATE = array( '_lledger_final_files' );
+
+	/**
 	 * Register hooks.
 	 *
 	 * @return void
@@ -56,7 +61,30 @@ final class Lesson_Fields_Module implements Module {
 		}
 		foreach ( $courses as $type ) {
 			$this->register_for( (string) $type, self::COURSE_JSON );
+			if ( post_type_exists( (string) $type ) ) {
+				add_filter( 'rest_prepare_' . $type, array( $this, 'hide_private_meta' ), 10, 2 );
+			}
 		}
+	}
+
+	/**
+	 * Drop private course meta from a REST response unless the current user can edit the post.
+	 *
+	 * @param \WP_REST_Response $response Response.
+	 * @param \WP_Post          $post     Post.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	public function hide_private_meta( \WP_REST_Response $response, \WP_Post $post ): \WP_REST_Response {
+		$data = $response->get_data();
+		if ( ! is_array( $data ) || ! isset( $data['meta'] ) || ! is_array( $data['meta'] ) || current_user_can( 'edit_post', $post->ID ) ) {
+			return $response;
+		}
+		foreach ( self::COURSE_PRIVATE as $key ) {
+			unset( $data['meta'][ $key ] );
+		}
+		$response->set_data( $data );
+		return $response;
 	}
 
 	/**
