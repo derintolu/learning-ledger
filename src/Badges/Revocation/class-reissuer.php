@@ -11,12 +11,10 @@ namespace LearningLedger\Badges\Revocation;
 // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- only table names are interpolated.
 
 use LearningLedger\Audit\Audit_Log;
-use LearningLedger\Badges\Issuer\Did_Document;
+use LearningLedger\Badges\Claim\Claim_Handler;
 use LearningLedger\Badges\Issuer\Issuer_Key;
 use LearningLedger\Badges\Issuer\Key_Store;
 use LearningLedger\Badges\Pipeline\Badge_Repository;
-use LearningLedger\Badges\Signing\Eddsa_Rdfc_2022;
-use LearningLedger\Badges\Status\Bitstring;
 use LearningLedger\Badges\Status\Status_List_Repository;
 use LearningLedger\Crypto\Multibase;
 use LearningLedger\Db\Tables;
@@ -47,9 +45,13 @@ final class Reissuer {
 	private const BATCH = 100;
 
 	/**
-	 * Seconds to wait for a status list lock.
+	 * Constructor.
+	 *
+	 * @param Status_List_Repository $status Status lists.
 	 */
-	private const LOCK_TIMEOUT = 10;
+	public function __construct(
+		private readonly Status_List_Repository $status = new Status_List_Repository()
+	) {}
 
 	/**
 	 * Re-sign every issued credential whose proof used a key, with the active key.
@@ -100,11 +102,10 @@ final class Reissuer {
 	 * @throws \RuntimeException When no key is active, or a list cannot be locked, signed or written.
 	 */
 	public function resign_status_lists(): int {
-		$key   = self::active_key();
-		$vm    = Did_Document::verification_method_for( $key );
+		self::active_key(); // Throws even when no list exists yet.
 		$count = 0;
 		foreach ( self::live_lists() as $list_id ) {
-			if ( $this->resign_list( $list_id, $key, $vm ) ) {
+			if ( $this->status->resign( $list_id ) ) {
 				++$count;
 			}
 		}
@@ -128,7 +129,7 @@ final class Reissuer {
 			return;
 		}
 		foreach ( self::live_lists() as $list_id ) {
-			$credential = ( new Status_List_Repository() )->credential( $list_id );
+			$credential = $this->status->credential( $list_id );
 			if ( self::signer_kid( $credential ) === $kid ) {
 				throw new \RuntimeException( 'This key signs the live status lists and no other key could re-sign them. Run `wp learning-ledger badges rotate` first, then remove it.' );
 			}
@@ -161,7 +162,7 @@ final class Reissuer {
 		$now                   = Clock::now();
 		$valid_from            = self::newer( $unsigned['validFrom'] ?? null, $now );
 		$unsigned['validFrom'] = $valid_from->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d\TH:i:s\Z' );
-		$signed                = self::sign( $unsigned, $key, $now );
+		$signed                = Claim_Handler::sign( $unsigned, $key, $now );
 
 		global $wpdb;
 		$table   = Tables::name( 'badges' );
@@ -192,82 +193,6 @@ final class Reissuer {
 			self::audit_actor()
 		);
 		return true;
-	}
-
-	/**
-	 * Sign as the claim handler does: an eddsa-rdfc-2022 proof, then `learning_ledger/badge_sign`
-	 * (which turns it into a VC-JWT in that mode).
-	 *
-	 * @param array              $credential Unsigned credential.
-	 * @param Issuer_Key         $key        Active key.
-	 * @param \DateTimeImmutable $now        Proof creation time.
-	 *
-	 * @return array|string
-	 *
-	 * @throws \RuntimeException When the filter returns neither a secured credential with the same id nor a non-empty string.
-	 */
-	private static function sign( array $credential, Issuer_Key $key, \DateTimeImmutable $now ): array|string {
-		$signed = Eddsa_Rdfc_2022::sign( $credential, Did_Document::verification_method_for( $key ), $key->secret(), $now );
-
-		/**
- * This filter is documented in src/Badges/Claim/class-claim-handler.php
-*/
-		$signed = apply_filters( 'learning_ledger/badge_sign', $signed, $credential, $key ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
-
-		if ( is_string( $signed ) && '' !== $signed ) {
-			return $signed;
-		}
-		if ( is_array( $signed ) && ( $signed['id'] ?? null ) === $credential['id'] && is_array( $signed['proof'] ?? null ) ) {
-			return $signed;
-		}
-		throw new \RuntimeException( 'The badge could not be signed.' );
-	}
-
-	/**
-	 * Re-sign one list unless the active key already signed it. Holds the list's lock, the same
-	 * one Status_List_Repository::set_revoked() takes, so no revocation is lost in between.
-	 *
-	 * @param integer    $list_id List id.
-	 * @param Issuer_Key $key     Active key.
-	 * @param string     $vm      Its verification method.
-	 *
-	 * @return boolean Whether the list was re-signed.
-	 *
-	 * @throws \RuntimeException When the lock, signing or the write fails.
-	 */
-	private function resign_list( int $list_id, Issuer_Key $key, string $vm ): bool {
-		global $wpdb;
-		$table = Tables::name( 'status_lists' );
-		$lock  = substr( $wpdb->prefix . 'lledger_status_list_' . $list_id, 0, 64 );
-		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, self::LOCK_TIMEOUT ) ) ) {
-			throw new \RuntimeException( 'Could not lock the status list.' );
-		}
-		try {
-			$row        = $wpdb->get_row( $wpdb->prepare( "SELECT bits, credential FROM {$table} WHERE id = %d", $list_id ), ARRAY_A );
-			$credential = is_array( $row ) ? json_decode( (string) $row['credential'], true ) : null;
-			if ( ! is_array( $credential ) ) {
-				throw new \RuntimeException( 'The status list credential is unreadable.' );
-			}
-			if ( ( $credential['proof']['verificationMethod'] ?? null ) === $vm ) {
-				return false;
-			}
-			$now = Clock::now();
-			unset( $credential['proof'] );
-			$credential['issuer']                           = Did_Document::did();
-			$credential['validFrom']                        = $now->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d\TH:i:s\Z' );
-			$credential['credentialSubject']['encodedList'] = Bitstring::encode( (string) $row['bits'] );
-			$json = wp_json_encode( Eddsa_Rdfc_2022::sign( $credential, $vm, $key->secret(), $now ), JSON_UNESCAPED_SLASHES );
-			if ( ! is_string( $json ) ) {
-				throw new \RuntimeException( 'Could not encode the status list credential.' );
-			}
-			$updated = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET credential = %s, updated = %s WHERE id = %d", $json, Timestamp::to_db( $now ), $list_id ) );
-			if ( 1 !== $updated ) {
-				throw new \RuntimeException( 'Could not write the status list.' );
-			}
-			return true;
-		} finally {
-			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
-		}
 	}
 
 	/**

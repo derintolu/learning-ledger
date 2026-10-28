@@ -96,6 +96,10 @@ final class Revoke_Command {
 		$argv = (array) \WP_CLI::get_runner()->arguments;
 		$at   = array_search( 'remove-key', $argv, true );
 		$kid  = false === $at ? '' : (string) ( $argv[ $at + 1 ] ?? '' );
+		if ( '' === $kid ) {
+			// Without the key id the lists could be re-signed with the very key being removed.
+			\WP_CLI::error( 'Could not read the key id of `badges remove-key`; nothing was removed.' );
+		}
 		try {
 			$this->reissuer->prepare_key_removal( $kid );
 		} catch ( \RuntimeException | \InvalidArgumentException $e ) {

@@ -306,6 +306,29 @@ class Reissuer_Test extends WP_UnitTestCase {
 		$this->assertSame( $encoded, ( new Status_List_Repository() )->credential( $list )['credentialSubject']['encodedList'], 'Revocations survive re-signing.' );
 	}
 
+	public function test_status_list_resign_moves_one_list_to_the_active_key_and_keeps_its_bits() {
+		$id   = $this->issued( 'https://example.org/badges/one' );
+		$list = ( new Badge_Repository() )->get( $id )['status_list_id'];
+		( new Revoker() )->revoke( $id, Revoker::REASON_ADMIN );
+		$repo    = new Status_List_Repository();
+		$encoded = $repo->credential( $list )['credentialSubject']['encodedList'];
+		$this->assertFalse( $repo->resign( $list ), 'A list the active key signed is left alone.' );
+
+		Clock::freeze( $this->t0->modify( '+1 minute' ) );
+		$new = Key_Store::rotate();
+		$this->assertTrue( $repo->resign( $list ) );
+		$this->assertFalse( $repo->resign( $list ) );
+
+		$credential = $repo->credential( $list );
+		$this->assertSame( Did_Document::verification_method_for( $new ), $credential['proof']['verificationMethod'] );
+		$this->assertSame( $this->t0->modify( '+1 minute' )->format( 'Y-m-d\TH:i:s\Z' ), $credential['validFrom'] );
+		$this->assertSame( $encoded, $credential['credentialSubject']['encodedList'] );
+		$this->assertTrue( self::verifies( $credential ) );
+
+		$this->expectException( Invalid_Input::class );
+		$repo->resign( $list + 1000 );
+	}
+
 	public function test_removing_a_retired_key_resigns_its_lists_first() {
 		$this->issued( 'https://example.org/badges/one' );
 		$old = Key_Store::active()->kid;

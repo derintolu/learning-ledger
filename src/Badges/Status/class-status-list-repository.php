@@ -139,6 +139,57 @@ final class Status_List_Repository {
 	}
 
 	/**
+	 * Re-sign a list with the active key, unless that key already signed it. Takes the same
+	 * lock as set_revoked() and signs the stored bits, so no revocation is lost.
+	 *
+	 * @param integer $list_id List id.
+	 *
+	 * @return boolean Whether the list was re-signed.
+	 *
+	 * @throws Invalid_Input When the list does not exist.
+	 * @throws \RuntimeException When no badge key is active, or the list cannot be locked, signed or written.
+	 */
+	public function resign( int $list_id ): bool {
+		$key = Key_Store::active();
+		if ( null === $key ) {
+			throw new \RuntimeException( 'No active badge key to sign a status list with.' );
+		}
+		$vm       = Did_Document::verification_method_for( $key );
+		$resigned = false;
+		global $wpdb;
+		$this->with_lock(
+			'list_' . $list_id,
+			function () use ( $wpdb, $list_id, $vm, &$resigned ): void {
+				$row = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$wpdb->prepare( "SELECT bits, credential FROM %i WHERE id = %d AND purpose = %s AND credential <> ''", Tables::name( 'status_lists' ), $list_id, self::PURPOSE ),
+					ARRAY_A
+				);
+				if ( ! is_array( $row ) ) {
+					throw new Invalid_Input( 'No such status list.', 'not_found', 'list_id' );
+				}
+				$credential = json_decode( (string) $row['credential'], true );
+				if ( ( $credential['proof']['verificationMethod'] ?? null ) === $vm ) {
+					return;
+				}
+				$updated = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$wpdb->prepare(
+						'UPDATE %i SET credential = %s, updated = %s WHERE id = %d',
+						Tables::name( 'status_lists' ),
+						$this->signed_json( $list_id, (string) $row['bits'] ),
+						self::now(),
+						$list_id
+					)
+				);
+				if ( 1 !== $updated ) {
+					throw new \RuntimeException( 'Could not write the status list.' );
+				}
+				$resigned = true;
+			}
+		);
+		return $resigned;
+	}
+
+	/**
 	 * The list's signed BitstringStatusListCredential.
 	 *
 	 * @param integer $list_id List id.

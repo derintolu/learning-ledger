@@ -186,6 +186,9 @@ final class Claim_Handler {
 	 * Sign with the eddsa-rdfc-2022 Data Integrity proof, then let `learning_ledger/badge_sign`
 	 * replace the result (Task 65 returns a VC-JWT string).
 	 *
+	 * The one badge credential signer: claims use it, and so does Reissuer when it re-signs a
+	 * credential after a key is removed, so both accept exactly the same filter results.
+	 *
 	 * @param array              $credential Unsigned credential.
 	 * @param Issuer_Key         $key        Active key.
 	 * @param \DateTimeImmutable $now        Proof creation time.
@@ -194,7 +197,7 @@ final class Claim_Handler {
 	 *
 	 * @throws \RuntimeException When the filter returns neither a secured credential with the same id nor a non-empty string.
 	 */
-	private static function sign( array $credential, Issuer_Key $key, \DateTimeImmutable $now ): array|string {
+	public static function sign( array $credential, Issuer_Key $key, \DateTimeImmutable $now ): array|string {
 		$signed = Eddsa_Rdfc_2022::sign( $credential, Did_Document::verification_method_for( $key ), $key->secret(), $now );
 
 		/**
