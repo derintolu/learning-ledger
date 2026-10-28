@@ -607,10 +607,13 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 		$this->assert_status( 403, self::post( $au, array( $with( Vocab::PASSED, 0.9, 0.89 ) ) ), 'passed below masteryScore' );
 		$this->assert_status( 403, self::post( $au, array( $with( Vocab::FAILED, 0.9, 0.9 ) ) ), 'failed at masteryScore' );
 		$this->assert_status( 403, self::post( $au, array( $with( Vocab::FAILED, 0.9, 0.91 ) ) ), 'failed above masteryScore' );
+		$this->assert_status( 403, self::post( $au, array( $with( Vocab::FAILED, 0.8, null ) ) ), 'failed with another masteryScore, no score' );
 		$this->assertSame( 0, $this->count_rows() );
-		$this->assert_status( 200, self::post( $au, array( $with( Vocab::FAILED, 0.9, 0.89 ) ) ), 'failed below masteryScore' );
+		$this->assert_status( 200, self::post( $au, array( $with( Vocab::FAILED, null, null ) ) ), 'a judgement without a score needs no masteryScore' );
 		[ $later ] = $this->child( 'Normal', self::SESSION2 );
-		$this->assert_status( 200, self::post( $later, array( $with( Vocab::PASSED, 0.9, 0.9, self::SESSION2 ) ) ), 'passed at masteryScore' );
+		$this->assert_status( 200, self::post( $later, array( $with( Vocab::FAILED, 0.9, 0.89, self::SESSION2 ) ) ), 'failed below masteryScore' );
+		[ $last ] = $this->child( 'Normal', self::SESSION3 );
+		$this->assert_status( 200, self::post( $last, array( $with( Vocab::PASSED, 0.9, 0.9, self::SESSION3 ) ) ), 'passed at masteryScore' );
 	}
 
 	public function test_full_client_is_never_guarded() {

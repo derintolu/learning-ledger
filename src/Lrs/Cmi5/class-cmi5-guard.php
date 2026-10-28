@@ -311,15 +311,17 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 			throw new Xapi_Error( 403, 'A raw score needs min and max.' );
 		}
 		$mastery = $this->mastery_score( $token );
+		$scaled  = $score['scaled'] ?? null;
+		$scaled  = is_int( $scaled ) || is_float( $scaled ) ? (float) $scaled : null;
 		if ( null === $mastery ) {
 			return;
 		}
+		// A judgement based on the masteryScore (one with a scaled score) carries it [cmi5 9.6.3.2-2].
 		$given = $statement['context']['extensions'][ Vocab::EXT_MASTERYSCORE ] ?? null;
-		if ( ( ! is_int( $given ) && ! is_float( $given ) ) || abs( (float) $given - $mastery ) > 1e-9 ) {
-			throw new Xapi_Error( 403, 'A passed or failed statement must carry the masteryScore from LMS.LaunchData.' );
+		if ( ( null !== $scaled || null !== $given ) && ( ( ! is_int( $given ) && ! is_float( $given ) ) || abs( (float) $given - $mastery ) > 1e-9 ) ) {
+			throw new Xapi_Error( 403, 'A passed or failed statement with a scaled score must carry the masteryScore from LMS.LaunchData.' );
 		}
-		$scaled = $score['scaled'] ?? null;
-		if ( ( is_int( $scaled ) || is_float( $scaled ) ) && ( Vocab::PASSED === $verb ) !== ( (float) $scaled >= $mastery ) ) {
+		if ( null !== $scaled && ( Vocab::PASSED === $verb ) !== ( $scaled >= $mastery ) ) {
 			throw new Xapi_Error( 403, 'A passed scaled score is at least the masteryScore and a failed one below it.' );
 		}
 	}
