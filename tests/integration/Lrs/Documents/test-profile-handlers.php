@@ -163,6 +163,33 @@ class Profile_Handlers_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * XAPI-00273 (agent profile) and XAPI-00287 / XAPI-00293 (activity profile): under 1.0.3
+	 * a PUT with neither If-Match nor If-None-Match is 400 for a new document (409 for an
+	 * existing one, above), and nothing is stored. Under 2.0 creating without one stays allowed.
+	 *
+	 * @dataProvider resources
+	 */
+	public function test_xapi_00273_put_without_precondition_on_new_document_400_under_1_0_3( string $path, array $context ) {
+		$c = self::client( array( Scopes::PROFILE ) );
+		$p = array_merge( $context, array( 'profileId' => 'new-doc' ) );
+		$h = array(
+			'Content-Type'             => 'application/json',
+			'X-Experience-API-Version' => '1.0.3',
+		);
+
+		$res = $c->request( 'PUT', $path, $p, '{"a":1}', $h );
+		$this->assertSame( 400, $res->status() );
+		$this->assertTrue( json_decode( $res->body(), true )['error'] );
+		$this->assertSame( 404, $c->request( 'GET', $path, $p, null, array( 'X-Experience-API-Version' => '1.0.3' ) )->status(), 'nothing stored' );
+
+		$this->assertSame( 204, $c->request( 'PUT', $path, $p, '{"a":1}', array_merge( $h, array( 'If-None-Match' => '*' ) ) )->status() );
+		$this->assertSame( 409, $c->request( 'PUT', $path, $p, '{"a":2}', $h )->status() );
+
+		$p2 = array_merge( $context, array( 'profileId' => 'new-doc-2' ) );
+		$this->assertSame( 204, $c->request( 'PUT', $path, $p2, '{"a":1}', array( 'Content-Type' => 'application/json' ) )->status(), '2.0 creates' );
+	}
+
+	/**
 	 * @dataProvider resources
 	 */
 	public function test_list_ids_since( string $path, array $context ) {

@@ -47,6 +47,17 @@ final class Agent_Profile_Handler extends Document_Handler_Base {
 	}
 
 	/**
+	 * Under 1.0.3 a PUT that creates a profile must carry a precondition (XAPI-00273).
+	 *
+	 * @param string $version Negotiated version.
+	 *
+	 * @return boolean
+	 */
+	protected function precondition_required_to_create( string $version ): bool {
+		return '1.0.3' === $version;
+	}
+
+	/**
 	 * Key.
 	 *
 	 * @param Xapi_Request $r      Request.

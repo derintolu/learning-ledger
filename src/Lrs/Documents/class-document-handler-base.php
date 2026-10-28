@@ -89,6 +89,18 @@ abstract class Document_Handler_Base implements Resource_Handler {
 	abstract protected function conflict_without_precondition( string $version ): bool;
 
 	/**
+	 * Whether a PUT with neither If-Match nor If-None-Match is 400 when the document does not
+	 * exist yet, in this version. Off by default; the profile resources turn it on for 1.0.3.
+	 *
+	 * @param string $version Negotiated version.
+	 *
+	 * @return boolean
+	 */
+	protected function precondition_required_to_create( string $version ): bool {
+		return false;
+	}
+
+	/**
 	 * Whether DELETE without an id deletes the set (State only).
 	 *
 	 * @return boolean
@@ -260,11 +272,15 @@ abstract class Document_Handler_Base implements Resource_Handler {
 	 * @param Doc_Key      $k Key.
 	 *
 	 * @return Xapi_Response
-	 * @throws Xapi_Error 409 when the document exists and no precondition was sent (where the version requires it).
+	 * @throws Xapi_Error 409 when the document exists and no precondition was sent (where the version requires it);
+	 *                    400 when it does not and the version requires a precondition to create it.
 	 */
 	private function put( Xapi_Request $r, Doc_Key $k ): Xapi_Response {
 		$if_match      = $r->header( 'If-Match' );
 		$if_none_match = $r->header( 'If-None-Match' );
+		if ( null === $if_match && null === $if_none_match && $this->precondition_required_to_create( $r->version() ) && null === $this->store->get( $k ) ) {
+			throw new Xapi_Error( 400, 'Send If-None-Match: * to create this document, or If-Match with its ETag to replace it.' );
+		}
 		if ( null === $if_match && null === $if_none_match && $this->conflict_without_precondition( $r->version() ) ) {
 			try {
 				$this->store->put( $k, $r->body(), self::content_type( $r ), null, '*' );
