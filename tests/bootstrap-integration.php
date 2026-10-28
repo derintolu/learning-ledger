@@ -34,6 +34,10 @@ tests_add_filter(
 		if ( file_exists( $sensei ) ) {
 			require_once $sensei;
 		}
+		$lifterlms = WP_PLUGIN_DIR . '/lifterlms/lifterlms.php';
+		if ( file_exists( $lifterlms ) ) {
+			require_once $lifterlms;
+		}
 		require_once dirname( __DIR__ ) . '/learning-ledger.php';
 	}
 );
