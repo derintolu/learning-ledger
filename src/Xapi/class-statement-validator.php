@@ -378,7 +378,8 @@ final class Statement_Validator {
 			throw new Invalid_Input( 'response must be a string.', 'type', $path . '.response' );
 		}
 		if ( array_key_exists( 'duration', $result ) ) {
-			$valid = is_string( $result['duration'] );
+			// ISO 8601:2004 4.4.3.2: a week duration (PnW) takes no other units (XAPI-00124).
+			$valid = is_string( $result['duration'] ) && ( ! str_contains( $result['duration'], 'W' ) || 1 === preg_match( '/\AP\d+W\z/', $result['duration'] ) );
 			if ( $valid ) {
 				try {
 					Duration::parse( $result['duration'] );

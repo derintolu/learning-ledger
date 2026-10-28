@@ -214,4 +214,19 @@ class Statement_Validator_Test extends \PHPUnit\Framework\TestCase {
 			Statement_Validator::validate( array_merge( $st, array( 'timestamp' => '2008-09-15T15:53:00.601' . $offset ) ), '1.0.3' );
 		}
 	}
+
+	/**
+	 * XAPI-00124 (Data 4.6): a duration is ISO 8601:2004 4.4.3.2, so weeks stand alone ("P4W1D" is 400).
+	 */
+	public function test_xapi_00124_week_duration_cannot_combine_with_other_units() {
+		$st = self::load( self::FIXTURES . 'valid/minimal.both.json' );
+		foreach ( array( '1.0.3', '2.0.0' ) as $version ) {
+			foreach ( array( 'PT4H35M59.14S', 'PT16559.14S', 'P3Y1M29DT4H35M59.14S', 'P3Y', 'P4W' ) as $d ) {
+				Statement_Validator::validate( array_merge( $st, array( 'result' => array( 'duration' => $d ) ) ), $version );
+			}
+			foreach ( array( 'P4W1D', 'P1Y4W', 'P4WT1H' ) as $d ) {
+				self::rejects( array_merge( $st, array( 'result' => array( 'duration' => $d ) ) ), $version, 'result.duration', $d . ' ' . $version );
+			}
+		}
+	}
 }
