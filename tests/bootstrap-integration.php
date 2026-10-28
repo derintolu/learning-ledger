@@ -42,6 +42,10 @@ tests_add_filter(
 		if ( file_exists( $tutor ) ) {
 			require_once $tutor;
 		}
+		$learnpress = WP_PLUGIN_DIR . '/learnpress/learnpress.php';
+		if ( file_exists( $learnpress ) ) {
+			require_once $learnpress;
+		}
 		require_once dirname( __DIR__ ) . '/learning-ledger.php';
 	}
 );
