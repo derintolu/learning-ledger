@@ -105,6 +105,7 @@ final class Revoke_Command {
 		} catch ( \RuntimeException | \InvalidArgumentException $e ) {
 			\WP_CLI::error( $e->getMessage() );
 		}
+		\WP_CLI::log( sprintf( 'Status lists are signed by the active key. Badges signed by %1$s stop verifying once it is removed: run `wp learning-ledger badges reissue --kid=%1$s` to re-issue them.', $kid ) );
 	}
 
 	/**

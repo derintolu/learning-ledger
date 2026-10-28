@@ -26,7 +26,9 @@ if ( ! class_exists( 'WP_CLI' ) ) {
 
 		public static function warning( string $message ): void {}
 
-		public static function log( string $message ): void {}
+		public static function log( string $message ): void {
+			$GLOBALS['lledger_revoke_cli_log'][] = $message;
+		}
 
 		public static function get_runner(): object {
 			return (object) array( 'arguments' => self::$arguments );
@@ -86,8 +88,11 @@ class Revoke_Command_Test extends WP_UnitTestCase {
 		$old               = substr( $this->old_vm, strrpos( $this->old_vm, '#' ) + 1 );
 		WP_CLI::$arguments = array( 'learning-ledger', 'badges', 'remove-key', $old );
 
+		$GLOBALS['lledger_revoke_cli_log'] = array();
 		( new Revoke_Command() )->before_remove_key();
 
 		$this->assertSame( Did_Document::verification_method_for( Key_Store::active() ), $this->list_vm() );
+		$this->assertCount( 1, $GLOBALS['lledger_revoke_cli_log'] );
+		$this->assertStringContainsString( 'wp learning-ledger badges reissue --kid=' . $old, $GLOBALS['lledger_revoke_cli_log'][0] );
 	}
 }
