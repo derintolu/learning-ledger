@@ -59,11 +59,36 @@ final class Agents_Handler implements Resource_Handler {
 		// An agent never seen in a statement still identifies itself.
 		$own = $agent->to_array();
 		foreach ( Agent_Identity::IFI_KEYS as $key ) {
-			if ( isset( $own[ $key ] ) && ! in_array( $own[ $key ], $person[ $key ], true ) ) {
+			if ( isset( $own[ $key ] ) && ! self::listed( $own[ $key ], $person[ $key ] ) ) {
 				$person[ $key ][] = $own[ $key ];
 			}
 		}
 		return Xapi_Response::json( 200, $person );
+	}
+
+	/**
+	 * Whether an IFI value is already in a list, whatever the key order of an account object
+	 * (MySQL 8 JSON columns return the keys in their own order).
+	 *
+	 * @param mixed $value IFI value.
+	 * @param array $list  Listed IFI values.
+	 *
+	 * @return boolean
+	 */
+	private static function listed( mixed $value, array $list ): bool {
+		if ( ! is_array( $value ) ) {
+			return in_array( $value, $list, true );
+		}
+		ksort( $value );
+		foreach ( $list as $item ) {
+			if ( is_array( $item ) ) {
+				ksort( $item );
+			}
+			if ( $item === $value ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

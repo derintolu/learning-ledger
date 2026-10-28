@@ -143,6 +143,27 @@ class Activities_Agents_Handlers_Test extends WP_UnitTestCase {
 		$this->assertSame( array(), $bound['mbox'] );
 	}
 
+	public function test_account_stored_with_reversed_key_order_is_listed_once() {
+		$a = Agent_Identity::from_array( self::learner( 'learner-1' ) );
+		( new Agent_Repository() )->record( $a );
+		// MySQL 8 JSON columns hand an account back with its keys sorted by length: {name, homePage}.
+		global $wpdb;
+		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				'UPDATE %i SET ifi = %s WHERE ifi_hash = UNHEX(%s)',
+				Tables::name( 'agents' ),
+				'{"account":{"name":"learner-1","homePage":"https://lms.example"}}',
+				bin2hex( $a->hash() )
+			)
+		);
+
+		$res    = $this->reader()->request( 'GET', 'agents', array( 'agent' => wp_json_encode( self::learner( 'learner-1' ) ) ) );
+		$person = json_decode( $res->body(), true );
+
+		$this->assertSame( 200, $res->status() );
+		$this->assertCount( 1, $person['account'] );
+	}
+
 	public function test_unknown_agent_still_gets_its_own_ifi() {
 		$res    = $this->reader()->request( 'GET', 'agents', array( 'agent' => wp_json_encode( array( 'mbox' => 'mailto:nobody@example.com' ) ) ) );
 		$person = json_decode( $res->body(), true );
