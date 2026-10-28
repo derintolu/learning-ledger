@@ -193,6 +193,17 @@ class Badge_Evaluator_Test extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * A cmi5 LMS's `satisfied`: about its own typed block or course activity, with the publisher
+	 * id in grouping (cmi5 9.3.9, 9.6.2.3), as the Sensei player writes it.
+	 */
+	private function lms_satisfied( string $publisher_id, string $kind ): array {
+		$st                         = $this->satisfied( $publisher_id . '/' . $kind );
+		$st['object']['definition'] = array( 'type' => 'https://w3id.org/xapi/cmi5/activitytype/' . $kind );
+		$st['context']['contextActivities']['grouping'] = array( array( 'id' => $publisher_id ) );
+		return $st;
+	}
+
 	private function store( Principal $p, array ...$statements ): array {
 		return ( new Statement_Store() )->store( $statements, $p, '1.0.3' );
 	}
@@ -295,6 +306,46 @@ class Badge_Evaluator_Test extends WP_UnitTestCase {
 		$badge = ( new Badge_Repository() )->get( $ids[0] );
 		$this->assertSame( $sat, $badge['trigger_statement_id'] );
 		$this->assertSame( '2 of 3 lessons completed, 1 tested out by placement', $badge['narrative'] );
+	}
+
+	/**
+	 * T64 regression: the player's typed `{id}/block` and `{id}/course` satisfied statements
+	 * trigger block and course badges through their grouping publisher id.
+	 */
+	public function test_typed_lms_block_and_course_satisfied_trigger_badges() {
+		$c = $this->import( self::declaration( 'block-satisfied', 'path-a', false, 'block' ), self::declaration( 'course-satisfied', null, false, 'course' ) );
+		$this->store( $this->trusted, $this->completed( self::A1 ), $this->completed( self::A2 ), $this->completed( self::B1 ) );
+		[ $block ]  = $this->store( $this->trusted, $this->lms_satisfied( self::PATH_A, 'block' ) );
+		[ $course ] = $this->store( $this->trusted, $this->lms_satisfied( self::COURSE, 'course' ) );
+
+		$ids = $this->evaluate( $c );
+		$this->assertCount( 2, $ids );
+		$triggers = array_map( static fn( $id ) => ( new Badge_Repository() )->get( $id )['trigger_statement_id'], $ids );
+		sort( $triggers );
+		$expected = array( $block, $course );
+		sort( $expected );
+		$this->assertSame( $expected, $triggers );
+	}
+
+	public function test_typed_satisfied_needs_its_kind_and_a_matching_grouping() {
+		$c = $this->import( self::declaration( 'block-satisfied', 'path-a', false, 'block' ), self::declaration( 'course-satisfied', null, false, 'course' ) );
+		$this->store( $this->trusted, $this->completed( self::A1 ), $this->completed( self::A2 ), $this->completed( self::B1 ) );
+		$untyped = $this->lms_satisfied( self::PATH_A, 'block' );
+		unset( $untyped['object']['definition'] );
+		$wrong_kind = $this->lms_satisfied( self::COURSE, 'block' );
+		$elsewhere  = $this->lms_satisfied( 'https://example.org/courses/other/paths/a', 'block' );
+		$this->store( $this->trusted, $untyped, $wrong_kind, $elsewhere );
+
+		$this->assertSame( array(), $this->evaluate( $c ) );
+	}
+
+	public function test_a_batch_holding_only_a_typed_course_satisfied_queues_its_course() {
+		( new Pipeline_Module() )->register();
+		$this->import( self::declaration( 'course-satisfied', null ) );
+		$this->store( $this->trusted, $this->lms_satisfied( self::COURSE, 'course' ) );
+		global $wpdb;
+		$payload = json_decode( (string) $wpdb->get_var( 'SELECT payload FROM ' . Tables::name( 'jobs' ) ), true ); // phpcs:ignore WordPress.DB
+		$this->assertSame( self::COURSE, $payload['course'] );
 	}
 
 	public function test_satisfied_written_by_an_untrusted_client_creates_nothing() {

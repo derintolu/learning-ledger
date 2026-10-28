@@ -12,6 +12,7 @@ use LearningLedger\Kernel\Capabilities;
 use LearningLedger\Kernel\Module;
 use LearningLedger\Lrs\Courses\Course_Record;
 use LearningLedger\Lrs\Courses\Course_Repository;
+use LearningLedger\Lrs\Statements\Ref_Indexer;
 use LearningLedger\Lrs\Statements\Statement_Repository;
 use LearningLedger\Lrs\Statements\Stored_Statement;
 use LearningLedger\Queue\Job_Queue;
@@ -81,8 +82,14 @@ final class Pipeline_Module implements Module {
 			$st     = $row->statement();
 			$course = $this->courses->for_statement( $st );
 			if ( null === $course && Vocab::SATISFIED === ( $st['verb']['id'] ?? null ) ) {
-				$object = $st['object']['id'] ?? null;
-				$course = is_string( $object ) ? $this->courses->get( $object ) : null;
+				// The course's own id: the object, or the grouping of an LMS course activity [cmi5 9.6.2.3].
+				$ids = array( $st['object']['id'] ?? null );
+				if ( Badge_Evaluator::TYPE_COURSE === ( $st['object']['definition']['type'] ?? null ) ) {
+					$ids = array_merge( $ids, array_column( Ref_Indexer::activity_list( $st['context']['contextActivities']['grouping'] ?? null ), 'id' ) );
+				}
+				foreach ( $ids as $id ) {
+					$course = $course ?? ( is_string( $id ) ? $this->courses->get( $id ) : null );
+				}
 				if ( null === $course ) {
 					$unresolved[ $row->registration ] = true;
 					continue;

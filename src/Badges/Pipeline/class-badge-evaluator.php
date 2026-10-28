@@ -18,6 +18,7 @@ use LearningLedger\Cmi5\Vocab;
 use LearningLedger\Cmi5\Waiver_Policy;
 use LearningLedger\Lrs\Auth\Client_Repository;
 use LearningLedger\Lrs\Courses\Course_Record;
+use LearningLedger\Lrs\Statements\Ref_Indexer;
 use LearningLedger\Lrs\Statements\Statement_Repository;
 use LearningLedger\Lrs\Statements\Stored_Statement;
 use LearningLedger\Util\Clock;
@@ -39,6 +40,13 @@ final class Badge_Evaluator {
 	 * Audit event of a held badge.
 	 */
 	const HELD_EVENT = 'badge_held';
+
+	/**
+	 * Activity types of an LMS's own block and course activities, which a cmi5 LMS's `satisfied`
+	 * is about, with the publisher id in grouping [cmi5 9.3.9, 9.6.2.3].
+	 */
+	const TYPE_BLOCK  = 'https://w3id.org/xapi/cmi5/activitytype/block';
+	const TYPE_COURSE = 'https://w3id.org/xapi/cmi5/activitytype/course';
 
 	/**
 	 * Fields of a declaration that are the badge's Achievement.
@@ -293,9 +301,8 @@ final class Badge_Evaluator {
 			if ( null !== $fact ) {
 				$facts[] = $fact;
 			}
-			$object_id = $st['object']['id'] ?? null;
-			if ( Vocab::SATISFIED === ( $st['verb']['id'] ?? null ) && is_string( $object_id ) && ! isset( $satisfied[ $object_id ] )
-				&& ( $s->course_id() === $object_id || null !== $s->find_block( $object_id ) ) && $this->trusted( $row ) ) {
+			$object_id = Vocab::SATISFIED === ( $st['verb']['id'] ?? null ) ? self::satisfied_target( $st, $s ) : null;
+			if ( null !== $object_id && ! isset( $satisfied[ $object_id ] ) && $this->trusted( $row ) ) {
 				$satisfied[ $object_id ] = $row->id;
 			}
 		}
@@ -305,6 +312,37 @@ final class Badge_Evaluator {
 			'satisfied' => $satisfied,
 			'rows'      => $by_id,
 		);
+	}
+
+	/**
+	 * The course or block a `satisfied` statement is about: its object when that is the course or
+	 * a block id, or, when its object is an LMS block or course activity (typed, cmi5 9.3.9), the
+	 * publisher id of that kind in its grouping.
+	 *
+	 * @param array            $st Statement.
+	 * @param Course_Structure $s  Course structure.
+	 *
+	 * @return string|null Course or block id, null when it is about neither.
+	 */
+	private static function satisfied_target( array $st, Course_Structure $s ): ?string {
+		$object_id = $st['object']['id'] ?? null;
+		if ( ! is_string( $object_id ) ) {
+			return null;
+		}
+		if ( $s->course_id() === $object_id || null !== $s->find_block( $object_id ) ) {
+			return $object_id;
+		}
+		$type = $st['object']['definition']['type'] ?? null;
+		if ( self::TYPE_BLOCK !== $type && self::TYPE_COURSE !== $type ) {
+			return null;
+		}
+		foreach ( Ref_Indexer::activity_list( $st['context']['contextActivities']['grouping'] ?? null ) as $activity ) {
+			$id = $activity['id'];
+			if ( self::TYPE_COURSE === $type ? $s->course_id() === $id : null !== $s->find_block( $id ) ) {
+				return $id;
+			}
+		}
+		return null;
 	}
 
 	/**
