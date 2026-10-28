@@ -3,8 +3,7 @@
  *
  * Each button posts the lesson and mode to the launch route with the REST nonce. An OwnWindow AU
  * replaces this page; an AnyWindow AU runs in an iframe in the lesson. When the AU returns, the
- * frame navigates to this lesson's page on this origin, which this page can read (the AU's own
- * origin it cannot), and it reloads to show the new status.
+ * frame loads a page of this site, which this page can read, and it reloads to show the new status.
  */
 const FRAME_NAME = 'lledger-cmi5-frame';
 
@@ -13,25 +12,21 @@ function isHttpUrl( value ) {
 }
 
 /**
- * Whether the frame has come back to this lesson. Reading a cross-origin frame's location throws,
- * which means the AU is still running.
+ * Whether the AU has handed the frame back. The AU never shares this page's origin (it is on its
+ * own content host, or opaque under the CSP sandbox), so reading the frame's location throws while
+ * it runs. Any readable document other than the blank one is the site again, whatever its URL.
  *
  * @param {HTMLIFrameElement} frame The AU frame.
  */
 function hasReturned( frame ) {
 	try {
-		const back = frame.contentWindow.location;
-		return (
-			back.origin === window.location.origin &&
-			back.pathname === window.location.pathname &&
-			back.search === window.location.search
-		);
+		return frame.contentWindow.location.href !== 'about:blank';
 	} catch {
 		return false;
 	}
 }
 
-function openFrame( root, url, title ) {
+function openFrame( root, url ) {
 	const holder = root.querySelector( '[data-lledger-frame]' );
 	if ( ! holder ) {
 		window.location.assign( url );
@@ -40,7 +35,7 @@ function openFrame( root, url, title ) {
 	holder.textContent = '';
 	const frame = document.createElement( 'iframe' );
 	frame.name = FRAME_NAME;
-	frame.title = title;
+	frame.title = root.dataset.frameTitle || '';
 	frame.setAttribute(
 		'sandbox',
 		'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
@@ -54,6 +49,10 @@ function openFrame( root, url, title ) {
 	} );
 	frame.src = url;
 	holder.appendChild( frame );
+	const back = root.querySelector( '[data-lledger-return]' );
+	if ( back ) {
+		back.hidden = false;
+	}
 	frame.scrollIntoView( { block: 'start' } );
 }
 
@@ -103,11 +102,7 @@ function init( root ) {
 						}
 						if ( data.method === 'AnyWindow' ) {
 							buttons.forEach( ( b ) => ( b.disabled = false ) );
-							openFrame(
-								root,
-								data.launch_url,
-								button.textContent
-							);
+							openFrame( root, data.launch_url );
 							return;
 						}
 						window.location.assign( data.launch_url );

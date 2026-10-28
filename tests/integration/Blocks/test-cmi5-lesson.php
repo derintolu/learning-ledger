@@ -184,17 +184,42 @@ class Cmi5_Lesson_Test extends WP_UnitTestCase {
 
 	public function test_output_is_escaped() {
 		$evil = '"><img src=x onerror=alert(1)>';
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) ); // Saves without content filtering.
 		wp_update_post(
 			array(
 				'ID'           => $this->lesson,
-				'post_content' => self::markup( $evil ),
+				'post_content' => wp_slash( self::markup( $evil ) ),
 			)
 		);
 		$this->enrol();
 		wp_set_current_user( $this->learner );
 		$html = $this->render();
 		$this->assertStringNotContainsString( '<img src=x', $html );
-		$this->assertStringNotContainsString( 'onerror=alert(1)>', $html );
+		$this->assertStringContainsString( 'Lesson content:', $html );
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		$preview = $this->editor_preview( true, $evil );
+		$this->assertStringContainsString( '&lt;img src=x onerror=alert(1)&gt;', $preview );
+		$this->assertStringNotContainsString( '<img src=x', $preview );
+	}
+
+	public function test_return_to_lesson_fallback_link_and_frame_title_data() {
+		$this->enrol();
+		wp_set_current_user( $this->learner );
+		$html = $this->render();
+		$this->assertStringContainsString( 'data-lledger-return hidden', $html );
+		$this->assertStringContainsString( 'Return to lesson', $html );
+		$this->assertStringContainsString( 'href="' . esc_url( get_permalink( $this->lesson ) ) . '"', $html );
+		$this->assertStringContainsString( 'data-frame-title="Lesson content: ', $html );
+	}
+
+	public function test_edit_context_outside_a_rest_request_renders_the_front_end() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		$this->pass_required_quiz();
+		$_GET['context'] = 'edit';
+		$html            = $this->render();
+		$this->assertStringNotContainsString( 'data-lledger-warning', $html );
+		$this->assertStringContainsString( 'data-lledger-mode="Browse"', $html );
 	}
 
 	public function test_no_au_id_renders_nothing() {
@@ -224,14 +249,14 @@ class Cmi5_Lesson_Test extends WP_UnitTestCase {
 	/**
 	 * The block-renderer response the editor preview is built from.
 	 */
-	private function editor_preview( bool $edit_context = true ): string {
+	private function editor_preview( bool $edit_context = true, string $au = self::AU_ID ): string {
 		if ( $edit_context ) {
 			$_GET['context'] = 'edit';
 		}
 		$req = new WP_REST_Request( 'GET', '/wp/v2/block-renderer/learning-ledger/cmi5-lesson' );
 		$req->set_param( 'context', $edit_context ? 'edit' : 'view' );
 		$req->set_param( 'post_id', $this->lesson );
-		$req->set_param( 'attributes', array( 'auId' => self::AU_ID ) );
+		$req->set_param( 'attributes', array( 'auId' => $au ) );
 		$res = rest_get_server()->dispatch( $req );
 		$this->assertSame( 200, $res->get_status(), wp_json_encode( $res->get_data() ) );
 		return (string) $res->get_data()['rendered'];

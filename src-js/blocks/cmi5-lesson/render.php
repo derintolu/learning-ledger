@@ -33,7 +33,7 @@ $lledger_can_edit = current_user_can( 'edit_post', $lledger_lesson );
 
 // The editor's server-side preview.
 $lledger_context = isset( $_GET['context'] ) ? sanitize_key( wp_unslash( $_GET['context'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display switch, gated by the edit capability.
-if ( 'edit' === $lledger_context && $lledger_can_edit ) {
+if ( 'edit' === $lledger_context && $lledger_can_edit && wp_is_rest_endpoint() ) {
 	$lledger_quiz = false;
 	foreach ( $lledger_adapter->course_tree( $lledger_course )->lessons as $lledger_node ) {
 		if ( $lledger_node->id === $lledger_lesson ) {
@@ -111,10 +111,12 @@ if ( $lledger_can_edit ) {
 $lledger_wrapper = array();
 if ( array() !== $lledger_buttons ) {
 	$lledger_wrapper = array(
-		'data-endpoint' => rest_url( 'learning-ledger/v1/cmi5/launch' ),
-		'data-nonce'    => wp_create_nonce( 'wp_rest' ),
-		'data-lesson'   => (string) $lledger_lesson,
-		'data-failed'   => __( 'The lesson could not be launched. Try again.', 'learning-ledger' ),
+		'data-endpoint'    => rest_url( 'learning-ledger/v1/cmi5/launch' ),
+		'data-nonce'       => wp_create_nonce( 'wp_rest' ),
+		'data-lesson'      => (string) $lledger_lesson,
+		'data-failed'      => __( 'The lesson could not be launched. Try again.', 'learning-ledger' ),
+		/* translators: %s: lesson title. */
+		'data-frame-title' => sprintf( __( 'Lesson content: %s', 'learning-ledger' ), get_the_title( $lledger_lesson ) ),
 	);
 }
 ?>
@@ -160,5 +162,6 @@ if ( array() !== $lledger_buttons ) {
 		</div>
 		<p role="status" aria-live="polite" data-lledger-message></p>
 		<div data-lledger-frame></div>
+		<p data-lledger-return hidden><a href="<?php echo esc_url( (string) get_permalink( $lledger_lesson ) ); ?>"><?php esc_html_e( 'Return to lesson', 'learning-ledger' ); ?></a></p>
 	<?php endif; ?>
 </div>
