@@ -272,6 +272,48 @@ class Sensei_Adapter_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A program over the given courses, with an IRI base.
+	 *
+	 * @param int[] $courses Course IDs.
+	 *
+	 * @return int Program ID.
+	 */
+	private function program( array $courses ): int {
+		$program = self::factory()->post->create(
+			array(
+				'post_type'   => 'lledger_program',
+				'post_status' => 'publish',
+			)
+		);
+		update_post_meta( $program, '_lledger_stable_key', 'learn-wp' );
+		update_post_meta( $program, '_lledger_iri_base', 'https://example.test/activities/' );
+		update_post_meta( $program, '_lledger_courses', $courses );
+		return $program;
+	}
+
+	public function test_program_lesson_key_on_two_courses_resolves_to_neither() {
+		$one = $this->adapter->upsert_course( new Course_Spec( 'one', 'One', '', 'publish', array() ) );
+		$two = $this->adapter->upsert_course( new Course_Spec( 'two', 'Two', '', 'publish', array() ) );
+		$this->adapter->upsert_lesson( $one, new Lesson_Spec( 'intro', 'Intro', '', 1, 'publish', array() ) );
+		$this->adapter->upsert_lesson( $two, new Lesson_Spec( 'intro', 'Intro', '', 1, 'publish', array() ) );
+		$only = $this->adapter->upsert_lesson( $two, new Lesson_Spec( 'only-two', 'Only two', '', 2, 'publish', array() ) );
+		$this->program( array( $one, $two ) );
+
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/intro' ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $only ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/only-two' ) ) );
+	}
+
+	public function test_program_path_key_resolves_within_the_program_courses() {
+		$outside = $this->course( 'Outside' );
+		$inside  = $this->course( 'Inside' );
+		update_post_meta( $outside, '_lledger_stable_key', 'shared' );
+		update_post_meta( $inside, '_lledger_stable_key', 'shared' );
+		$this->program( array( $inside ) );
+
+		$this->assertEquals( new Lms_Object( 'course', $inside ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/paths/shared' ) ) );
+	}
+
+	/**
 	 * Import tests/fixtures/cmi5/nested-blocks.xml through the player.
 	 *
 	 * @return array{program:int,a:int,b:int,a1:int,b1:int,b2:int}

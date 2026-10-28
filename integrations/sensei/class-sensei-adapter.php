@@ -287,11 +287,12 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 		}
 		$courses = $program->course_ids;
 		if ( 'path' === $parsed['kind'] ) {
-			$id = $this->find_by_key( 'course', $parsed['key'] );
-			return null !== $id && ( ! $courses || in_array( $id, $courses, true ) ) ? new Lms_Object( 'course', $id ) : null;
+			$id = $this->find_by_key( 'course', $parsed['key'], $courses );
+			return null !== $id ? new Lms_Object( 'course', $id ) : null;
 		}
 		if ( 'lesson' === $parsed['kind'] ) {
-			$id = $this->find_by_key( 'lesson', $parsed['key'], $courses );
+			// Lesson keys are unique within a program; a key on two of its lessons resolves to nothing.
+			$id = $this->find_by_key( 'lesson', $parsed['key'], $courses, true );
 			return null !== $id ? new Lms_Object( 'lesson', $id ) : null;
 		}
 		return null;
@@ -431,13 +432,14 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 	/**
 	 * Post with a stable key.
 	 *
-	 * @param string $post_type Post type.
-	 * @param string $key       Stable key.
-	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 * @param string  $post_type Post type.
+	 * @param string  $key       Stable key.
+	 * @param int[]   $courses   When not empty: lessons of these courses, or (for courses) these courses only.
+	 * @param boolean $unique    Null unless exactly one post matches.
 	 *
 	 * @return integer|null
 	 */
-	private function find_by_key( string $post_type, string $key, array $courses = array() ): ?int {
+	private function find_by_key( string $post_type, string $key, array $courses = array(), bool $unique = false ): ?int {
 		if ( '' === $key ) {
 			return null;
 		}
@@ -445,7 +447,7 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 			'post_type'      => $post_type,
 			'post_status'    => 'any',
 			'fields'         => 'ids',
-			'posts_per_page' => 1,
+			'posts_per_page' => $unique ? 2 : 1,
 			'orderby'        => 'ID',
 			'order'          => 'ASC',
 			'no_found_rows'  => true,
@@ -456,7 +458,9 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 				),
 			),
 		);
-		if ( $courses ) {
+		if ( $courses && 'course' === $post_type ) {
+			$args['post__in'] = array_map( 'intval', $courses );
+		} elseif ( $courses ) {
 			$args['meta_query'][] = array(
 				'key'     => '_lesson_course',
 				'value'   => array_map( 'strval', $courses ),
@@ -464,7 +468,10 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 			);
 		}
 		$ids = get_posts( $args );
-		return $ids ? (int) $ids[0] : null;
+		if ( ! $ids || ( $unique && count( $ids ) > 1 ) ) {
+			return null;
+		}
+		return (int) $ids[0];
 	}
 
 	/**

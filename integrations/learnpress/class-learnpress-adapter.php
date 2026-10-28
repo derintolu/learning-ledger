@@ -423,8 +423,8 @@ final class Learnpress_Adapter implements LMS_Adapter {
 		}
 		$courses = $program->course_ids;
 		if ( 'path' === $parsed['kind'] ) {
-			$id = $this->find_by_key( self::COURSE, $parsed['key'] );
-			return null !== $id && ( ! $courses || in_array( $id, $courses, true ) ) ? new Lms_Object( 'course', $id ) : null;
+			$id = $this->find_by_key( self::COURSE, $parsed['key'], $courses );
+			return null !== $id ? new Lms_Object( 'course', $id ) : null;
 		}
 		if ( 'lesson' === $parsed['kind'] ) {
 			// Lesson keys are unique per course only: a key on lessons of two of the program's courses names neither.
@@ -597,7 +597,7 @@ final class Learnpress_Adapter implements LMS_Adapter {
 	 *
 	 * @param string  $post_type Post type.
 	 * @param string  $key       Stable key.
-	 * @param int[]   $courses   For lessons: limit to these courses' curricula when not empty.
+	 * @param int[]   $courses   When not empty: lessons of these courses' curricula, or (for courses) these courses only.
 	 * @param boolean $unique    Null unless exactly one post matches.
 	 *
 	 * @return integer|null
@@ -621,7 +621,9 @@ final class Learnpress_Adapter implements LMS_Adapter {
 				),
 			),
 		);
-		if ( $courses ) {
+		if ( $courses && self::COURSE === $post_type ) {
+			$args['post__in'] = array_map( 'intval', $courses );
+		} elseif ( $courses ) {
 			$in = array();
 			foreach ( $courses as $course ) {
 				$in = array_merge( $in, $this->lesson_ids( (int) $course ) );

@@ -304,6 +304,15 @@ class Learnpress_Contract_Test extends Adapter_Contract_Test_Case {
 		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/intro' ) ) );
 	}
 
+	public function test_resolve_program_path_key_within_the_program_courses() {
+		list( $outside, $inside ) = $this->two_courses_sharing_a_lesson_key();
+		update_post_meta( $outside, '_lledger_stable_key', 'shared' );
+		update_post_meta( $inside, '_lledger_stable_key', 'shared' );
+		$this->program( array( $inside ) );
+
+		$this->assertEquals( new Lms_Object( 'course', $inside ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/paths/shared' ) ) );
+	}
+
 	public function test_import_without_a_current_user_writes_the_learnpress_course_record() {
 		// LearnPress's own save hook refuses without a user who may edit the course and logs why; keep that log out of the test output.
 		$log             = wp_tempnam( 'lledger-lp-log' );

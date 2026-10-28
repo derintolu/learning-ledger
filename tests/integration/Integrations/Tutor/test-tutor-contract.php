@@ -409,6 +409,16 @@ class Tutor_Contract_Test extends Adapter_Contract_Test_Case {
 		$this->assertEquals( new Lms_Object( 'lesson', $only ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/only-b' ) ) );
 	}
 
+	public function test_resolve_program_path_key_within_the_program_courses() {
+		$outside = $this->adapter->upsert_course( new Course_Spec( 'outside', 'Outside', '', 'publish', array() ) );
+		$inside  = $this->adapter->upsert_course( new Course_Spec( 'inside', 'Inside', '', 'publish', array() ) );
+		update_post_meta( $outside, '_lledger_stable_key', 'shared' );
+		update_post_meta( $inside, '_lledger_stable_key', 'shared' );
+		$this->program( array( $inside ) );
+
+		$this->assertEquals( new Lms_Object( 'course', $inside ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/paths/shared' ) ) );
+	}
+
 	public function test_direction2_iris_null_for_a_program_course() {
 		$made = $this->make_course( 1 );
 		$this->program( array( $made['course'] ) );

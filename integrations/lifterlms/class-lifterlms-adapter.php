@@ -394,9 +394,8 @@ final class Lifterlms_Adapter implements LMS_Adapter {
 		}
 		$courses = $program->course_ids;
 		if ( 'path' === $parsed['kind'] ) {
-			$ids = $this->find_all_by_key( 'course', $parsed['key'] );
-			$id  = $ids ? $ids[0] : null;
-			return null !== $id && ( ! $courses || in_array( $id, $courses, true ) ) ? new Lms_Object( 'course', $id ) : null;
+			$id = $this->find_by_key( 'course', $parsed['key'], $courses );
+			return null !== $id ? new Lms_Object( 'course', $id ) : null;
 		}
 		if ( 'lesson' === $parsed['kind'] ) {
 			// Lesson keys are unique within a program; a key on two of its lessons resolves to nothing.
@@ -507,7 +506,7 @@ final class Lifterlms_Adapter implements LMS_Adapter {
 	 *
 	 * @param string $post_type Post type.
 	 * @param string $key       Stable key.
-	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 * @param int[]  $courses   When not empty: lessons of these courses, or (for courses) these courses only.
 	 *
 	 * @return int[]
 	 */
@@ -530,7 +529,9 @@ final class Lifterlms_Adapter implements LMS_Adapter {
 				),
 			),
 		);
-		if ( $courses ) {
+		if ( $courses && 'course' === $post_type ) {
+			$args['post__in'] = array_map( 'intval', $courses );
+		} elseif ( $courses ) {
 			$args['meta_query'][] = array(
 				'key'     => self::PARENT_COURSE,
 				'value'   => array_map( 'strval', $courses ),
@@ -545,7 +546,7 @@ final class Lifterlms_Adapter implements LMS_Adapter {
 	 *
 	 * @param string $post_type Post type.
 	 * @param string $key       Stable key.
-	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 * @param int[]  $courses   When not empty: lessons of these courses, or (for courses) these courses only.
 	 *
 	 * @return integer|null
 	 */

@@ -376,8 +376,8 @@ final class Tutor_Adapter implements LMS_Adapter {
 		}
 		$courses = $program->course_ids;
 		if ( 'path' === $parsed['kind'] ) {
-			$id = $this->find_by_key( self::COURSE, $parsed['key'] );
-			return null !== $id && ( ! $courses || in_array( $id, $courses, true ) ) ? new Lms_Object( 'course', $id ) : null;
+			$id = $this->find_by_key( self::COURSE, $parsed['key'], $courses );
+			return null !== $id ? new Lms_Object( 'course', $id ) : null;
 		}
 		if ( 'lesson' === $parsed['kind'] ) {
 			// Lesson keys are unique within a program; a key on two of its lessons resolves to nothing.
@@ -517,7 +517,7 @@ final class Tutor_Adapter implements LMS_Adapter {
 	 *
 	 * @param string $post_type Post type.
 	 * @param string $key       Stable key.
-	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 * @param int[]  $courses   When not empty: lessons of these courses, or (for courses) these courses only.
 	 *
 	 * @return integer|null
 	 */
@@ -531,7 +531,7 @@ final class Tutor_Adapter implements LMS_Adapter {
 	 *
 	 * @param string $post_type Post type.
 	 * @param string $key       Stable key.
-	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 * @param int[]  $courses   When not empty: lessons of these courses, or (for courses) these courses only.
 	 *
 	 * @return int[]
 	 */
@@ -539,22 +539,23 @@ final class Tutor_Adapter implements LMS_Adapter {
 		if ( '' === $key ) {
 			return array();
 		}
-		$ids     = get_posts(
-			array(
-				'post_type'      => $post_type,
-				'post_status'    => 'any',
-				'fields'         => 'ids',
-				'posts_per_page' => -1,
-				'orderby'        => 'ID',
-				'order'          => 'ASC',
-				'no_found_rows'  => true,
-				'meta_key'       => self::STABLE_KEY, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
-				'meta_value'     => $key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
-			)
-		);
-		$ids     = array_map( 'intval', $ids );
 		$courses = array_map( 'intval', $courses );
-		if ( ! $courses ) {
+		$args    = array(
+			'post_type'      => $post_type,
+			'post_status'    => 'any',
+			'fields'         => 'ids',
+			'posts_per_page' => -1,
+			'orderby'        => 'ID',
+			'order'          => 'ASC',
+			'no_found_rows'  => true,
+			'meta_key'       => self::STABLE_KEY, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			'meta_value'     => $key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+		);
+		if ( $courses && self::COURSE === $post_type ) {
+			$args['post__in'] = $courses;
+		}
+		$ids = array_map( 'intval', get_posts( $args ) );
+		if ( ! $courses || self::COURSE === $post_type ) {
 			return $ids;
 		}
 		// A lesson's course is its topic's parent, which a meta query cannot reach.
