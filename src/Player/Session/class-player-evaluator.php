@@ -292,7 +292,11 @@ final class Player_Evaluator {
 				}
 				try {
 					$this->settle( $target[0], $target[1], (string) $registration );
-				} catch ( \RuntimeException $e ) {
+				} catch ( \Throwable $e ) {
+					// The AU's statements are stored; whatever failed here is retried by the sync, never answered to the AU.
+					if ( ! $e instanceof \RuntimeException ) {
+						error_log( 'Learning Ledger: cmi5 evaluation on commit failed: ' . get_class( $e ) . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- operators need the cause.
+					}
 					self::queue_sync( $target[0], $target[1], (string) $registration, 60 );
 				}
 			}

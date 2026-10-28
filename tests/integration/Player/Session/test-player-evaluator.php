@@ -387,6 +387,29 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) ), 'written once' );
 	}
 
+	/**
+	 * T64 review: whatever a listener throws while the LMS statements are written on commit, the
+	 * AU's statements stay accepted (200) and a sync is queued to retry.
+	 */
+	public function test_a_throwing_listener_on_commit_keeps_the_au_answer_and_queues_a_sync() {
+		global $wpdb;
+		$a1 = $this->launch_au( self::A1 );
+		$this->tick( '10:00:10' );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM ' . Tables::name( 'jobs' ) . ' WHERE type = %s', Player_Evaluator::SYNC_JOB ) );
+		$boom = static function () {
+			throw new \Error( 'listener failed' );
+		};
+		add_action( 'learning_ledger/connector_evaluated', $boom, 1 ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+		$log = ini_set( 'error_log', '/dev/null' ); // phpcs:ignore WordPress.PHP.IniSet.Risky -- keep the expected log line out of the test output.
+		try {
+			$this->post_as( $a1['client'], $this->au_statement( $this->learner, Vocab::COMPLETED, self::A1, $a1['session']['session_id'], $a1['session']['registration'], array( 'completion' => true ) ) );
+		} finally {
+			ini_set( 'error_log', (string) $log ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+			remove_action( 'learning_ledger/connector_evaluated', $boom, 1 ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+		}
+		$this->assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Tables::name( 'jobs' ) . ' WHERE type = %s AND dedupe_key = %s', Player_Evaluator::SYNC_JOB, Player_Evaluator::SYNC_JOB . ':' . strtolower( $a1['session']['registration'] ) ) ), 'a sync is queued' );
+	}
+
 	public function test_return_route_processes_statements_before_redirecting() {
 		$this->lrs_elsewhere();
 		$a1           = $this->launch_au( self::A1 );
