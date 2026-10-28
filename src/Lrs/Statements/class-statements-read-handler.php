@@ -13,6 +13,7 @@ use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Http\Xapi_Request;
 use LearningLedger\Lrs\Http\Xapi_Response;
 use LearningLedger\Lrs\Http\Xapi_Router;
+use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Json;
 use LearningLedger\Util\Timestamp;
 use LearningLedger\Xapi\Formatter;
@@ -46,9 +47,38 @@ final class Statements_Read_Handler implements Resource_Handler {
 	 * @param Xapi_Request $r Request.
 	 *
 	 * @return Xapi_Response
-	 * @throws Xapi_Error 400 invalid parameters or `more`, 401, 403 without a read scope, 404 no such statement.
+	 * @throws Xapi_Error 400 invalid parameters or `more`, 401, 403 without a read scope, 404 no such statement;
+	 *                    each carries X-Experience-API-Consistent-Through (XAPI-00153).
 	 */
 	public function handle( Xapi_Request $r ): Xapi_Response {
+		try {
+			return $this->respond( $r );
+		} catch ( Xapi_Error $e ) {
+			throw new Xapi_Error( $e->status(), $e->getMessage(), array_merge( $e->headers(), self::consistent_header() ) );
+		} catch ( Invalid_Input $e ) {
+			throw new Xapi_Error( 400, $e->getMessage(), self::consistent_header() );
+		}
+	}
+
+	/**
+	 * The consistent-through header that every response to a statements GET carries.
+	 *
+	 * @return array<string,string>
+	 */
+	private static function consistent_header(): array {
+		return array( 'X-Experience-API-Consistent-Through' => Statement_Query::consistent_through() );
+	}
+
+	/**
+	 * Answer a GET.
+	 *
+	 * @param Xapi_Request $r Request.
+	 *
+	 * @return Xapi_Response
+	 * @throws Xapi_Error As for handle().
+	 * @throws Invalid_Input On an invalid parameter.
+	 */
+	private function respond( Xapi_Request $r ): Xapi_Response {
 		$p = $r->principal();
 		if ( null === $p ) {
 			throw new Xapi_Error( 401, 'Authentication is required.' );

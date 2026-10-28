@@ -338,4 +338,33 @@ class Statements_Read_Handler_Test extends WP_UnitTestCase {
 		$_SERVER['REQUEST_URI'] = '/?rest_route=/learning-ledger/xapi/statements&limit=1';
 		$this->assertMatchesRegularExpression( '#\A/index\.php\?rest_route=%2Flearning-ledger%2Fxapi%2Fstatements&more=' . $token . '\z#', json_decode( $this->get( array( 'limit' => '1' ) )->body(), true )['more'] );
 	}
+
+	/**
+	 * XAPI-00153 (Communication 2.1.3.s2.b5): every GET on the Statements resource returns
+	 * X-Experience-API-Consistent-Through, whatever the status code.
+	 */
+	public function test_xapi_00153_consistent_through_on_every_get_response() {
+		[ $id ] = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement() ) );
+		$cases  = array(
+			'statementId with a filter (400)' => array(
+				array(
+					'statementId' => $id,
+					'agent'       => '{"mbox":"mailto:a@example.test"}',
+				),
+				null,
+				400,
+			),
+			'invalid parameter (400)'         => array( array( 'since' => 'yesterday' ), null, 400 ),
+			'tampered more (400)'             => array( array( 'more' => 'x.y' ), null, 400 ),
+			'no such statement (404)'         => array( array( 'statementId' => '00000000-0000-4000-8000-000000000000' ), null, 404 ),
+			'no read scope (403)'             => array( array(), self::principal( array( 'statements/write' ) ), 403 ),
+		);
+		foreach ( $cases as $label => list( $query, $p, $status ) ) {
+			foreach ( array( '1.0.3', '2.0.0' ) as $version ) {
+				$res = $this->get( $query, array(), $p, $version );
+				$this->assertSame( $status, $res->status(), $label . ' ' . $version );
+				$this->assertSame( '2026-10-27T08:59:59.000000Z', $res->headers()['X-Experience-API-Consistent-Through'] ?? null, $label . ' ' . $version );
+			}
+		}
+	}
 }
