@@ -82,15 +82,20 @@ jobs:
           openssl rand -hex 32 | tr -d '\n' > "$RUNNER_TEMP/lrs-secret"
           openssl rand -hex 32 | tr -d '\n' > "$RUNNER_TEMP/catapult-test-secret"
           jq -n --rawfile s "$RUNNER_TEMP/catapult-test-secret" \
-            '{config: {LLEDGER_CATAPULT_TEST_ROUTES: true, LLEDGER_CMI5_CONTENT_HOST: "127.0.0.1:8888", LLEDGER_CATAPULT_TEST_SECRET: $s}}' \
+            '{config: {LLEDGER_CATAPULT_TEST_ROUTES: true, LLEDGER_CMI5_CONTENT_HOST: "127.0.0.1:8888", LLEDGER_CATAPULT_TEST_SECRET: $s},
+              env: {development: {plugins: [".", "https://downloads.wordpress.org/plugin/sensei-lms.4.26.4.zip"]}}}' \
             > .wp-env.override.json
       - run: npx @wordpress/env start
-      - name: Enable the LRS role and register a conformance client
+      - name: Enable the LRS and connector roles and register a conformance client
         run: |
           npx @wordpress/env run cli wp learning-ledger role enable lrs
+          npx @wordpress/env run cli wp learning-ledger role enable connector
           hash="$(sha256sum "$RUNNER_TEMP/lrs-secret" | cut -d' ' -f1)"
           npx @wordpress/env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define --rate-class=unlimited
       - name: Run the CATAPULT LTS
+        env:
+          # The LTS package build uses webpack 5.45, whose md4 hashing needs the legacy OpenSSL provider on Node 17+.
+          NODE_OPTIONS: --openssl-legacy-provider
         run: |
           bin/catapult-lts.sh --site "$LLEDGER_SITE" \
             --content-host http://127.0.0.1:8888 \
