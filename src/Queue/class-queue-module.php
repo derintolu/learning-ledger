@@ -95,12 +95,21 @@ final class Queue_Module implements Module {
 	}
 
 	/**
-	 * Minute tick: run the queue, then the minute and quarter-hour hooks.
+	 * Minute tick from WP-Cron.
 	 *
 	 * @return void
 	 */
 	public function on_cron_minute(): void {
-		Job_Queue::run();
+		self::tick();
+	}
+
+	/**
+	 * Minute tick (WP-Cron or the cron route): run the queue, then the minute and quarter-hour hooks.
+	 *
+	 * @return integer Jobs processed.
+	 */
+	public static function tick(): int {
+		$processed = Job_Queue::run();
 		do_action( 'learning_ledger/cron_minute' ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
 
 		$bucket = intdiv( Clock::now()->getTimestamp(), 900 );
@@ -108,5 +117,6 @@ final class Queue_Module implements Module {
 			update_option( self::QUARTER_OPTION, $bucket, false );
 			do_action( 'learning_ledger/cron_quarter_hour' ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
 		}
+		return $processed;
 	}
 }

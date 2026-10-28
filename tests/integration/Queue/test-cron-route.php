@@ -9,6 +9,7 @@ use LearningLedger\Db\Installer;
 use LearningLedger\Db\Tables;
 use LearningLedger\Queue\Cron_Route;
 use LearningLedger\Queue\Job_Queue;
+use LearningLedger\Util\Clock;
 
 class Cron_Route_Test extends WP_UnitTestCase {
 
@@ -19,6 +20,7 @@ class Cron_Route_Test extends WP_UnitTestCase {
 		Installer::install();
 		$GLOBALS['wpdb']->query( 'DELETE FROM ' . Tables::name( 'jobs' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		delete_option( 'lledger_cron_secret_sha256' );
+		delete_option( 'lledger_cron_quarter_hour_last' );
 		( new Cron_Route() )->register();
 		global $wp_rest_server;
 		$wp_rest_server = new WP_REST_Server();
@@ -29,6 +31,9 @@ class Cron_Route_Test extends WP_UnitTestCase {
 		global $wp_rest_server;
 		$wp_rest_server = null;
 		remove_all_actions( 'learning_ledger/jobs/test' );
+		remove_all_actions( 'learning_ledger/cron_minute' );
+		remove_all_actions( 'learning_ledger/cron_quarter_hour' );
+		Clock::freeze( null );
 		parent::tear_down();
 	}
 
@@ -70,5 +75,33 @@ class Cron_Route_Test extends WP_UnitTestCase {
 
 		$this->assertSame( 200, $this->dispatch( 'POST', null, self::SECRET )->get_status() );
 		$this->assertSame( 200, $this->dispatch( 'POST', self::SECRET )->get_status() );
+	}
+
+	public function test_cron_route_fires_the_minute_and_quarter_hour_actions() {
+		$minute  = 0;
+		$quarter = 0;
+		add_action(
+			'learning_ledger/cron_minute',
+			static function () use ( &$minute ) {
+				++$minute;
+			}
+		);
+		add_action(
+			'learning_ledger/cron_quarter_hour',
+			static function () use ( &$quarter ) {
+				++$quarter;
+			}
+		);
+		update_option( 'lledger_cron_secret_sha256', hash( 'sha256', self::SECRET ) );
+
+		foreach ( array( '10:14:00', '10:15:00', '10:29:59', '10:30:00' ) as $time ) {
+			Clock::freeze( new \DateTimeImmutable( "2026-10-27 {$time}", new \DateTimeZone( 'UTC' ) ) );
+			$this->assertSame( 200, $this->dispatch( 'GET', self::SECRET )->get_status() );
+		}
+		$this->assertSame( 4, $minute, 'every hit is a minute tick' );
+		$this->assertSame( 3, $quarter, 'quarter hour once per 15-minute bucket' );
+
+		$this->assertSame( 403, $this->dispatch( 'GET', 'wrong' )->get_status() );
+		$this->assertSame( 4, $minute, 'a refused hit fires nothing' );
 	}
 }

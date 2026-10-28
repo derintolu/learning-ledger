@@ -1,6 +1,6 @@
 <?php
 /**
- * Secret-protected route that runs the queue (for an external cron).
+ * Secret-protected route that runs the minute tick (for an external cron).
  *
  * @package LearningLedger
  */
@@ -67,12 +67,12 @@ final class Cron_Route {
 	}
 
 	/**
-	 * Run the queue.
+	 * Run the minute tick, as WP-Cron would.
 	 *
 	 * @return \WP_REST_Response
 	 */
 	public function handle(): \WP_REST_Response {
-		$processed = Job_Queue::run();
+		$processed = Queue_Module::tick();
 		$response  = new \WP_REST_Response(
 			array(
 				'processed' => $processed,
