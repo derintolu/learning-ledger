@@ -165,4 +165,21 @@ class Statement_Validator_Test extends \PHPUnit\Framework\TestCase {
 			self::rejects( array_merge( $st, array( 'authority' => $three ) ), $version, 'authority.member', 'three members ' . $version );
 		}
 	}
+
+	/**
+	 * XAPI-00101 (Data 2.4.10): a statement `version` of "1.0" or "1.0.x" is accepted; others are 400.
+	 */
+	public function test_xapi_00101_statement_version_1_0_without_patch_is_accepted() {
+		$st = self::load( self::FIXTURES . 'valid/minimal.both.json' );
+		foreach ( array( '1.0.3', '2.0.0' ) as $version ) {
+			foreach ( array( '1.0', '1.0.0', '1.0.9' ) as $value ) {
+				Statement_Validator::validate( array_merge( $st, array( 'version' => $value ) ), $version );
+			}
+			foreach ( array( 'should fail', '0.9.9', '1.1.0', '1', '1.0.', '1.0-rc.1' ) as $value ) {
+				self::rejects( array_merge( $st, array( 'version' => $value ) ), $version, 'version', $value . ' ' . $version );
+			}
+		}
+		Statement_Validator::validate( array_merge( $st, array( 'version' => '2.0' ) ), '2.0.0' );
+		self::rejects( array_merge( $st, array( 'version' => '2.0' ) ), '1.0.3', 'version', '2.0 under 1.0.3' );
+	}
 }

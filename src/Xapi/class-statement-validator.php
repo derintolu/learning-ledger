@@ -665,7 +665,7 @@ final class Statement_Validator {
 	/**
 	 * Validate the statement's `version` property.
 	 *
-	 * Under 1.0.3 it must start `1.0.`; under 2.0.0, `1.0.` or `2.0.`.
+	 * Under 1.0.3 it is `1.0` or `1.0.x`; under 2.0.0, also `2.0` or `2.0.x` (XAPI-00101).
 	 *
 	 * @param mixed  $value   Version.
 	 * @param string $version The xAPI version.
@@ -677,7 +677,7 @@ final class Statement_Validator {
 	 */
 	private static function statement_version( mixed $value, string $version, string $path ): void {
 		$majors = '2.0.0' === $version ? '[12]' : '1';
-		$semver = '/^' . $majors . '\.0\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/D';
+		$semver = '/^' . $majors . '\.0(?:\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)?$/D';
 		if ( ! is_string( $value ) || 1 !== preg_match( $semver, $value ) ) {
 			throw new Invalid_Input( 'Unsupported statement version.', 'version', $path );
 		}
