@@ -23,11 +23,17 @@ use LearningLedger\Connector\Pairing\Connector_Settings;
 use LearningLedger\Connector\Pairing\Lrs_Client;
 use LearningLedger\Connector\Programs\Program;
 use LearningLedger\Connector\Programs\Program_Repository;
+use LearningLedger\Lrs\Auth\Client_Repository;
+use LearningLedger\Lrs\Auth\Principal;
+use LearningLedger\Lrs\Http\Xapi_Error;
+use LearningLedger\Lrs\Statements\Statement_Repository;
+use LearningLedger\Lrs\Statements\Statement_Store;
 use LearningLedger\Lrs\Statements\Stored_Statement;
 use LearningLedger\Player\Launch\Launch_Controller;
 use LearningLedger\Player\Launch\Lms_Statements;
 use LearningLedger\Player\Launch\Session_Repository;
 use LearningLedger\Queue\Job_Queue;
+use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Timestamp;
 use LearningLedger\Util\Uuid;
@@ -108,6 +114,14 @@ final class Player_Evaluator {
 	 * @var array<string,bool>
 	 */
 	private array $evaluated = array();
+
+	/**
+	 * Whether LMS statements go straight into this site's LRS rather than over HTTP: true while
+	 * on_committed runs, for every evaluator instance it reaches (the inbox's listeners included).
+	 *
+	 * @var bool
+	 */
+	private static bool $local = false;
 
 	/**
 	 * Constructor.
@@ -267,15 +281,23 @@ final class Player_Evaluator {
 				$this->inbox->store( $row->statement(), 'webhook' );
 			}
 		}
-		foreach ( $todo as $registration => $target ) {
-			if ( false === $target ) {
-				continue;
+		// statements_committed fires only where the LRS runs, so the LMS statements are stored in
+		// process: no HTTP request inside the AU's request.
+		$was         = self::$local; // A nested commit (the LMS's own statements) keeps the outer mode.
+		self::$local = true;
+		try {
+			foreach ( $todo as $registration => $target ) {
+				if ( false === $target ) {
+					continue;
+				}
+				try {
+					$this->settle( $target[0], $target[1], (string) $registration );
+				} catch ( \RuntimeException $e ) {
+					self::queue_sync( $target[0], $target[1], (string) $registration, 60 );
+				}
 			}
-			try {
-				$this->settle( $target[0], $target[1], (string) $registration );
-			} catch ( \RuntimeException $e ) {
-				self::queue_sync( $target[0], $target[1], (string) $registration, 60 );
-			}
+		} finally {
+			self::$local = $was;
 		}
 	}
 
@@ -445,11 +467,47 @@ final class Player_Evaluator {
 	 * @throws \RuntimeException When the LRS refuses or cannot be read.
 	 */
 	public function record( array $statement ): int {
+		if ( self::$local ) {
+			return $this->record_local( $statement );
+		}
 		$status = self::post( $this->lrs, $statement );
 		$res    = $this->lrs->xapi( 'GET', 'statements', array( 'statementId' => $statement['id'] ) );
 		$data   = 200 === $res->status ? $res->json() : null;
 		if ( ! is_array( $data ) || Inbox_Repository::ERROR === $this->inbox->store( $data, 'poll' ) ) {
 			throw new \RuntimeException( 'LRS answered ' . (int) $res->status ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- never echoed.
+		}
+		return $status;
+	}
+
+	/**
+	 * Record against this site's LRS without HTTP: the statement goes through the Statement_Store
+	 * as the connector's client, decoded as the LRS would decode the POST body, and the stored bytes
+	 * go into the inbox, as the GET by id would return them.
+	 *
+	 * @param array $statement Statement.
+	 *
+	 * @return integer 200, or 409 when a different statement holds the id.
+	 * @throws \RuntimeException When the connector's client is missing or the store refuses.
+	 */
+	private function record_local( array $statement ): int {
+		$client = ( new Client_Repository() )->find( Connector_Settings::get()['client_id'] );
+		if ( null === $client || ! $client->is_active( Clock::now() ) ) {
+			throw new \RuntimeException( 'The connector client is not active on this LRS.' );
+		}
+		$decoded = json_decode( (string) wp_json_encode( $statement, JSON_UNESCAPED_SLASHES ), false );
+		$status  = 200;
+		try {
+			( new Statement_Store() )->store( array( get_object_vars( $decoded ) ), Principal::for_client( $client ), Lrs_Client::XAPI_VERSION );
+		} catch ( Xapi_Error $e ) {
+			if ( 409 !== $e->status() ) {
+				throw new \RuntimeException( 'LRS answered ' . (int) $e->status() ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- never echoed.
+			}
+			$status = 409;
+		}
+		$row  = ( new Statement_Repository() )->find( (string) $statement['id'] );
+		$data = null === $row ? null : json_decode( $row->body, true );
+		if ( ! is_array( $data ) || Inbox_Repository::ERROR === $this->inbox->store( $data, 'poll' ) ) {
+			throw new \RuntimeException( 'The stored statement could not be copied to the inbox.' );
 		}
 		return $status;
 	}

@@ -356,7 +356,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 	 * CATAPULT 001-essentials and 004-*, cmi5 9.3.9.0-1/-5, 9.3.3.0-3, 9.3.4.0-4: with the LRS on
 	 * this site, `satisfied` follows the AU statement that met moveOn before the AU's request
 	 * returns (so before its `terminated`), with no return, poll or job; `terminated` closes the
-	 * session at once.
+	 * session at once. T64 review: written in-process, with no HTTP request in the AU's request.
 	 */
 	public function test_lrs_on_this_site_writes_satisfied_before_the_au_request_returns() {
 		$this->assertNotFalse( has_action( 'learning_ledger/statements_committed' ) ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
@@ -369,7 +369,9 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->tick( '10:00:20' );
 		$a2 = $this->launch_au( self::A2 );
 		$this->tick( '10:00:30' );
+		$this->http = array();
 		$this->post_as( $a2['client'], $this->au_statement( $this->learner, Vocab::COMPLETED, self::A2, $a2['session']['session_id'], $registration, array( 'completion' => true ) ) );
+		$this->assertSame( array(), array_column( $this->http, 'url' ), 'no HTTP request while the AU statement is stored' );
 		$block  = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) );
 		$course = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::T59_COURSE, 'course' ) );
 		$this->assertCount( 1, $block );
@@ -378,7 +380,9 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->assertSame( $a2['session']['session_id'], $course[0]['context']['extensions'][ Vocab::EXT_SESSIONID ] );
 
 		$this->tick( '10:00:40' );
+		$this->http = array();
 		$this->post_as( $a2['client'], $this->au_statement( $this->learner, Vocab::TERMINATED, self::A2, $a2['session']['session_id'], $registration, array( 'duration' => 'PT5S' ) ) );
+		$this->assertSame( array(), array_column( $this->http, 'url' ), 'no HTTP request while terminated is stored' );
 		$this->assertSame( Session_Repository::TERMINATED, ( new Session_Repository() )->find( $a2['session']['session_id'] )['status'] );
 		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) ), 'written once' );
 	}
