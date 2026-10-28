@@ -108,7 +108,7 @@ final class Badge_Repository {
 	 * @param string $id Badge id.
 	 *
 	 * @return array|null Keys as in COLUMNS; hashes raw, UUIDs lowercase text, times xAPI format,
-	 *                    `achievement` and `credential` decoded.
+	 *                    `achievement` decoded, `credential` decoded (or the stored string for a VC-JWT).
 	 */
 	public function get( string $id ): ?array {
 		if ( ! Uuid::is_valid( $id ) ) {
@@ -189,27 +189,29 @@ final class Badge_Repository {
 	}
 
 	/**
-	 * Record the signed credential of a pending badge and mark it issued.
+	 * Record the signed credential of a pending badge and mark it issued, in one UPDATE.
 	 *
 	 * Only a pending badge changes, so two claims racing each other issue it once.
 	 *
-	 * @param string  $id             Badge id.
-	 * @param array   $credential     Signed credential.
-	 * @param integer $list_id        Status list id.
-	 * @param integer $index          Index in the status list.
-	 * @param string  $recipient_hash Salted recipient identity hash.
-	 * @param string  $salt           Salt of the recipient hash.
+	 * @param string       $id             Badge id.
+	 * @param array|string $credential     Signed credential: the secured JSON-LD document, or a
+	 *                                     credential string (a VC-JWT), stored as it is.
+	 * @param integer      $list_id        Status list id.
+	 * @param integer      $index          Index in the status list.
+	 * @param string       $recipient_hash Salted recipient identity hash.
+	 * @param string       $salt           Salt of the recipient hash.
+	 * @param boolean      $shared         Whether the learner allows the public badge page.
 	 *
 	 * @return boolean Whether this call issued the badge (false when it was not pending).
 	 *
 	 * @throws \RuntimeException On a database error.
 	 */
-	public function store_issued( string $id, array $credential, int $list_id, int $index, string $recipient_hash, string $salt ): bool {
+	public function store_issued( string $id, array|string $credential, int $list_id, int $index, string $recipient_hash, string $salt, bool $shared = false ): bool {
 		global $wpdb;
 		$table = Tables::name( 'badges' );
 		$now   = Clock::now();
 		$from  = $now;
-		if ( is_string( $credential['validFrom'] ?? null ) ) {
+		if ( is_array( $credential ) && is_string( $credential['validFrom'] ?? null ) ) {
 			try {
 				$from = new \DateTimeImmutable( $credential['validFrom'] );
 			} catch ( \Exception $e ) {
@@ -218,12 +220,13 @@ final class Badge_Repository {
 		}
 		$changed = $wpdb->query(
 			$wpdb->prepare(
-				"UPDATE {$table} SET credential = %s, status_list_id = %d, status_index = %d, recipient_hash = %s, salt = %s, status = %s, valid_from = %s, issued_at = %s WHERE id = %s AND status = %s",
-				Json::encode_exact( $credential ),
+				"UPDATE {$table} SET credential = %s, status_list_id = %d, status_index = %d, recipient_hash = %s, salt = %s, shared = %d, status = %s, valid_from = %s, issued_at = %s WHERE id = %s AND status = %s",
+				is_string( $credential ) ? $credential : Json::encode_exact( $credential ),
 				$list_id,
 				$index,
 				$recipient_hash,
 				$salt,
+				$shared ? 1 : 0,
 				self::ISSUED,
 				Timestamp::to_db( $from ),
 				Timestamp::to_db( $now ),
@@ -282,6 +285,9 @@ final class Badge_Repository {
 	private static function hydrate( array $row ): array {
 		$achievement = json_decode( (string) $row['achievement'], true );
 		$credential  = null === $row['credential'] ? null : json_decode( (string) $row['credential'], true );
+		if ( null !== $row['credential'] && ! is_array( $credential ) ) {
+			$credential = (string) $row['credential']; // A credential string (VC-JWT), as stored.
+		}
 		return array(
 			'id'                   => (string) $row['id'],
 			'achievement'          => is_array( $achievement ) ? $achievement : array(),
@@ -294,7 +300,7 @@ final class Badge_Repository {
 			'waived_count'         => (int) $row['waived_count'],
 			'recipient_hash'       => $row['recipient_hash'],
 			'salt'                 => $row['salt'],
-			'credential'           => is_array( $credential ) ? $credential : null,
+			'credential'           => $credential,
 			'status_list_id'       => null === $row['status_list_id'] ? null : (int) $row['status_list_id'],
 			'status_index'         => null === $row['status_index'] ? null : (int) $row['status_index'],
 			'valid_from'           => self::time( $row['valid_from'] ),

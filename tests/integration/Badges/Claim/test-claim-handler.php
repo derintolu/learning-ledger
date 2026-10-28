@@ -149,6 +149,10 @@ class Claim_Handler_Test extends WP_UnitTestCase {
 		);
 	}
 
+	private static function rows( string $table, string $where = '1=1' ): array {
+		return (array) $GLOBALS['wpdb']->get_results( 'SELECT * FROM ' . Tables::name( $table ) . ' WHERE ' . $where, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
 	private static function earned_rows(): array {
 		global $wpdb;
 		$bodies = $wpdb->get_col( 'SELECT body FROM ' . Tables::name( 'statements' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -260,10 +264,12 @@ class Claim_Handler_Test extends WP_UnitTestCase {
 		( new Claim_Handler() )->claim( $this->mint(), self::EMAIL, true );
 
 		global $wpdb;
+		foreach ( array( 'badges', 'links', 'statements' ) as $t ) {
+			$this->assertNotSame( array(), self::rows( $t ), $t . ' holds the claim' );
+		}
 		foreach ( array( 'badges', 'links', 'statements', 'audit', 'agents', 'jobs' ) as $t ) {
-			$rows = (array) $wpdb->get_results( 'SELECT * FROM ' . Tables::name( $t ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-			$this->assertNotSame( array(), 'badges' === $t || 'links' === $t || 'statements' === $t ? $rows : array( 1 ), $t );
-			$this->assertStringNotContainsString( 'alice', strtolower( serialize( $rows ) ), $t ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize
+			$dump = strtolower( serialize( self::rows( $t ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize
+			$this->assertStringNotContainsString( 'alice', $dump, $t );
 		}
 		$options = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_value LIKE %s", '%' . $wpdb->esc_like( self::EMAIL ) . '%' ) );
 		$this->assertSame( 0, $options );
@@ -421,15 +427,86 @@ class Claim_Handler_Test extends WP_UnitTestCase {
 		$this->assertSame( 'test', ( new Badge_Repository() )->get( $this->badge_id )['credential']['filteredBy'] );
 	}
 
-	public function test_a_string_from_the_badge_sign_filter_is_stored_as_is() {
+	public function test_a_string_from_the_badge_sign_filter_is_stored_as_is_in_one_write() {
 		add_filter( 'learning_ledger/badge_sign', static fn() => 'eyJhbGciOiJSUzI1NiJ9.e30.c2ln', 10, 3 );
+		$writes = array();
+		$table  = Tables::name( 'badges' );
+		$spy    = static function ( $sql ) use ( &$writes, $table ) {
+			if ( 1 === preg_match( '/^\s*UPDATE\s+`?' . preg_quote( $table, '/' ) . '\b/i', (string) $sql ) ) {
+				$writes[] = $sql;
+			}
+			return $sql;
+		};
+		add_filter( 'query', $spy );
 
-		( new Claim_Handler() )->claim( $this->mint(), self::EMAIL, false );
+		( new Claim_Handler() )->claim( $this->mint(), self::EMAIL, true );
+		remove_filter( 'query', $spy );
 
-		global $wpdb;
-		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT status, credential FROM ' . Tables::name( 'badges' ) . ' WHERE id = %s', $this->badge_id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-		$this->assertSame( 'issued', $row['status'] );
-		$this->assertSame( 'eyJhbGciOiJSUzI1NiJ9.e30.c2ln', $row['credential'] );
+		$this->assertCount( 1, $writes );
+		$this->assertStringContainsString( 'eyJhbGciOiJSUzI1NiJ9.e30.c2ln', $writes[0] );
+		$badge = ( new Badge_Repository() )->get( $this->badge_id );
+		$this->assertSame( Badge_Repository::ISSUED, $badge['status'] );
+		$this->assertSame( 'eyJhbGciOiJSUzI1NiJ9.e30.c2ln', $badge['credential'] );
+		$this->assertTrue( $badge['shared'] );
+	}
+
+	public function test_a_json_ld_claim_is_stored_in_one_write_with_the_share_choice() {
+		$writes = 0;
+		$table  = Tables::name( 'badges' );
+		$spy    = static function ( $sql ) use ( &$writes, $table ) {
+			if ( 1 === preg_match( '/^\s*UPDATE\s+`?' . preg_quote( $table, '/' ) . '\b/i', (string) $sql ) ) {
+				++$writes;
+			}
+			return $sql;
+		};
+		add_filter( 'query', $spy );
+
+		( new Claim_Handler() )->claim( $this->mint(), self::EMAIL, true );
+		remove_filter( 'query', $spy );
+
+		$this->assertSame( 1, $writes );
+		$badge = ( new Badge_Repository() )->get( $this->badge_id );
+		$this->assertTrue( $badge['shared'] );
+		$this->assertArrayHasKey( 'proof', $badge['credential'] );
+	}
+
+	public function test_failures_after_issuance_still_show_the_result_page() {
+		$log = tempnam( sys_get_temp_dir(), 'll57' );
+		$old = ini_set( 'error_log', $log ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		add_action(
+			'learning_ledger/badge_issued',
+			static function (): void {
+				throw new \RuntimeException( 'listener broke' );
+			},
+			5
+		);
+		add_filter(
+			'learning_ledger/statement_guards',
+			static function (): array {
+				throw new \RuntimeException( 'statement store broke' );
+			}
+		);
+
+		try {
+			$token = $this->mint();
+			$page  = $this->page();
+			$body  = $this->serve( $page, $token, 'POST', $this->fields( $token ) );
+		} finally {
+			ini_set( 'error_log', (string) $old ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+			remove_all_filters( 'learning_ledger/statement_guards' );
+		}
+
+		$this->assertSame( 200, $page->status );
+		$this->assertStringContainsString( esc_url( home_url( '/badges/' . $this->badge_id . '.json' ) ), $body );
+		$badge = ( new Badge_Repository() )->get( $this->badge_id );
+		$this->assertSame( Badge_Repository::ISSUED, $badge['status'] );
+		$this->assertTrue( self::verifies_against_did_document( $badge['credential'] ) );
+		$this->assertCount( 1, self::rows( 'audit', "event = 'badge_issued'" ) );
+		$this->assertSame( array(), self::earned_rows() );
+		$logged = (string) file_get_contents( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		wp_delete_file( $log );
+		$this->assertStringContainsString( 'listener broke', $logged );
+		$this->assertStringContainsString( 'statement store broke', $logged );
 	}
 
 	public function test_a_filter_returning_garbage_issues_nothing() {
@@ -654,5 +731,35 @@ class Claim_Handler_Test extends WP_UnitTestCase {
 		$this->assertSame( 200, $page->status );
 		$this->assertTrue( ( new Badge_Repository() )->get( $this->badge_id )['shared'] );
 		$this->assertStringContainsString( 'value="' . esc_attr( home_url( '/badges/' . $this->badge_id ) ) . '"', $body );
+	}
+
+	public function test_maybe_serve_answers_only_on_its_own_rewrite_rule() {
+		$token = $this->mint();
+		$page  = $this->page();
+		set_query_var( Claim_Page::QUERY_VAR, $token );
+		$_SERVER['REQUEST_METHOD'] = 'GET';
+		$wp                        = $GLOBALS['wp'];
+		$rule                      = $wp->matched_rule;
+
+		$wp->matched_rule = null;
+		ob_start();
+		$page->maybe_serve();
+		$this->assertSame( '', ob_get_clean() );
+		$this->assertSame( 0, $page->status );
+
+		$wp->matched_rule = Claim_Page::RULE;
+		try {
+			ob_start();
+			$page->maybe_serve();
+			$this->fail( 'Expected the response to finish' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'finished', $e->getMessage() );
+		} finally {
+			ob_end_clean();
+			$wp->matched_rule = $rule;
+			set_query_var( Claim_Page::QUERY_VAR, '' );
+			unset( $_SERVER['REQUEST_METHOD'] );
+		}
+		$this->assertSame( 200, $page->status );
 	}
 }

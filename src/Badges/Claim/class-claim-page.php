@@ -165,6 +165,11 @@ class Claim_Page {
 	 * @return void
 	 */
 	public function maybe_serve(): void {
+		global $wp;
+		// Only the page's own rewrite serves it, not the public query variable on any URL.
+		if ( ! $wp instanceof \WP || self::RULE !== $wp->matched_rule ) {
+			return;
+		}
 		$token = get_query_var( self::QUERY_VAR );
 		if ( ! is_string( $token ) || '' === $token ) {
 			return;
@@ -176,7 +181,8 @@ class Claim_Page {
 			$fields = array(
 				'token' => isset( $_POST[ self::FIELD_TOKEN ] ) && is_string( $_POST[ self::FIELD_TOKEN ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::FIELD_TOKEN ] ) ) : '',
 				'nonce' => isset( $_POST[ self::FIELD_NONCE ] ) && is_string( $_POST[ self::FIELD_NONCE ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::FIELD_NONCE ] ) ) : '',
-				'email' => isset( $_POST[ self::FIELD_EMAIL ] ) && is_string( $_POST[ self::FIELD_EMAIL ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::FIELD_EMAIL ] ) ) : '',
+				// Not sanitize_text_field(): Claim_Handler trims, lowercases and checks it with is_email(), then only hashes it; the form escapes it when showing it again.
+				'email' => isset( $_POST[ self::FIELD_EMAIL ] ) && is_string( $_POST[ self::FIELD_EMAIL ] ) ? wp_unslash( $_POST[ self::FIELD_EMAIL ] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 				'share' => isset( $_POST[ self::FIELD_SHARE ] ) && '1' === $_POST[ self::FIELD_SHARE ],
 			);
 			// phpcs:enable WordPress.Security.NonceVerification.Missing
@@ -218,9 +224,9 @@ class Claim_Page {
 			return;
 		}
 
+		$share = true === ( $fields['share'] ?? false );
 		try {
-			$share      = $fields['share'] ?? false;
-			$credential = $this->handler->claim( $token, $email, true === $share );
+			$credential = $this->handler->claim( $token, $email, $share );
 		} catch ( Invalid_Input $e ) {
 			if ( Claim_Handler::INVALID_EMAIL === $e->error_code() ) {
 				$this->respond( 400, $this->form( $token, $badge, $email, __( 'Enter a valid email address.', 'learning-ledger' ) ) );
@@ -235,15 +241,14 @@ class Claim_Page {
 			return;
 		}
 
-		$issued = $this->badges->get( $badge['id'] );
-		$exp    = Clock::now()->getTimestamp() + self::DOWNLOAD_TTL;
+		$exp = Clock::now()->getTimestamp() + self::DOWNLOAD_TTL;
 		$this->respond(
 			200,
 			array(
 				'state'      => 'issued',
 				'json_url'   => self::download_url( $badge['id'], 'json', $exp ),
 				'png_url'    => self::download_url( $badge['id'], 'png', $exp ),
-				'share_url'  => null !== $issued && $issued['shared'] ? home_url( '/badges/' . $badge['id'] ) : '',
+				'share_url'  => $share ? home_url( '/badges/' . $badge['id'] ) : '',
 				'valid_from' => is_string( $credential['validFrom'] ?? null ) ? $credential['validFrom'] : '',
 			) + self::about( $badge )
 		);
@@ -318,9 +323,13 @@ class Claim_Page {
 	 * @return void
 	 */
 	protected function send_headers( int $status, array $headers ): void {
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- the page-cache convention; caches must not keep a claim page.
+		}
 		if ( headers_sent() ) {
 			return;
 		}
+		nocache_headers();
 		status_header( $status );
 		foreach ( $headers as $name => $value ) {
 			header( $name . ': ' . $value );

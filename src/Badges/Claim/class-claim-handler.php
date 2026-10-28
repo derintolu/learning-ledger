@@ -7,7 +7,6 @@
 
 namespace LearningLedger\Badges\Claim;
 
-// phpcs:disable WordPress.DB.DirectDatabaseQuery -- plugin-owned table, never cached: badge status must be read fresh.
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- exception messages are never echoed; Claim_Page maps the codes to its own text.
 
 use LearningLedger\Audit\Audit_Log;
@@ -18,9 +17,7 @@ use LearningLedger\Badges\Issuer\Key_Store;
 use LearningLedger\Badges\Pipeline\Badge_Repository;
 use LearningLedger\Badges\Signing\Eddsa_Rdfc_2022;
 use LearningLedger\Badges\Status\Status_List_Repository;
-use LearningLedger\Db\Tables;
 use LearningLedger\Lrs\Auth\Principal;
-use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Links\Link_Repository;
 use LearningLedger\Lrs\Statements\Statement_Repository;
 use LearningLedger\Lrs\Statements\Statement_Store;
@@ -86,10 +83,10 @@ final class Claim_Handler {
 	 * @param string  $email Recipient email address (trimmed and lowercased before hashing).
 	 * @param boolean $share Whether the learner allows the public badge page.
 	 *
-	 * @return array The stored credential.
+	 * @return array The stored credential (the unsigned one when the `badge_sign` filter returned a VC-JWT).
 	 *
 	 * @throws Invalid_Input Code GONE, CONFLICT or INVALID_EMAIL.
-	 * @throws \RuntimeException When no badge key is active, or signing or storage fails.
+	 * @throws \RuntimeException When no badge key is active, or signing or storage fails (before the badge is issued; nothing after issuance throws).
 	 */
 	public function claim( string $token, #[\SensitiveParameter] string $email, bool $share ): array {
 		$link = 1 === preg_match( '/\A[A-Za-z0-9_-]{43}\z/', $token ) ? $this->links->resolve( $token, 'claim' ) : null;
@@ -117,6 +114,11 @@ final class Claim_Handler {
 		if ( ! $this->links->consume( $token ) ) {
 			throw new Invalid_Input( 'This claim link has expired or was already used.', self::GONE, 'token' );
 		}
+		// Look again now the link is spent, so a badge revoked meanwhile does not take a status index.
+		$fresh = $this->badges->get( $badge['id'] );
+		if ( null === $fresh || Badge_Repository::PENDING !== $fresh['status'] ) {
+			throw new Invalid_Input( 'This badge cannot be claimed.', self::CONFLICT, 'badge' );
+		}
 
 		$salt          = bin2hex( random_bytes( 16 ) );
 		$identity_hash = 'sha256$' . hash( 'sha256', $email . $salt );
@@ -136,38 +138,46 @@ final class Claim_Handler {
 		);
 		$signed     = self::sign( $credential, $key, $now );
 
-		$stored = is_array( $signed ) ? $signed : $credential;
-		if ( ! $this->badges->store_issued( $badge['id'], $stored, $slot['list_id'], $slot['index'], $identity_hash, $salt ) ) {
+		// One UPDATE of a pending row: the credential (JSON-LD or VC-JWT), status slot, hash, share choice.
+		if ( ! $this->badges->store_issued( $badge['id'], $signed, $slot['list_id'], $slot['index'], $identity_hash, $salt, $share ) ) {
 			throw new Invalid_Input( 'This badge cannot be claimed.', self::CONFLICT, 'badge' );
 		}
-		self::finish_row( $badge['id'], $share, is_string( $signed ) ? $signed : null );
+		$stored = is_array( $signed ) ? $signed : $credential;
 
-		$earned_id = $this->write_earned( $actor, $badge, $credential['id'] );
+		// The badge is issued. Nothing below may fail the claim: the learner must get the result page.
+		try {
+			Audit_Log::record(
+				'badge_issued',
+				array(
+					'badge'        => $badge['id'],
+					'credential'   => $credential['id'],
+					'achievement'  => (string) ( $badge['achievement']['id'] ?? '' ),
+					'registration' => $badge['registration'],
+					'kid'          => $key->kid,
+					'status_list'  => $slot['list_id'],
+					'status_index' => $slot['index'],
+					'shared'       => $share,
+				),
+				$link['created_by']
+			);
+		} catch ( \Throwable $e ) {
+			self::log( 'audit row', $badge['id'], $e );
+		}
 
-		/**
-		 * Fires once when a badge is issued, after it is stored.
-		 *
-		 * @param string $credential_id Credential id (`urn:uuid:<badge id>`).
-		 * @param array  $credential    The stored credential.
-		 * @param string $registration  Registration UUID.
-		 */
-		do_action( 'learning_ledger/badge_issued', $credential['id'], $stored, $badge['registration'] ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+		$this->write_earned( $actor, $badge, $credential['id'] );
 
-		Audit_Log::record(
-			'badge_issued',
-			array(
-				'badge'        => $badge['id'],
-				'credential'   => $credential['id'],
-				'achievement'  => (string) ( $badge['achievement']['id'] ?? '' ),
-				'registration' => $badge['registration'],
-				'kid'          => $key->kid,
-				'status_list'  => $slot['list_id'],
-				'status_index' => $slot['index'],
-				'shared'       => $share,
-				'earned'       => $earned_id,
-			),
-			$link['created_by']
-		);
+		try {
+			/**
+			 * Fires once when a badge is issued, after it is stored.
+			 *
+			 * @param string $credential_id Credential id (`urn:uuid:<badge id>`).
+			 * @param array  $credential    The stored credential (the unsigned one when it was stored as a VC-JWT).
+			 * @param string $registration  Registration UUID.
+			 */
+			do_action( 'learning_ledger/badge_issued', $credential['id'], $stored, $badge['registration'] ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+		} catch ( \Throwable $e ) {
+			self::log( 'badge_issued listener', $badge['id'], $e );
+		}
 
 		return $stored;
 	}
@@ -206,52 +216,36 @@ final class Claim_Handler {
 	}
 
 	/**
-	 * Record the share choice and, for a credential signed as a string, the string itself.
-	 *
-	 * @param string      $id    Badge id.
-	 * @param boolean     $share Whether the public page is allowed.
-	 * @param string|null $jwt   Credential string from the filter, or null.
-	 *
-	 * @return void
-	 *
-	 * @throws \RuntimeException On a database error.
-	 */
-	private static function finish_row( string $id, bool $share, ?string $jwt ): void {
-		if ( ! $share && null === $jwt ) {
-			return;
-		}
-		global $wpdb;
-		$table = Tables::name( 'badges' );
-		if ( null === $jwt ) {
-			$ok = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET shared = 1 WHERE id = %s AND status = %s', $table, $id, Badge_Repository::ISSUED ) );
-		} else {
-			$ok = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET shared = %d, credential = %s WHERE id = %s AND status = %s', $table, $share ? 1 : 0, $jwt, $id, Badge_Repository::ISSUED ) );
-		}
-		if ( false === $ok ) {
-			throw new \RuntimeException( 'Could not store the issued badge.' );
-		}
-	}
-
-	/**
 	 * Store the `earned` statement as the LRS itself.
 	 *
-	 * The badge is already issued at this point, so a refused statement is recorded in the
-	 * audit row (as null) rather than failing the claim.
+	 * The badge is already issued at this point, so a failure is logged rather than failing the claim.
 	 *
 	 * @param array  $actor         Learner.
 	 * @param array  $badge         Badge row.
 	 * @param string $credential_id Credential id.
 	 *
-	 * @return string|null The statement id, or null when it could not be stored.
+	 * @return void
 	 */
-	private function write_earned( array $actor, array $badge, string $credential_id ): ?string {
+	private function write_earned( array $actor, array $badge, string $credential_id ): void {
 		$statement = Earned_Statement::build( $actor, $badge['registration'], (string) ( $badge['achievement']['id'] ?? '' ), $credential_id, $badge['trigger_statement_id'] );
 		try {
-			$ids = $this->store->store( array( $statement ), Principal::system(), self::XAPI_VERSION );
-		} catch ( Xapi_Error $e ) {
-			return null;
+			$this->store->store( array( $statement ), Principal::system(), self::XAPI_VERSION );
+		} catch ( \Throwable $e ) {
+			self::log( 'earned statement', $badge['id'], $e );
 		}
-		return $ids[0] ?? null;
+	}
+
+	/**
+	 * Log a failure that followed a successful issuance.
+	 *
+	 * @param string     $what     What failed.
+	 * @param string     $badge_id Badge id.
+	 * @param \Throwable $e        Failure.
+	 *
+	 * @return void
+	 */
+	private static function log( string $what, string $badge_id, \Throwable $e ): void {
+		error_log( sprintf( 'Learning Ledger: badge %s was issued, but its %s failed: %s', $badge_id, $what, $e->getMessage() ) ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- operator diagnostics after an issuance that already succeeded.
 	}
 
 	/**
