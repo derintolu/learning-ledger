@@ -94,6 +94,16 @@ class Lms_Statements_Test extends WP_UnitTestCase {
 		$this->assertSame( $st['id'], $none['id'], 'id depends on registration, object, verb and session only' );
 	}
 
+	/**
+	 * CATAPULT 001-essentials, cmi5 9.6.3.2-1: `launched` carries the masteryScore from the launch data.
+	 */
+	public function test_launched_carries_the_mastery_score_when_set() {
+		$st = ( new Lms_Statements() )->launched( self::au( array( 'mastery_score' => 0.9 ) ), self::actor(), self::REG, self::SESSION, 'Normal', 'https://au.example.org/1/index.html', null );
+		$this->assertSame( 0.9, $st['context']['extensions'][ Vocab::EXT_MASTERYSCORE ] );
+		$none = ( new Lms_Statements() )->launched( self::au(), self::actor(), self::REG, self::SESSION, 'Normal', 'https://au.example.org/1/index.html', null );
+		$this->assertArrayNotHasKey( Vocab::EXT_MASTERYSCORE, $none['context']['extensions'] );
+	}
+
 	public function test_abandoned_carries_the_duration() {
 		$st = ( new Lms_Statements() )->abandoned( self::au(), self::actor(), self::REG, self::SESSION, 3725.25 );
 		$this->assert_cmi5( $st, self::AU_ID . '/au', Vocab::ABANDONED, self::AU_ID );

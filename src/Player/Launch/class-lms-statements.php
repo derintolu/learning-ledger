@@ -27,7 +27,7 @@ final class Lms_Statements {
 	const NAMESPACE = 'c3e1a8d4-2f6b-5c7e-9a1d-4b8f0e2c6a53';
 
 	/**
-	 * The `launched` statement [cmi5 9.3.1].
+	 * The `launched` statement [cmi5 9.3.1], with the masteryScore when the AU has one [cmi5 9.6.3.2].
 	 *
 	 * @param Au          $au                AU.
 	 * @param array       $actor             Learner actor.
@@ -47,6 +47,9 @@ final class Lms_Statements {
 		);
 		if ( null !== $launch_parameters ) {
 			$extensions[ Vocab::EXT_LAUNCHPARAMETERS ] = $launch_parameters;
+		}
+		if ( null !== $au->mastery_score() ) {
+			$extensions[ Vocab::EXT_MASTERYSCORE ] = $au->mastery_score();
 		}
 		return self::statement( $actor, Vocab::LAUNCHED, 'Launched', Au::activity_id( $au->id() ), $registration, $session, $au->id(), $extensions );
 	}
