@@ -12,6 +12,7 @@ use LearningLedger\Cmi5\Satisfaction_Evaluator;
 use LearningLedger\Connector\Identity\Identity_Map;
 use LearningLedger\Connector\Ledger\Apply_Ledger;
 use LearningLedger\Connector\Ledger\Echo_Guard;
+use LearningLedger\Connector\Ledger\Registration_Map;
 use LearningLedger\Connector\Lms\Activity_Ref;
 use LearningLedger\Connector\Lms\Apply_Outcome;
 use LearningLedger\Connector\Lms\Integration_Loader;
@@ -172,7 +173,9 @@ final class Inbox_Processor {
 	}
 
 	/**
-	 * Evaluate one registration and apply its new results.
+	 * Evaluate one registration and apply its new results. A registration the registration map
+	 * holds under a scope other than `course:*` or `cmi5:*` (a Browse `preview:*` one) is
+	 * evaluated for listeners but never applied to the LMS.
 	 *
 	 * @param integer $program_id   Program id.
 	 * @param integer $user         User id.
@@ -187,8 +190,9 @@ final class Inbox_Processor {
 		if ( ! $program || ! $structure ) {
 			return $this->mark_all( $rows, Inbox_Repository::PROCESSED, $user );
 		}
-		$adapter = ( $this->adapter_for )( $program );
-		if ( ! $adapter instanceof LMS_Adapter ) {
+		$applies = self::applies_to_lms( $registration );
+		$adapter = $applies ? ( $this->adapter_for )( $program ) : null;
+		if ( $applies && ! $adapter instanceof LMS_Adapter ) {
 			// No adapter can take the results now; keep the rows for a later run.
 			return 0;
 		}
@@ -211,7 +215,7 @@ final class Inbox_Processor {
 		}
 
 		$e       = Satisfaction_Evaluator::evaluate( $structure, $facts );
-		$results = ( new Result_Factory( $this->ledger ) )->results(
+		$results = ! $adapter instanceof LMS_Adapter ? array() : ( new Result_Factory( $this->ledger ) )->results(
 			$program,
 			$structure,
 			$e,
@@ -241,6 +245,19 @@ final class Inbox_Processor {
 			return 0;
 		}
 		return $this->mark_all( $rows, $failed ? Inbox_Repository::FLAGGED : Inbox_Repository::PROCESSED, $user );
+	}
+
+	/**
+	 * Whether a registration's results may reach the LMS: one the registration map does not hold
+	 * (minted elsewhere), or one it holds under a `course:*` or `cmi5:*` scope.
+	 *
+	 * @param string $registration Registration UUID.
+	 *
+	 * @return boolean
+	 */
+	private static function applies_to_lms( string $registration ): bool {
+		$scope = ( new Registration_Map() )->scope_for( $registration );
+		return null === $scope || str_starts_with( $scope, 'course:' ) || str_starts_with( $scope, 'cmi5:' );
 	}
 
 	/**

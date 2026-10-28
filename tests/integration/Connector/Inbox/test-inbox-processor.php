@@ -14,6 +14,7 @@ use LearningLedger\Connector\Identity\Identity_Map;
 use LearningLedger\Connector\Inbox\Inbox_Processor;
 use LearningLedger\Connector\Inbox\Inbox_Repository;
 use LearningLedger\Connector\Ledger\Apply_Ledger;
+use LearningLedger\Connector\Ledger\Registration_Map;
 use LearningLedger\Connector\Lms\Course_Spec;
 use LearningLedger\Connector\Lms\Guarded_Adapter;
 use LearningLedger\Connector\Lms\Integration_State;
@@ -47,7 +48,7 @@ class Inbox_Processor_Test extends WP_UnitTestCase {
 		parent::set_up();
 		Installer::install();
 		global $wpdb;
-		foreach ( array( 'conn_inbox', 'applied', 'identity_links', 'waivers' ) as $t ) {
+		foreach ( array( 'conn_inbox', 'applied', 'identity_links', 'waivers', 'registrations' ) as $t ) {
 			$wpdb->query( 'DELETE FROM ' . Tables::name( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
 		}
 		delete_option( 'lledger_integration_state' );
@@ -361,6 +362,35 @@ class Inbox_Processor_Test extends WP_UnitTestCase {
 			$this->applied_types()
 		);
 		$this->assertSame( array( array( $this->program, $this->user, $this->registration, true ) ), $seen );
+	}
+
+	public function test_preview_registration_is_evaluated_but_never_applied() {
+		$seen = array();
+		$hook = static function ( int $program_id, int $user, string $registration ) use ( &$seen ) {
+			$seen[] = array( $program_id, $user, $registration );
+		};
+		add_action( 'learning_ledger/connector_evaluated', $hook, 10, 3 ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+
+		$this->registration = ( new Registration_Map() )->get_or_create( $this->user, 'preview:' . $this->program . ':' . $this->user );
+		$c                  = $this->st( Vocab::COMPLETED, $this->l2 );
+		$this->add( $c );
+		$this->assertSame( 1, $this->processor->process_pending() );
+		remove_action( 'learning_ledger/connector_evaluated', $hook, 10 );
+
+		$this->assertSame( array(), $this->fake->applied, 'a Browse registration never reaches the LMS' );
+		$this->assertSame( array(), ( new Apply_Ledger() )->for_user( $this->user ) );
+		$this->assertSame( 'processed', $this->status_of( $c['id'] ) );
+		$this->assertSame( array( array( $this->program, $this->user, $this->registration ) ), $seen, 'listeners still see it (sessions close on terminated)' );
+	}
+
+	public function test_course_and_cmi5_scoped_registrations_are_applied() {
+		foreach ( array( 'cmi5:' . $this->program, 'course:' . $this->course ) as $i => $scope ) {
+			$this->registration = ( new Registration_Map() )->get_or_create( $this->user, $scope );
+			$this->add( $this->st( Vocab::COMPLETED, 0 === $i ? $this->l2 : $this->l1 ), $this->st( Vocab::PASSED, $this->l1, array( 'success' => true ) ) );
+			$this->processor->process_pending();
+		}
+		$this->assertContains( 'lesson_completed:lesson:' . $this->l2, $this->applied_types() );
+		$this->assertContains( 'lesson_completed:lesson:' . $this->l1, $this->applied_types() );
 	}
 
 	public function test_a_run_skips_while_another_holds_the_lock() {

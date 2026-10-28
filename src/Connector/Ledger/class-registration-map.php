@@ -110,6 +110,25 @@ final class Registration_Map {
 	}
 
 	/**
+	 * The scope key a registration belongs to.
+	 *
+	 * @param string $registration Registration UUID.
+	 *
+	 * @return string|null Null when the map does not hold it.
+	 */
+	public function scope_for( string $registration ): ?string {
+		global $wpdb;
+		if ( ! Uuid::is_valid( $registration ) ) {
+			return null;
+		}
+		$table = Tables::name( 'registrations' );
+		$scope = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->prepare( "SELECT scope_key FROM {$table} WHERE registration = UNHEX(%s) LIMIT 1", bin2hex( Uuid::to_bin( $registration ) ) )
+		);
+		return null === $scope ? null : (string) $scope;
+	}
+
+	/**
 	 * Delete every registration of a user.
 	 *
 	 * @param integer $user User ID.
