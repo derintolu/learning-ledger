@@ -279,8 +279,10 @@ final class Package_Importer {
 			$updated,
 			static function () use ( $adapter, $spec, $tagline ): int {
 				$id = $adapter->upsert_course( $spec );
-				// The path tagline is the course excerpt, which Package_Builder exports.
-				if ( $id > 0 && get_post( $id ) && get_post_field( 'post_excerpt', $id, 'raw' ) !== $tagline ) {
+				// The path tagline is the course excerpt, which Package_Builder exports. Only a post of a course type
+				// the adapters report is touched, so a foreign id can never overwrite an unrelated post's excerpt.
+				$types = (array) apply_filters( 'learning_ledger/course_post_types', array() ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Slash-namespaced hook name is the plugin convention.
+				if ( $id > 0 && in_array( get_post_type( $id ), $types, true ) && get_post_field( 'post_excerpt', $id, 'raw' ) !== $tagline ) {
 					wp_update_post(
 						wp_slash(
 							array(

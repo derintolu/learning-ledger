@@ -40,12 +40,18 @@ class Importing_Fake_Adapter extends Fake_Adapter {
 
 	public int $fail_on_call = 0;
 
+	/** Id returned for every course instead of the real one, to simulate a foreign id. */
+	public int $course_id_override = 0;
+
 	/** @var array<string,int> */
 	private array $ids_by_key = array();
 
 	public function upsert_course( Course_Spec $spec ): int {
 		$this->course_specs[] = $spec;
 		$id                   = parent::upsert_course( $spec );
+		if ( $this->course_id_override > 0 ) {
+			return $this->course_id_override;
+		}
 		// The importer trusts a stored hash only while the LMS post exists.
 		if ( ! get_post( $id ) ) {
 			wp_insert_post(
@@ -111,6 +117,12 @@ class Package_Importer_Test extends WP_UnitTestCase {
 		$module->register_meta();
 		$this->adapter = new Importing_Fake_Adapter();
 		$this->repo    = new Program_Repository();
+		// The fake adapter keeps its courses as plain posts.
+		add_filter( 'learning_ledger/course_post_types', array( $this, 'course_types' ) );
+	}
+
+	public function course_types( $types ): array {
+		return array_merge( (array) $types, array( 'post' ) );
 	}
 
 	/**
@@ -194,6 +206,35 @@ class Package_Importer_Test extends WP_UnitTestCase {
 
 		$placement = array_filter( $this->adapter->lesson_specs, static fn( $s ) => 'placement' === $s->stable_key );
 		$this->assertSame( array(), $placement, 'the placement AU is program meta, not a lesson' );
+	}
+
+	public function test_course_tagline_becomes_the_course_excerpt() {
+		$report  = $this->import();
+		$courses = $this->repo->get( $report->program_id )->course_ids;
+
+		$this->assertSame( 'Indentation as syntax.', get_post_field( 'post_excerpt', $courses[1], 'raw' ) );
+	}
+
+	public function test_tagline_never_overwrites_a_post_of_another_type() {
+		$page                              = self::factory()->post->create(
+			array(
+				'post_type'    => 'page',
+				'post_excerpt' => 'Keep me.',
+			)
+		);
+		$this->adapter->course_id_override = $page;
+
+		$this->import();
+
+		$this->assertSame( 'Keep me.', get_post_field( 'post_excerpt', $page, 'raw' ) );
+	}
+
+	public function test_tagline_is_skipped_when_no_course_post_type_is_reported() {
+		remove_filter( 'learning_ledger/course_post_types', array( $this, 'course_types' ) );
+		$report  = $this->import();
+		$courses = $this->repo->get( $report->program_id )->course_ids;
+
+		$this->assertSame( '', get_post_field( 'post_excerpt', $courses[1], 'raw' ) );
 	}
 
 	public function test_lesson_blocks_and_secrets_land_in_post_content() {

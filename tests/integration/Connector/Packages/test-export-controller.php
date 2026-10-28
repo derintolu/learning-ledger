@@ -110,6 +110,7 @@ class Export_Controller_Test extends WP_UnitTestCase {
 		);
 		add_filter( 'learning_ledger/integration_dirs', array( $this, 'dirs' ) );
 		add_filter( 'learning_ledger/adapter_post_types', array( $this, 'post_types' ) );
+		add_filter( 'learning_ledger/course_post_types', array( $this, 'course_types' ) );
 		$this->start_lms();
 		$this->fixture();
 
@@ -135,6 +136,10 @@ class Export_Controller_Test extends WP_UnitTestCase {
 
 	public function dirs(): array {
 		return array( $this->dir );
+	}
+
+	public function course_types( $types ): array {
+		return array_merge( (array) $types, array( 'fake_course' ) );
 	}
 
 	public function post_types(): array {
