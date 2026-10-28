@@ -1,0 +1,46 @@
+name: Badges interop
+
+# Differential verification: the plugin signs tests/fixtures/badges/corpus.json in a
+# throwaway wp-env site, then Digital Bazaar's vc, eddsa-rdfc-2022 cryptosuite and jsonld
+# verify and re-canonicalise every credential and status list in Node. Any failure is a
+# release blocker for badges. Node runs here only, never at plugin runtime.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/Badges/**'
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    env:
+      COMPOSER_PROCESS_TIMEOUT: 0
+      LLEDGER_CORPUS: .cache/badges-corpus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+      - uses: actions/setup-node@v4
+        with:
+          # `npm run test:node` passes the directory tests/node to `node --test`; Node 22
+          # and 24 treat that as a module path and fail, Node 26 runs the tests in it.
+          node-version: 26
+          cache: npm
+      - run: composer install --no-progress --prefer-dist
+      - run: composer prefix
+      - run: npm ci
+      - run: npx @wordpress/env start
+      - name: Sign the corpus with the plugin
+        run: npx @wordpress/env run cli wp eval-file wp-content/plugins/learning-ledger/bin/dev-sign-corpus.php "wp-content/plugins/learning-ledger/$LLEDGER_CORPUS"
+      - name: Verify and re-canonicalise in Node
+        run: npm run test:node

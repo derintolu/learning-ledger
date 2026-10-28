@@ -1,0 +1,703 @@
+{
+	"issuerName": "Learn WordPress, reimagined",
+	"credentials": [
+		{
+			"name": "path-learner",
+			"narrative": "6 of 6 lessons completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner",
+				"name": "Learner path",
+				"description": "Start from zero and build your first WordPress site.",
+				"criteria": {
+					"narrative": "Complete the 6 lessons of the Learner path. Lessons tested out by placement count; lessons carried over from an earlier record do not."
+				},
+				"image": "https://learnwp.sqwrlz.com/badges/learner.png",
+				"achievementType": "Badge",
+				"alignment": [
+					{
+						"targetName": "Introduction to WordPress (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/introduction-to-wordpress-2/"
+					},
+					{
+						"targetName": "Understanding the difference between WordPress posts and pages (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/understanding-the-difference-between-wordpress-posts-and-pages/"
+					},
+					{
+						"targetName": "Creating posts and pages with the WordPress Block Editor (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/creating-posts-and-pages-with-the-wordpress-block-editor/"
+					},
+					{
+						"targetName": "What is the difference between the Block Editor and Site Editor? (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/what-is-the-difference-between-the-block-editor-and-site-editor/"
+					},
+					{
+						"targetName": "What is WordPress AI? (Learn WordPress lesson, AI-Powered WordPress)",
+						"targetUrl": "https://learn.wordpress.org/lesson/what-is-wordpress-ai/"
+					},
+					{
+						"targetName": "WordPress essentials, Domains and hosting (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/wordpress-essentials-domains-and-hosting/"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-ln-what-is-wordpress",
+			"narrative": "Lesson ln-what-is-wordpress completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner/ln-what-is-wordpress",
+				"name": "What WordPress is, and a tour of the dashboard",
+				"description": "What WordPress is, and a tour of the dashboard: a lesson of the Learner path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"What WordPress is, and a tour of the dashboard\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Introduction to WordPress (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/introduction-to-wordpress-2/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-ln-posts-and-pages",
+			"narrative": "Lesson ln-posts-and-pages completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner/ln-posts-and-pages",
+				"name": "Posts and pages, and when to use which",
+				"description": "Posts and pages, and when to use which: a lesson of the Learner path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Posts and pages, and when to use which\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Understanding the difference between WordPress posts and pages (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/understanding-the-difference-between-wordpress-posts-and-pages/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-ln-blocks",
+			"narrative": "Lesson ln-blocks completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner/ln-blocks",
+				"name": "Blocks, and the Code editor view",
+				"description": "Blocks, and the Code editor view: a lesson of the Learner path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Blocks, and the Code editor view\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Creating posts and pages with the WordPress Block Editor (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/creating-posts-and-pages-with-the-wordpress-block-editor/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-ln-navigation-and-site-editor",
+			"narrative": "Lesson ln-navigation-and-site-editor completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner/ln-navigation-and-site-editor",
+				"name": "The Site Editor, and your site's menu",
+				"description": "The Site Editor, and your site's menu: a lesson of the Learner path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"The Site Editor, and your site's menu\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "What is the difference between the Block Editor and Site Editor? (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/what-is-the-difference-between-the-block-editor-and-site-editor/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-ln-ai-in-wordpress",
+			"narrative": "Lesson ln-ai-in-wordpress completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner/ln-ai-in-wordpress",
+				"name": "AI in WordPress 7, and checking what it writes",
+				"description": "AI in WordPress 7, and checking what it writes: a lesson of the Learner path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"AI in WordPress 7, and checking what it writes\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "What is WordPress AI? (Learn WordPress lesson, AI-Powered WordPress)",
+						"targetUrl": "https://learn.wordpress.org/lesson/what-is-wordpress-ai/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-ln-publish",
+			"narrative": "Lesson ln-publish completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/learner/ln-publish",
+				"name": "Publishing, and what comes next",
+				"description": "Publishing, and what comes next: a lesson of the Learner path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Publishing, and what comes next\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "WordPress essentials, Domains and hosting (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/wordpress-essentials-domains-and-hosting/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "path-block-theme",
+			"narrative": "6 of 6 lessons completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme",
+				"name": "Block theme developer path",
+				"description": "Build your first block theme with theme.json, templates, parts and patterns.",
+				"criteria": {
+					"narrative": "Complete the 6 lessons of the Block theme developer path. Lessons tested out by placement count; lessons carried over from an earlier record do not."
+				},
+				"image": "https://learnwp.sqwrlz.com/badges/block-theme.png",
+				"achievementType": "Badge",
+				"alignment": [
+					{
+						"targetName": "Theme Structure (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/core-concepts/theme-structure/"
+					},
+					{
+						"targetName": "Main Stylesheet (style.css) (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/basics/main-stylesheet-style-css/"
+					},
+					{
+						"targetName": "Introduction to Templates (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/templates/introduction-to-templates/"
+					},
+					{
+						"targetName": "Styles (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/global-settings-and-styles/styles/"
+					},
+					{
+						"targetName": "Introduction to Patterns (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/patterns/introduction-to-patterns/"
+					},
+					{
+						"targetName": "Use the Create Block Theme plugin for exports, and theme variations (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/use-the-create-block-theme-plugin-for-exports-and-theme-variations/"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-bt-what-is-a-block-theme",
+			"narrative": "Lesson bt-what-is-a-block-theme completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme/bt-what-is-a-block-theme",
+				"name": "What makes a block theme",
+				"description": "What makes a block theme: a lesson of the Block theme developer path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"What makes a block theme\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Theme Structure (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/core-concepts/theme-structure/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-bt-style-css-and-theme-json",
+			"narrative": "Lesson bt-style-css-and-theme-json completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme/bt-style-css-and-theme-json",
+				"name": "style.css and theme.json settings",
+				"description": "style.css and theme.json settings: a lesson of the Block theme developer path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"style.css and theme.json settings\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Main Stylesheet (style.css) (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/basics/main-stylesheet-style-css/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-bt-templates-and-parts",
+			"narrative": "Lesson bt-templates-and-parts completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme/bt-templates-and-parts",
+				"name": "Templates and template parts",
+				"description": "Templates and template parts: a lesson of the Block theme developer path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Templates and template parts\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Introduction to Templates (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/templates/introduction-to-templates/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-bt-global-styles",
+			"narrative": "Lesson bt-global-styles completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme/bt-global-styles",
+				"name": "Global styles in theme.json",
+				"description": "Global styles in theme.json: a lesson of the Block theme developer path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Global styles in theme.json\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Styles (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/global-settings-and-styles/styles/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-bt-patterns",
+			"narrative": "Lesson bt-patterns completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme/bt-patterns",
+				"name": "Block patterns",
+				"description": "Block patterns: a lesson of the Block theme developer path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Block patterns\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Introduction to Patterns (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/patterns/introduction-to-patterns/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-bt-ship-it",
+			"narrative": "Lesson bt-ship-it completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme/bt-ship-it",
+				"name": "Ship your block theme",
+				"description": "Ship your block theme: a lesson of the Block theme developer path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Ship your block theme\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Use the Create Block Theme plugin for exports, and theme variations (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/use-the-create-block-theme-plugin-for-exports-and-theme-variations/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "path-vibe-coder",
+			"narrative": "6 of 6 lessons completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder",
+				"name": "Vibe coder path",
+				"description": "Ship WordPress code with an AI pair, and learn to spot what it gets wrong.",
+				"criteria": {
+					"narrative": "Complete the 6 lessons of the Vibe coder path. Lessons tested out by placement count; lessons carried over from an earlier record do not."
+				},
+				"image": "https://learnwp.sqwrlz.com/badges/vibe-coder.png",
+				"achievementType": "Badge",
+				"alignment": [
+					{
+						"targetName": "WordPress Hooks (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/wordpress-hooks/"
+					},
+					{
+						"targetName": "Enqueuing CSS or JavaScript (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/enqueuing-css-or-javascript/"
+					},
+					{
+						"targetName": "Securely developing plugins and themes (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/securely-developing-plugins-and-themes/"
+					},
+					{
+						"targetName": "Templates (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/templates-3/"
+					},
+					{
+						"targetName": "Global settings and styles (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/global-settings-and-styles/"
+					},
+					{
+						"targetName": "Plugin requirements (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/plugin-requirements/"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-vc-actions-and-filters",
+			"narrative": "Lesson vc-actions-and-filters completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder/vc-actions-and-filters",
+				"name": "Hooks, actions and filters",
+				"description": "Hooks, actions and filters: a lesson of the Vibe coder path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Hooks, actions and filters\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "WordPress Hooks (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/wordpress-hooks/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-vc-enqueueing",
+			"narrative": "Lesson vc-enqueueing completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder/vc-enqueueing",
+				"name": "Loading CSS the WordPress way",
+				"description": "Loading CSS the WordPress way: a lesson of the Vibe coder path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Loading CSS the WordPress way\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Enqueuing CSS or JavaScript (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/enqueuing-css-or-javascript/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-vc-escaping-and-sanitizing",
+			"narrative": "Lesson vc-escaping-and-sanitizing completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder/vc-escaping-and-sanitizing",
+				"name": "Escaping output, sanitizing input",
+				"description": "Escaping output, sanitizing input: a lesson of the Vibe coder path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Escaping output, sanitizing input\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Securely developing plugins and themes (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/securely-developing-plugins-and-themes/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-vc-template-hierarchy",
+			"narrative": "Lesson vc-template-hierarchy completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder/vc-template-hierarchy",
+				"name": "Which template renders this page?",
+				"description": "Which template renders this page?: a lesson of the Vibe coder path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Which template renders this page?\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Templates (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/templates-3/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-vc-theme-json-from-code",
+			"narrative": "Lesson vc-theme-json-from-code completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder/vc-theme-json-from-code",
+				"name": "Changing theme.json from your plugin",
+				"description": "Changing theme.json from your plugin: a lesson of the Vibe coder path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Changing theme.json from your plugin\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Global settings and styles (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/global-settings-and-styles/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "lesson-vc-ship-it",
+			"narrative": "Lesson vc-ship-it completed.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/vibe-coder/vc-ship-it",
+				"name": "Ship your plugin",
+				"description": "Ship your plugin: a lesson of the Vibe coder path.",
+				"criteria": {
+					"narrative": "Complete the lesson \"Ship your plugin\"."
+				},
+				"achievementType": "Achievement",
+				"alignment": [
+					{
+						"targetName": "Plugin requirements (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/plugin-requirements/",
+						"targetFramework": "Learn WordPress, reimagined"
+					}
+				]
+			}
+		},
+		{
+			"name": "path-block-theme-tested-out-revoked",
+			"narrative": "4 of 6 lessons completed, 2 tested out by placement.",
+			"revoke": true,
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/block-theme",
+				"name": "Block theme developer path",
+				"description": "Build your first block theme with theme.json, templates, parts and patterns.",
+				"criteria": {
+					"narrative": "Complete the 6 lessons of the Block theme developer path. Lessons tested out by placement count; lessons carried over from an earlier record do not."
+				},
+				"image": "https://learnwp.sqwrlz.com/badges/block-theme.png",
+				"achievementType": "Badge",
+				"alignment": [
+					{
+						"targetName": "Theme Structure (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/core-concepts/theme-structure/"
+					},
+					{
+						"targetName": "Main Stylesheet (style.css) (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/basics/main-stylesheet-style-css/"
+					},
+					{
+						"targetName": "Introduction to Templates (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/templates/introduction-to-templates/"
+					},
+					{
+						"targetName": "Styles (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/global-settings-and-styles/styles/"
+					},
+					{
+						"targetName": "Introduction to Patterns (Theme Handbook)",
+						"targetUrl": "https://developer.wordpress.org/themes/patterns/introduction-to-patterns/"
+					},
+					{
+						"targetName": "Use the Create Block Theme plugin for exports, and theme variations (Learn WordPress lesson)",
+						"targetUrl": "https://learn.wordpress.org/lesson/use-the-create-block-theme-plugin-for-exports-and-theme-variations/"
+					}
+				]
+			}
+		},
+		{
+			"name": "unicode-names",
+			"narrative": "Café (NFD) and Café (NFC) differ. Tab\there, newline\nthere, CR\rhere, quote \" and backslash \\, BEL \u0007, DEL , LS  , PS  , BOM ﻿, NUL-adjacent \u0001.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/unicode/%E2%9C%93-caf%C3%A9",
+				"name": "Développeur·se de thèmes — 블록 테마 — Блочная тема — ثيم الكتل — עיצוב בלוקים — ブロックテーマ — 区块主题 — 𝔅𝔩𝔬𝔠𝔨 𝔗𝔥𝔢𝔪𝔢 — ｆｕｌｌｗｉｄｔｈ",
+				"description": "Ελληνικά, हिन्दी, ไทย, Ꭰꮳꮃ, and 𐌰𐌱𐌲 (Gothic), with zero-width joiner a‍b and non-breaking space.",
+				"criteria": {
+					"narrative": "Złóż wszystkie lekcje. Façade, naïve, Ångström, œuvre, Straße, İstanbul, ǅ."
+				},
+				"image": "https://learnwp.sqwrlz.com/badges/unicode/%E2%9C%93.png",
+				"achievementType": "Badge",
+				"alignment": [
+					{
+						"targetName": "Référentiel « thèmes » – 主题",
+						"targetUrl": "https://example.org/frameworks/th%C3%A8mes?q=%E4%B8%BB%E9%A2%98#n%C2%BA1",
+						"targetDescription": "Описание цели",
+						"targetFramework": "إطار العمل",
+						"targetCode": "ТЕМА-01",
+						"targetType": "ext:Skill"
+					}
+				]
+			}
+		},
+		{
+			"name": "long-narrative",
+			"narrative": "The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with th.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/long-narrative",
+				"name": "Long narrative",
+				"description": "A credential whose evidence narrative is 5,000 characters long.",
+				"criteria": {
+					"narrative": "The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with theme.json, templates, parts and patterns, and checked each lesson — café, naïve, 日本語. The learner built a block theme with th."
+				},
+				"achievementType": "Badge"
+			}
+		},
+		{
+			"name": "alignment-fields",
+			"narrative": "Aligned to three frameworks.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/alignment-fields",
+				"name": "Alignment fields",
+				"description": "An achievement with every alignment field.",
+				"criteria": {
+					"narrative": "Meet each aligned target."
+				},
+				"achievementType": "Competency",
+				"alignment": [
+					{
+						"targetName": "Theme structure",
+						"targetUrl": "https://developer.wordpress.org/themes/core-concepts/theme-structure/",
+						"targetDescription": "Knows the files a block theme needs.",
+						"targetFramework": "WordPress Theme Handbook",
+						"targetCode": "TH-1.2",
+						"targetType": "ext:HandbookSection"
+					},
+					{
+						"targetName": "Escaping data",
+						"targetUrl": "https://developer.wordpress.org/apis/security/escaping/",
+						"targetDescription": "Escapes output late.",
+						"targetFramework": "WordPress Common APIs Handbook",
+						"targetCode": "SEC-ESC",
+						"targetType": "CFItem"
+					},
+					{
+						"targetName": "ISTE 1.5",
+						"targetUrl": "https://example.org/iste/1.5",
+						"targetCode": "1.5",
+						"targetType": "CFRubricCriterionLevel"
+					}
+				]
+			}
+		},
+		{
+			"name": "result-fields",
+			"narrative": "Scored 87 of 100, rubric level Proficient.",
+			"achievement": {
+				"id": "https://learnwp.sqwrlz.com/badges/result-fields",
+				"name": "Result fields",
+				"description": "An achievement with result descriptions, and a credential with results.",
+				"criteria": {
+					"narrative": "Score at least 70 on the final checkpoint."
+				},
+				"achievementType": "Assessment"
+			},
+			"resultDescription": [
+				{
+					"id": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a01",
+					"type": [
+						"ResultDescription"
+					],
+					"name": "Final checkpoint score",
+					"resultType": "ScaledScore",
+					"valueMin": "0",
+					"valueMax": "100",
+					"requiredValue": "70"
+				},
+				{
+					"id": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a02",
+					"type": [
+						"ResultDescription"
+					],
+					"name": "Rubric level",
+					"resultType": "RubricCriterionLevel",
+					"allowedValue": [
+						"Beginning",
+						"Developing",
+						"Proficient",
+						"Exemplary"
+					],
+					"requiredLevel": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a12",
+					"rubricCriterionLevel": [
+						{
+							"id": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a11",
+							"type": [
+								"RubricCriterionLevel"
+							],
+							"name": "Developing",
+							"level": "2",
+							"points": "60"
+						},
+						{
+							"id": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a12",
+							"type": [
+								"RubricCriterionLevel"
+							],
+							"name": "Proficient",
+							"level": "3",
+							"points": "80",
+							"description": "Écrit du code sûr."
+						}
+					]
+				},
+				{
+					"id": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a03",
+					"type": [
+						"ResultDescription"
+					],
+					"name": "Status",
+					"resultType": "Status"
+				}
+			],
+			"result": [
+				{
+					"type": [
+						"Result"
+					],
+					"resultDescription": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a01",
+					"value": "87"
+				},
+				{
+					"type": [
+						"Result"
+					],
+					"resultDescription": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a02",
+					"achievedLevel": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a12",
+					"value": "Proficient",
+					"alignment": [
+						{
+							"type": [
+								"Alignment"
+							],
+							"targetName": "Escaping data",
+							"targetUrl": "https://developer.wordpress.org/apis/security/escaping/"
+						}
+					]
+				},
+				{
+					"type": [
+						"Result"
+					],
+					"resultDescription": "urn:uuid:5d3a1f0e-1c7b-4b8e-9a39-0c6e9b6f6a03",
+					"status": "Completed"
+				}
+			]
+		}
+	]
+}
