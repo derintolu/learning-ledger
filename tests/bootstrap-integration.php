@@ -20,6 +20,13 @@ if ( ! file_exists( $lledger_tests_dir . '/includes/functions.php' ) ) {
 require_once dirname( __DIR__ ) . '/vendor/yoast/phpunit-polyfills/phpunitpolyfills-autoload.php';
 require_once $lledger_tests_dir . '/includes/functions.php';
 
+// A test run in a separate process loads this bootstrap again. The parent
+// already installed WordPress; reinstalling would reset auto-increment IDs
+// mid-suite, so later tests reuse IDs that static caches still hold.
+if ( function_exists( '__phpunit_run_isolated_test' ) ) {
+	putenv( 'WP_TESTS_SKIP_INSTALL=1' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv -- Read by the WordPress test bootstrap below.
+}
+
 tests_add_filter(
 	'muplugins_loaded',
 	static function () {
