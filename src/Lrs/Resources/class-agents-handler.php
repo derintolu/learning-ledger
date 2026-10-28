@@ -7,6 +7,7 @@
 
 namespace LearningLedger\Lrs\Resources;
 
+use LearningLedger\Lrs\Auth\Bindings;
 use LearningLedger\Lrs\Http\Resource_Handler;
 use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Http\Xapi_Request;
@@ -16,7 +17,8 @@ use LearningLedger\Util\Json;
 use LearningLedger\Xapi\Agent_Identity;
 
 /**
- * Returns the Person for an Agent; a principal bound to one actor may read only that actor.
+ * Returns the Person for an Agent, limited to the identities inside the principal's actor
+ * bindings; a principal bound to one actor may read only that actor.
  */
 final class Agents_Handler implements Resource_Handler {
 
@@ -48,7 +50,12 @@ final class Agents_Handler implements Resource_Handler {
 			throw new Xapi_Error( 403, 'This credential may not read that agent.' );
 		}
 
-		$person = ( new Agent_Repository() )->person_for( $agent );
+		$person   = ( new Agent_Repository() )->person_for( $agent );
+		$bindings = $principal->bindings();
+		// A linked identity outside the principal's actor bindings belongs to another system.
+		foreach ( Agent_Identity::IFI_KEYS as $key ) {
+			$person[ $key ] = array_values( array_filter( $person[ $key ], static fn( $value ) => self::within( $bindings, $key, $value ) ) );
+		}
 		// An agent never seen in a statement still identifies itself.
 		$own = $agent->to_array();
 		foreach ( Agent_Identity::IFI_KEYS as $key ) {
@@ -57,5 +64,22 @@ final class Agents_Handler implements Resource_Handler {
 			}
 		}
 		return Xapi_Response::json( 200, $person );
+	}
+
+	/**
+	 * Whether one IFI of a Person is inside the actor bindings.
+	 *
+	 * @param Bindings $bindings Bindings.
+	 * @param string   $key      IFI kind.
+	 * @param mixed    $value    IFI value.
+	 *
+	 * @return boolean
+	 */
+	private static function within( Bindings $bindings, string $key, mixed $value ): bool {
+		try {
+			return $bindings->allows_actor( Agent_Identity::from_array( array( $key => $value ) ) );
+		} catch ( Invalid_Input $e ) {
+			return false;
+		}
 	}
 }

@@ -6,6 +6,7 @@
  */
 
 use LearningLedger\Db\Installer;
+use LearningLedger\Db\Tables;
 use LearningLedger\Lrs\Auth\Client_Repository;
 use LearningLedger\Lrs\Auth\Scopes;
 use LearningLedger\Lrs\Auth\Token_Repository;
@@ -106,6 +107,40 @@ class Activities_Agents_Handlers_Test extends WP_UnitTestCase {
 		$this->assertSame( 'Person', $person['objectType'] );
 		$this->assertSame( array( self::learner( 'learner-1' )['account'] ), $person['account'] );
 		$this->assertSame( array(), $person['mbox'] );
+	}
+
+	public function test_bound_client_sees_only_linked_ifis_inside_its_bindings() {
+		$repo    = new Agent_Repository();
+		$mine    = Agent_Identity::from_array( self::learner( 'learner-1' ) );
+		$mbox    = Agent_Identity::from_array( array( 'mbox' => 'mailto:learner@other.example' ) );
+		$foreign = Agent_Identity::from_array(
+			array(
+				'account' => array(
+					'homePage' => 'https://other-lms.example',
+					'name'     => 'learner-1',
+				),
+			)
+		);
+		global $wpdb;
+		$table = Tables::name( 'agents' );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i', $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		foreach ( array( $mine, $mbox, $foreign ) as $a ) {
+			$repo->record( $a );
+		}
+		$person = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM %i WHERE ifi_hash = UNHEX(%s)', $table, bin2hex( $mine->hash() ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( $wpdb->prepare( 'UPDATE %i SET person_id = %d', $table, $person ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$query = array( 'agent' => wp_json_encode( self::learner( 'learner-1' ) ) );
+
+		$all = json_decode( $this->reader()->request( 'GET', 'agents', $query )->body(), true );
+		$this->assertSame( array( 'mailto:learner@other.example' ), $all['mbox'], 'an unbound reader sees the whole person' );
+		$this->assertCount( 2, $all['account'] );
+
+		$c     = Client_Factory::create( array( Scopes::STATEMENTS_READ ), array( 'bindings' => array( 'actor_home_page' => 'https://lms.example' ) ) );
+		$res   = Xapi_Test_Client::as( $c['id'], $c['secret'] )->request( 'GET', 'agents', $query );
+		$bound = json_decode( $res->body(), true );
+		$this->assertSame( 200, $res->status() );
+		$this->assertSame( array( self::learner( 'learner-1' )['account'] ), $bound['account'] );
+		$this->assertSame( array(), $bound['mbox'] );
 	}
 
 	public function test_unknown_agent_still_gets_its_own_ifi() {
