@@ -152,6 +152,19 @@ final class Badge_Repository {
 	}
 
 	/**
+	 * Number of badges with a status.
+	 *
+	 * @param string $status One of STATUSES.
+	 *
+	 * @return integer
+	 */
+	public function count_with_status( string $status ): int {
+		global $wpdb;
+		$table = Tables::name( 'badges' );
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = %s", $status ) );
+	}
+
+	/**
 	 * Change a badge's status.
 	 *
 	 * @param string $id     Badge id.

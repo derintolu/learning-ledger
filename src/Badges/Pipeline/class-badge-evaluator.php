@@ -156,11 +156,8 @@ final class Badge_Evaluator {
 				if ( null === $au || ! $result->au_satisfied( $au->id(), $policy ) ) {
 					return null;
 				}
-				$trigger = $this->move_on_statement( $s, $au, $record['facts'], $policy );
-				if ( null === $trigger || ! $this->trusted( $record['rows'][ $trigger ] ?? null ) ) {
-					return null;
-				}
-				return array( Badge_Repository::PENDING, $trigger, $au );
+				$trigger = $this->move_on_statement( $s, $au, $record, $policy );
+				return null === $trigger ? null : array( Badge_Repository::PENDING, $trigger, $au );
 
 			case 'block-satisfied':
 				$block = null === $key ? null : self::block_by_key( $s, $key );
@@ -311,24 +308,53 @@ final class Badge_Evaluator {
 	}
 
 	/**
-	 * Id of the fact that first satisfied the AU under the policy.
+	 * Id of the first trusted statement that meets the AU's moveOn under the policy: a
+	 * moveOn verb (or a waiver the policy counts) after which the AU is satisfied.
 	 *
 	 * @param Course_Structure $s      Course structure.
 	 * @param Au               $au     AU.
-	 * @param Au_Fact[]        $facts  Facts in stored order.
+	 * @param array            $record One actor's record (see record()).
 	 * @param string           $policy Waiver_Policy constant.
 	 *
-	 * @return string|null Null when the AU is satisfied without any statement (moveOn NotApplicable).
+	 * @return string|null Null when no trusted statement meets it (or moveOn is NotApplicable).
 	 */
-	private function move_on_statement( Course_Structure $s, Au $au, array $facts, string $policy ): ?string {
-		$own = array_values( array_filter( $facts, static fn( Au_Fact $f ): bool => $f->au_id === $au->id() ) );
-		$n   = count( $own );
-		for ( $i = 1; $i <= $n; $i++ ) {
-			if ( Satisfaction_Evaluator::evaluate( $s, array_slice( $own, 0, $i ) )->au_satisfied( $au->id(), $policy ) ) {
-				return $own[ $i - 1 ]->statement_id;
+	private function move_on_statement( Course_Structure $s, Au $au, array $record, string $policy ): ?string {
+		$own = array_values( array_filter( $record['facts'], static fn( Au_Fact $f ): bool => $f->au_id === $au->id() ) );
+		foreach ( $own as $i => $fact ) {
+			if ( ! self::meets_move_on( $au, $fact, $policy ) || ! $this->trusted( $record['rows'][ $fact->statement_id ] ?? null ) ) {
+				continue;
+			}
+			if ( Satisfaction_Evaluator::evaluate( $s, array_slice( $own, 0, $i + 1 ) )->au_satisfied( $au->id(), $policy ) ) {
+				return $fact->statement_id;
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Whether a fact is of a kind that can meet the AU's moveOn under the policy.
+	 *
+	 * @param Au      $au     AU.
+	 * @param Au_Fact $fact   Fact.
+	 * @param string  $policy Waiver_Policy constant.
+	 *
+	 * @return boolean
+	 */
+	private static function meets_move_on( Au $au, Au_Fact $fact, string $policy ): bool {
+		if ( Vocab::WAIVED === $fact->verb ) {
+			return Waiver_Policy::ALL === $policy || ( Waiver_Policy::EXCLUDE_CARRIED_OVER === $policy && ! $fact->carried_over );
+		}
+		switch ( $au->move_on() ) {
+			case 'Completed':
+				return Vocab::COMPLETED === $fact->verb;
+			case 'Passed':
+				return Vocab::PASSED === $fact->verb;
+			case 'CompletedAndPassed':
+			case 'CompletedOrPassed':
+				return Vocab::COMPLETED === $fact->verb || Vocab::PASSED === $fact->verb;
+			default:
+				return false;
+		}
 	}
 
 	/**
@@ -403,7 +429,8 @@ final class Badge_Evaluator {
 				'reason'       => 'recomputed satisfaction disagrees with the trusted satisfied statement',
 			)
 		);
-		update_option( Pipeline_Module::HELD_OPTION, (int) get_option( Pipeline_Module::HELD_OPTION, 0 ) + 1, false );
+		// A flag, not a counter, so concurrent jobs cannot lose an update; the notice counts the rows.
+		update_option( Pipeline_Module::HELD_OPTION, 1, false );
 	}
 
 	/**

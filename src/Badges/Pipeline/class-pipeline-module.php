@@ -8,7 +8,6 @@
 namespace LearningLedger\Badges\Pipeline;
 
 use LearningLedger\Cmi5\Vocab;
-use LearningLedger\Db\Tables;
 use LearningLedger\Kernel\Capabilities;
 use LearningLedger\Kernel\Module;
 use LearningLedger\Lrs\Courses\Course_Record;
@@ -33,14 +32,9 @@ final class Pipeline_Module implements Module {
 	const JOB = 'badge_evaluate';
 
 	/**
-	 * Option counting badges held for an admin's review.
+	 * Option flagging that held badges may await an admin's review.
 	 */
 	const HELD_OPTION = 'lledger_badges_held';
-
-	/**
-	 * Most evaluation passes per job when statements keep arriving during one.
-	 */
-	private const MAX_PASSES = 3;
 
 	/**
 	 * Constructor.
@@ -73,13 +67,11 @@ final class Pipeline_Module implements Module {
 	 * A batch whose only statements about the course are `satisfied` on a block cannot be
 	 * matched to a course here (a block id is not an AU); its job finds the course itself.
 	 *
-	 * @param Stored_Statement[]|Stored_Statement $rows Committed rows. do_action() passes a
-	 *                                                  one-row batch as the bare row.
+	 * @param Stored_Statement[] $rows Committed rows.
 	 *
 	 * @return void
 	 */
-	public function on_committed( array|Stored_Statement $rows ): void {
-		$rows       = is_array( $rows ) ? $rows : array( $rows );
+	public function on_committed( array $rows ): void {
 		$resolved   = array();
 		$unresolved = array();
 		foreach ( $rows as $row ) {
@@ -113,9 +105,8 @@ final class Pipeline_Module implements Module {
 	/**
 	 * Job handler: evaluate one registration.
 	 *
-	 * The queue drops a push while the same key's job is still open, so a statement stored
-	 * while this job runs would go unevaluated; the job re-evaluates until no new statement
-	 * arrived during a pass.
+	 * A statement stored while this runs queues a follow-up job (the queue releases a job's
+	 * dedupe key when it claims it), so nothing stored mid-evaluation goes unevaluated.
 	 *
 	 * @param array $payload Keys `registration` and `course` (null when the request could not tell).
 	 *
@@ -130,23 +121,22 @@ final class Pipeline_Module implements Module {
 		if ( null === $course || array() === $course->badges ) {
 			return;
 		}
-		for ( $pass = 0; $pass < self::MAX_PASSES; $pass++ ) {
-			$before = self::latest_seq( $registration );
-			$this->evaluator->evaluate( $registration, $course );
-			if ( self::latest_seq( $registration ) === $before ) {
-				return;
-			}
-		}
+		$this->evaluator->evaluate( $registration, $course );
 	}
 
 	/**
-	 * Admin notice while badges wait in the held state.
+	 * Admin notice while badges wait in the held state. The rows are counted only while the
+	 * flag is set, and the flag is cleared once none is held.
 	 *
 	 * @return void
 	 */
 	public function held_notice(): void {
-		$held = (int) get_option( self::HELD_OPTION, 0 );
-		if ( $held < 1 || ! current_user_can( Capabilities::MANAGE_BADGES ) ) {
+		if ( ! get_option( self::HELD_OPTION ) || ! current_user_can( Capabilities::MANAGE_BADGES ) ) {
+			return;
+		}
+		$held = ( new Badge_Repository() )->count_with_status( Badge_Repository::HELD );
+		if ( $held < 1 ) {
+			delete_option( self::HELD_OPTION );
 			return;
 		}
 		printf(
@@ -200,19 +190,5 @@ final class Pipeline_Module implements Module {
 			}
 		}
 		return null;
-	}
-
-	/**
-	 * Highest seq stored for a registration (0 when none).
-	 *
-	 * @param string $registration Registration UUID.
-	 *
-	 * @return integer
-	 */
-	private static function latest_seq( string $registration ): int {
-		global $wpdb;
-		return (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->prepare( 'SELECT MAX(seq) FROM %i WHERE registration = UNHEX(%s)', Tables::name( 'statements' ), str_replace( '-', '', $registration ) )
-		);
 	}
 }

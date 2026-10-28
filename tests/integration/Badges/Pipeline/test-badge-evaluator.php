@@ -15,6 +15,8 @@ use LearningLedger\Db\Tables;
 use LearningLedger\Lrs\Auth\Client_Repository;
 use LearningLedger\Lrs\Auth\Principal;
 use LearningLedger\Lrs\Auth\Scopes;
+use LearningLedger\Lrs\Auth\Token_Repository;
+use LearningLedger\Lrs\Auth\Token_Spec;
 use LearningLedger\Lrs\Courses\Course_Record;
 use LearningLedger\Lrs\Courses\Course_Repository;
 use LearningLedger\Lrs\Statements\Statement_Repository;
@@ -55,6 +57,7 @@ class Badge_Evaluator_Test extends WP_UnitTestCase {
 	public function tear_down() {
 		remove_all_actions( 'learning_ledger/statements_committed' );
 		remove_all_actions( 'learning_ledger/jobs/badge_evaluate' );
+		wp_set_current_user( 0 );
 		parent::tear_down();
 	}
 
@@ -431,5 +434,111 @@ class Badge_Evaluator_Test extends WP_UnitTestCase {
 		$again = ( new Badge_Repository() )->create_pending( $rows[0]['achievement'], $this->registration, $rows[0]['actor_hash'], self::COURSE, $rows[0]['trigger_statement_id'], 'x', 0 );
 		$this->assertNull( $again );
 		$this->assertCount( 1, $this->rows() );
+	}
+
+	public function test_a_push_while_the_job_runs_queues_a_follow_up() {
+		( new Pipeline_Module() )->register();
+		$this->import( self::declaration( 'block-satisfied', 'path-a' ) );
+		$this->store( $this->trusted, $this->completed( self::A1 ), $this->completed( self::A2 ) );
+
+		// The satisfied statement is stored after this job's evaluation has read the record.
+		$stored = false;
+		add_action(
+			'learning_ledger/jobs/badge_evaluate',
+			function () use ( &$stored ) {
+				if ( ! $stored ) {
+					$stored = true;
+					$this->store( $this->trusted, $this->satisfied( self::PATH_A ) );
+				}
+			},
+			20
+		);
+		$this->assertSame( 1, Job_Queue::run( 1 ) );
+		$this->assertSame( array(), $this->rows() );
+
+		global $wpdb;
+		$open = $wpdb->get_col( 'SELECT dedupe_key FROM ' . Tables::name( 'jobs' ) . ' WHERE done_at IS NULL' ); // phpcs:ignore WordPress.DB
+		$this->assertSame( array( 'badge:' . $this->registration ), $open, 'The push during the run queued a second job.' );
+
+		$this->assertSame( 1, Job_Queue::run() );
+		$this->assertCount( 1, $this->rows() );
+	}
+
+	public function test_statements_stored_with_a_child_token_never_trigger() {
+		$c      = $this->import( self::declaration( 'block-satisfied', 'path-a', false, 'block' ), self::declaration( 'au-moveon', 'a1', false, 'lesson' ) );
+		$parent = Client_Factory::create( array( Scopes::STATEMENTS_WRITE, Scopes::TOKENS_MINT ), array( 'trusted' => true ) );
+		$client = ( new Client_Repository() )->find( $parent['id'] );
+		$tokens = new Token_Repository();
+		$minted = $tokens->mint( $client, new Token_Spec( $this->registration, self::actor(), self::A1 . '/au', Uuid::v4(), 'Normal' ) );
+		$child  = Principal::for_token( $client, $tokens->find( $minted['key'] ) );
+		$this->assertFalse( $child->trusted_for_satisfaction() );
+
+		$this->store( $child, $this->completed( self::A1 ), $this->completed( self::A2 ), $this->satisfied( self::PATH_A ) );
+		$this->assertSame( 'tok:' . $minted['key'], ( new Statement_Repository() )->for_registration( $this->registration )[0]->authority_client );
+
+		$this->assertSame( array(), $this->evaluate( $c ) );
+		$this->assertSame( array(), $this->rows() );
+		$this->assertSame( array(), $this->audit_events( 'badge_held' ) );
+	}
+
+	public function test_au_moveon_takes_the_first_trusted_statement_that_meets_move_on() {
+		$c = $this->import( self::declaration( 'au-moveon', 'a1' ) );
+		$this->store( $this->untrusted, $this->completed( self::A1 ) );
+		$this->store( $this->trusted, $this->defined_statement( Vocab::TERMINATED, self::A1 ) );
+		[ $trusted ] = $this->store( $this->trusted, $this->completed( self::A1 ) );
+
+		$ids = $this->evaluate( $c );
+		$this->assertCount( 1, $ids );
+		$this->assertSame( $trusted, ( new Badge_Repository() )->get( $ids[0] )['trigger_statement_id'] );
+	}
+
+	public function test_any_path_with_unmet_recomputation_is_held() {
+		$c = $this->import( self::declaration( 'any-path', null ) );
+		$this->store( $this->trusted, $this->completed( self::A1 ) );
+		[ $sat ] = $this->store( $this->trusted, $this->satisfied( self::PATH_A ) );
+
+		$ids = $this->evaluate( $c );
+		$this->assertCount( 1, $ids );
+		$badge = ( new Badge_Repository() )->get( $ids[0] );
+		$this->assertSame( Badge_Repository::HELD, $badge['status'] );
+		$this->assertSame( $sat, $badge['trigger_statement_id'] );
+		$this->assertCount( 1, $this->audit_events( 'badge_held' ) );
+	}
+
+	public function test_course_satisfied_with_unmet_recomputation_is_held() {
+		$c = $this->import( self::declaration( 'course-satisfied', null ) );
+		$this->store( $this->trusted, $this->completed( self::A1 ), $this->completed( self::A2 ) );
+		[ $sat ] = $this->store( $this->trusted, $this->satisfied( self::COURSE ) );
+
+		$ids = $this->evaluate( $c );
+		$this->assertCount( 1, $ids );
+		$badge = ( new Badge_Repository() )->get( $ids[0] );
+		$this->assertSame( Badge_Repository::HELD, $badge['status'] );
+		$this->assertSame( $sat, $badge['trigger_statement_id'] );
+		$this->assertCount( 1, $this->audit_events( 'badge_held' ) );
+	}
+
+	public function test_held_notice_counts_held_rows_and_clears_its_flag() {
+		$c = $this->import( self::declaration( 'block-satisfied', 'path-a' ) );
+		$this->store( $this->trusted, $this->completed( self::A1 ), $this->satisfied( self::PATH_A ) );
+		[ $id ] = $this->evaluate( $c );
+		$module = new Pipeline_Module();
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+		ob_start();
+		$module->held_notice();
+		$this->assertSame( '', ob_get_clean(), 'Only badge managers see the notice.' );
+
+		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		get_userdata( $admin )->add_cap( 'lledger_manage_badges' );
+		wp_set_current_user( $admin );
+		ob_start();
+		$module->held_notice();
+		$this->assertStringContainsString( 'held 1 badge', ob_get_clean() );
+
+		( new Badge_Repository() )->set_status( $id, Badge_Repository::REVOKED );
+		ob_start();
+		$module->held_notice();
+		$this->assertSame( '', ob_get_clean() );
+		$this->assertFalse( get_option( Pipeline_Module::HELD_OPTION ) );
 	}
 }

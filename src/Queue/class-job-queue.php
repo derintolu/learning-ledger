@@ -52,7 +52,8 @@ final class Job_Queue {
 	private const MAX_ERROR_LENGTH = 1000;
 
 	/**
-	 * Queue a job. A `dedupe_key` already held by an undone job makes this a no-op.
+	 * Queue a job. A `dedupe_key` already held by a job that no runner has claimed yet makes
+	 * this a no-op; a claimed job gives its key up, so a push while it runs queues a follow-up.
 	 *
 	 * @param string      $type       Job type (the hook suffix).
 	 * @param array       $payload    JSON-serialisable payload.
@@ -148,7 +149,9 @@ final class Job_Queue {
 	 * Lock due, unlocked jobs with this runner's token and return them.
 	 *
 	 * The UPDATE repeats the due-and-unlocked condition, so a job another
-	 * runner claimed after our SELECT is not taken twice.
+	 * runner claimed after our SELECT is not taken twice. It also releases the
+	 * jobs' dedupe keys: work pushed while a job runs may depend on data the
+	 * job has already read, so it must queue a follow-up rather than be dropped.
 	 *
 	 * @param string  $token    Lock token.
 	 * @param integer $max_jobs Most jobs to claim.
@@ -177,7 +180,7 @@ final class Job_Queue {
 
 		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- placeholders are passed as one array.
-				"UPDATE {$table} SET lock_token = %s, locked_until = %s WHERE id IN ({$placeholders}) AND done_at IS NULL AND run_after <= %s AND (locked_until IS NULL OR locked_until < %s)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"UPDATE {$table} SET lock_token = %s, locked_until = %s, dedupe_key = NULL WHERE id IN ({$placeholders}) AND done_at IS NULL AND run_after <= %s AND (locked_until IS NULL OR locked_until < %s)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				array_merge( array( $token, $until ), $ids, array( $now, $now ) )
 			)
 		);
