@@ -447,7 +447,14 @@ class Launch_Test extends Lledger_Launch_Test_Case {
 		$this->launch_ok();
 		$res = $this->preferences( $this->learner );
 		$this->assertSame( 200, $res->status() );
-		$this->assertSame( array( 'languagePreference' => 'fr-FR' ), json_decode( $res->body(), true ) );
+		// CATAPULT 001-essentials, cmi5 11.0.0.0-5: the document holds both properties.
+		$this->assertSame(
+			array(
+				'languagePreference' => 'fr-FR',
+				'audioPreference'    => 'on',
+			),
+			json_decode( $res->body(), true )
+		);
 
 		$puts = array_values(
 			array_filter(

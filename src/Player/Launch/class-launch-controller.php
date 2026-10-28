@@ -211,7 +211,13 @@ final class Launch_Controller {
 						'agent'     => self::json( $actor ),
 						'profileId' => self::PREFERENCES,
 					),
-					self::json( array( 'languagePreference' => str_replace( '_', '-', get_user_locale( $user ) ) ) ),
+					// Both properties are required [cmi5 11.0.0.0-5]; audio defaults to on [cmi5 11.2].
+					self::json(
+						array(
+							'languagePreference' => str_replace( '_', '-', get_user_locale( $user ) ),
+							'audioPreference'    => 'on',
+						)
+					),
 					array(
 						'Content-Type'  => 'application/json',
 						'If-None-Match' => '*',
