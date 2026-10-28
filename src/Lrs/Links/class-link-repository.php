@@ -161,13 +161,14 @@ final class Link_Repository {
 	}
 
 	/**
-	 * Delete expired links.
+	 * Delete expired view links and expired unused claim links. Used claim links are kept as the
+	 * record of the claim.
 	 *
 	 * @return integer Links deleted.
 	 */
 	public function prune(): int {
 		global $wpdb;
-		$n = $wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE expires_at <= %s', Tables::name( 'links' ), Timestamp::to_db( Clock::now() ) ) );
+		$n = $wpdb->query( $wpdb->prepare( "DELETE FROM %i WHERE expires_at <= %s AND ( kind = 'view' OR used_at IS NULL )", Tables::name( 'links' ), Timestamp::to_db( Clock::now() ) ) );
 		return is_int( $n ) ? $n : 0;
 	}
 }

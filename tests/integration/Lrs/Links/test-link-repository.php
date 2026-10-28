@@ -173,4 +173,21 @@ class Link_Repository_Test extends WP_UnitTestCase {
 		$this->assertNotNull( $repo->resolve( $kept, 'view' ) );
 		$this->assertSame( 0, $repo->prune() );
 	}
+
+	public function test_prune_keeps_used_claim_links_as_the_record_of_the_claim() {
+		$repo = new Link_Repository();
+		$used = $repo->mint( 'claim', self::actor(), 'badge-1', 60, 'client:test' );
+		$repo->mint( 'claim', self::actor(), 'badge-2', 60, 'client:test' );
+		$repo->mint( 'view', self::actor(), 'record', 60, 'client:test' );
+		$this->assertTrue( $repo->consume( $used ) );
+
+		$this->later( 60 );
+		$this->assertSame( 2, $repo->prune(), 'the expired view link and the expired unused claim link' );
+
+		$rows = self::rows();
+		$this->assertCount( 1, $rows );
+		$this->assertSame( 'claim', $rows[0]['kind'] );
+		$this->assertNotNull( $rows[0]['used_at'] );
+		$this->assertSame( 0, $repo->prune() );
+	}
 }
