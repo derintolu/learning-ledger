@@ -224,8 +224,9 @@ class Package_Importer_Test extends WP_UnitTestCase {
 		);
 		$this->adapter->course_id_override = $page;
 
-		$this->import();
+		$report = $this->import();
 
+		$this->assertTrue( $report->ok(), wp_json_encode( $report->errors ) );
 		$this->assertSame( 'Keep me.', get_post_field( 'post_excerpt', $page, 'raw' ) );
 	}
 

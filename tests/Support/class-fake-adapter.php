@@ -224,7 +224,7 @@ class Fake_Adapter implements LMS_Adapter {
 	}
 
 	/**
-	 * Create or update a lesson by stable key.
+	 * Create or update a lesson by stable key. Like the real adapters, 0 for an id that is not one of its courses.
 	 *
 	 * @param int         $course_id Course ID.
 	 * @param Lesson_Spec $spec      Spec.
@@ -233,6 +233,9 @@ class Fake_Adapter implements LMS_Adapter {
 	 */
 	public function upsert_lesson( int $course_id, Lesson_Spec $spec ): int {
 		$this->maybe_throw();
+		if ( ! isset( $this->courses[ $course_id ] ) ) {
+			return 0;
+		}
 		foreach ( $this->courses[ $course_id ]['lessons'] ?? array() as $id ) {
 			if ( $this->lessons[ $id ]['key'] === $spec->stable_key ) {
 				$this->lessons[ $id ]['title'] = $spec->title;
