@@ -81,8 +81,8 @@ class Installer_Test extends WP_UnitTestCase {
 		foreach ( array_keys( Schema::tables() ) as $short ) {
 			$this->assertSame( Tables::name( $short ), $GLOBALS['wpdb']->get_var( $GLOBALS['wpdb']->prepare( 'SHOW TABLES LIKE %s', Tables::name( $short ) ) ) );
 		}
-		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
-		$this->assertSame( 2, Schema::VERSION );
+		$this->assertSame( 3, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 3, Schema::VERSION );
 		$autoload = $GLOBALS['wpdb']->get_var( $GLOBALS['wpdb']->prepare( "SELECT autoload FROM {$GLOBALS['wpdb']->options} WHERE option_name = %s", 'lledger_schema_version' ) );
 		$this->assertContains( $autoload, array( 'no', 'off' ) );
 	}
@@ -141,7 +141,7 @@ class Installer_Test extends WP_UnitTestCase {
 		$this->assertSame( '', $wpdb->last_error );
 		$this->assertSame( $before, count( $this->columns( 'statements' ) ) );
 		$this->assertSame( 17, $before );
-		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 3, (int) get_option( 'lledger_schema_version' ) );
 	}
 
 	public function test_statement_indexes_exist() {
@@ -171,7 +171,33 @@ class Installer_Test extends WP_UnitTestCase {
 		$indexes = $this->indexes( 'statements' );
 		$this->assertTrue( $this->has_index( $indexes, array( 'object_kind', 'seq' ) ) );
 		$this->assertTrue( $this->has_index( $indexes, array( 'object_kind', 'stored' ) ) );
-		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 3, (int) get_option( 'lledger_schema_version' ) );
+	}
+
+	public function test_upgrade_from_version_2_adds_the_registration_and_trigger_indexes() {
+		global $wpdb;
+		$this->install_real_tables();
+		$wpdb->query( 'ALTER TABLE ' . Tables::name( 'registrations' ) . ' DROP INDEX registration' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( 'ALTER TABLE ' . Tables::name( 'badges' ) . ' DROP INDEX trigger_statement_id' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$this->assertFalse( $this->has_index( $this->indexes( 'registrations' ), array( 'registration' ) ), 'the version 2 registrations indexes' );
+		$this->assertFalse( $this->has_index( $this->indexes( 'badges' ), array( 'trigger_statement_id' ) ), 'the version 2 badges indexes' );
+		update_option( 'lledger_schema_version', 2, false );
+
+		Installer::maybe_upgrade();
+
+		$this->assertTrue( $this->has_index( $this->indexes( 'registrations' ), array( 'registration' ) ) );
+		$this->assertTrue( $this->has_index( $this->indexes( 'badges' ), array( 'trigger_statement_id' ) ) );
+		$this->assertSame( 3, (int) get_option( 'lledger_schema_version' ) );
+
+		// Upgrading again changes nothing.
+		$registrations    = $this->indexes( 'registrations' );
+		$badges           = $this->indexes( 'badges' );
+		$wpdb->last_error = '';
+		update_option( 'lledger_schema_version', 2, false );
+		Installer::maybe_upgrade();
+		$this->assertSame( '', $wpdb->last_error );
+		$this->assertSame( $registrations, $this->indexes( 'registrations' ) );
+		$this->assertSame( $badges, $this->indexes( 'badges' ) );
 	}
 
 	public function test_statement_column_types() {
@@ -258,7 +284,7 @@ class Installer_Test extends WP_UnitTestCase {
 			'tokens'         => array( array( array( 'parent_client' ), false ), array( array( 'registration' ), false ) ),
 			'courses'        => array( array( array( 'course_iri_hash' ), true ) ),
 			'outbox'         => array( array( array( 'status', 'next_attempt_at' ), false ) ),
-			'badges'         => array( array( array( 'actor_hash' ), false ), array( array( 'registration' ), false ) ),
+			'badges'         => array( array( array( 'actor_hash' ), false ), array( array( 'registration' ), false ), array( array( 'trigger_statement_id' ), false ) ),
 			'links'          => array( array( array( 'token_hash' ), true ), array( array( 'kind', 'actor_hash', 'subject' ), false ) ),
 			'jobs'           => array( array( array( 'dedupe_key' ), true ), array( array( 'done_at', 'run_after' ), false ) ),
 			'conn_outbox'    => array( array( array( 'statement_id' ), true ) ),
@@ -266,7 +292,7 @@ class Installer_Test extends WP_UnitTestCase {
 			'identity_links' => array( array( array( 'user_id' ), false ) ),
 			'waivers'        => array( array( array( 'user_id', 'lesson_id' ), true ) ),
 			'applied'        => array( array( array( 'user_id', 'object_kind', 'object_id', 'status' ), true ) ),
-			'registrations'  => array( array( array( 'user_id', 'scope_key' ), true ) ),
+			'registrations'  => array( array( array( 'user_id', 'scope_key' ), true ), array( array( 'registration' ), false ) ),
 			'nonces'         => array( array( array( 'key_id', 'nonce' ), true ) ),
 			'cmi5_files'     => array( array( array( 'package_id', 'path_hash' ), true ) ),
 			'cmi5_sessions'  => array( array( array( 'session_id' ), true ), array( array( 'user_id', 'au_hash', 'status' ), false ) ),
@@ -295,7 +321,7 @@ class Installer_Test extends WP_UnitTestCase {
 		update_option( 'lledger_schema_version', 0, false );
 		Installer::maybe_upgrade();
 		$this->assertSame( 1, $queries );
-		$this->assertSame( 2, (int) get_option( 'lledger_schema_version' ) );
+		$this->assertSame( 3, (int) get_option( 'lledger_schema_version' ) );
 	}
 
 	public function test_db_requirements() {

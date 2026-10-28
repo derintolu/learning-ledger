@@ -27,8 +27,10 @@ final class Schema {
 	 *
 	 * 2: statements gain `kind_seq` and `kind_stored`, so StatementRef referrers are found
 	 * without reading every statement a filter matches (load test, Task 68).
+	 * 3: registrations gain KEY registration (registration-to-scope lookups on every committed
+	 * batch) and badges KEY trigger_statement_id (revocation on every voided statement).
 	 */
-	public const VERSION = 2;
+	public const VERSION = 3;
 
 	/**
 	 * Short table name => `CREATE TABLE` statement.
@@ -220,7 +222,8 @@ created_at datetime(6) NOT NULL,
 PRIMARY KEY  (id),
 UNIQUE KEY achievement_registration (achievement_hash,registration),
 KEY actor_hash (actor_hash),
-KEY registration (registration)',
+KEY registration (registration),
+KEY trigger_statement_id (trigger_statement_id)',
 
 			'status_lists'   => 'id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 purpose varchar(16) NOT NULL,
@@ -347,7 +350,8 @@ scope_key varchar(191) NOT NULL,
 registration binary(16) NOT NULL,
 created_at datetime(6) NOT NULL,
 ended_at datetime(6) NULL,
-PRIMARY KEY  (user_id,scope_key)',
+PRIMARY KEY  (user_id,scope_key),
+KEY registration (registration)',
 
 			'trusted_keys'   => 'key_id varchar(64) NOT NULL,
 public_key varbinary(32) NOT NULL,
