@@ -92,15 +92,15 @@ Behind Cloudflare, return `$server['HTTP_CF_CONNECTING_IP']` instead (only when 
 
 `connector connect` pins the LRS's notification key and generates this site's secret, which stays on the site. An administrator reads its SHA-256 from the `connector.secret_sha256` field of `GET /wp-json/learning-ledger/v1/status` (sign in with an Application Password), and the LRS administrator registers it, bound to the connector site's own learners:
 
-    wp learning-ledger client create --id=my-lms --secret-sha256=<the hash> --scopes=statements/read,actors/erase,records/view-links,badges/claim-links --bind-actor-home-page=https://lms.example.org
+    wp learning-ledger client create --id=my-lms --secret-sha256=<the hash> --scopes=statements/read,actors/erase,records/view-links --bind-actor-home-page=https://lms.example.org
 
 Add scopes for what the connector does beyond reading; `client update` replaces the scope list. Courses that send LMS progress to the LRS (`wp learning-ledger course direction2 <course id> on`) need `statements/write`, limited to the connector's activity IRIs, which start with `https://lms.example.org/activities/` unless the course comes from a package:
 
-    wp learning-ledger client update my-lms --scopes=statements/read,actors/erase,records/view-links,badges/claim-links,statements/write --write-activity-prefix=https://lms.example.org/activities/
+    wp learning-ledger client update my-lms --scopes=statements/read,actors/erase,records/view-links,statements/write --write-activity-prefix=https://lms.example.org/activities/
 
 The cmi5 player also needs `tokens/mint`, `void`, `state` and `profile`, and `--write-activity-prefix` must list the IRI base of each player course as well (comma-separated):
 
-    wp learning-ledger client update my-lms --scopes=statements/read,actors/erase,records/view-links,badges/claim-links,statements/write,tokens/mint,void,state,profile --write-activity-prefix=https://lms.example.org/activities/,https://courses.example.org/json-basics/
+    wp learning-ledger client update my-lms --scopes=statements/read,actors/erase,records/view-links,statements/write,tokens/mint,void,state,profile --write-activity-prefix=https://lms.example.org/activities/,https://courses.example.org/json-basics/
 
 Then, on the LRS, subscribe the connector's inbox to its learners' statements, so progress recorded elsewhere reaches the LMS:
 
