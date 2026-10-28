@@ -240,6 +240,28 @@ class Au_Store_Test extends WP_UnitTestCase {
 		$this->assertSame( 0, Job_Queue::due_count() );
 	}
 
+	public function test_corrupt_entry_data_marks_failed_without_a_php_warning() {
+		$files                = $this->five_files();
+		$files['au/zlast.js'] = str_repeat( 'console.log("au");', 40 );
+		$id                   = $this->begin( $this->zip_of( $files ) );
+		Job_Queue::run();
+		global $wpdb;
+		$source = $wpdb->get_var( $wpdb->prepare( 'SELECT source_url FROM ' . Tables::name( 'cmi5_packages' ) . ' WHERE id = %d', $id ) ); // phpcs:ignore WordPress.DB
+		$bytes  = file_get_contents( $source );
+		$local  = strpos( $bytes, "PK\x03\x04" . substr( $bytes, strpos( $bytes, 'au/zlast.js' ) - 26, 22 ) );
+		$this->assertNotFalse( $local );
+		$lens               = unpack( 'vname/vextra', substr( $bytes, $local + 26, 4 ) );
+		$data               = $local + 30 + $lens['name'] + $lens['extra'];
+		$bytes[ $data ]     = chr( ord( $bytes[ $data ] ) ^ 0xff );
+		$bytes[ $data + 2 ] = chr( ord( $bytes[ $data + 2 ] ) ^ 0x55 );
+		file_put_contents( $source, $bytes );
+
+		$this->extract_fully( $id );
+		$this->assertSame( 'failed', Au_Store::status( $id ) );
+		$error = $wpdb->get_var( $wpdb->prepare( 'SELECT error FROM ' . Tables::name( 'cmi5_packages' ) . ' WHERE id = %d', $id ) ); // phpcs:ignore WordPress.DB
+		$this->assertStringContainsString( 'zip_invalid', (string) $error );
+	}
+
 	public function test_delete_removes_files_rows_and_status() {
 		$id = $this->begin( $this->zip_of( $this->five_files() ) );
 		$this->extract_fully( $id );

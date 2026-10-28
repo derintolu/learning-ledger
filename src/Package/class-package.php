@@ -255,13 +255,23 @@ final class Package {
 		if ( true !== $zip->open( $this->zip_path, \ZipArchive::RDONLY ) ) {
 			throw new Invalid_Input( 'The package is not a readable ZIP file.', 'zip_invalid' );
 		}
+		$warned = false;
+		// The zip extension warns on a CRC or read error; an untrusted package must never surface that.
+		set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- scoped, restored below.
+			static function () use ( &$warned ): bool {
+				$warned = true;
+				return true;
+			},
+			E_WARNING
+		);
 		try {
 			$declared = $this->sizes[ $path ];
 			$data     = $zip->getFromName( $path, $declared + 1 );
 		} finally {
+			restore_error_handler();
 			$zip->close();
 		}
-		if ( false === $data || strlen( $data ) > $declared ) {
+		if ( $warned || false === $data || strlen( $data ) > $declared ) {
 			throw new Invalid_Input( 'A package entry does not match its declared size.', 'zip_too_large', $path );
 		}
 		return $data;

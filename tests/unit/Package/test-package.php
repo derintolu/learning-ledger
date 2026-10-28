@@ -192,6 +192,31 @@ class Package_Test extends \PHPUnit\Framework\TestCase {
 		}
 	}
 
+	public function test_corrupt_crc_entry_never_emits_a_php_warning() {
+		$body = 'abcdefghij';
+		$zip  = Package_Writer::write( Package_Fixtures::xml(), array(), array(), array( 'x' => $body ) );
+		$crc  = pack( 'V', crc32( $body ) );
+		$bad  = pack( 'V', crc32( $body ) ^ 0xffff );
+		$this->assertSame( 2, substr_count( $zip, $crc ), 'local header and central directory each carry the CRC' );
+		$p        = Package::from_zip( $this->zip_of( str_replace( $crc, $bad, $zip ) ), new Limits() );
+		$warnings = array();
+		set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- recording warnings.
+			static function ( int $no, string $str ) use ( &$warnings ): bool {
+				$warnings[] = $str;
+				return true;
+			},
+			E_WARNING
+		);
+		try {
+			$p->file( 'cxm/files/x' );
+		} catch ( Invalid_Input $e ) {
+			$this->assertSame( 'zip_too_large', $e->error_code() );
+		} finally {
+			restore_error_handler();
+		}
+		$this->assertSame( array(), $warnings );
+	}
+
 	public function test_duplicate_entries_are_rejected() {
 		$zip = Package_Writer::write(
 			Package_Fixtures::xml(),

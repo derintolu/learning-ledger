@@ -145,8 +145,17 @@ final class Extract_Job {
 			throw new Invalid_Input( 'The content store is not writable.', 'store_unwritable', $path );
 		}
 
-		$hash = hash_init( 'sha256' );
-		$read = 0;
+		$hash   = hash_init( 'sha256' );
+		$read   = 0;
+		$warned = false;
+		// The zip stream warns on a CRC or inflate error; an untrusted package must never surface that.
+		set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- scoped, restored below.
+			static function () use ( &$warned ): bool {
+				$warned = true;
+				return true;
+			},
+			E_WARNING
+		);
 		try {
 			while ( ! feof( $in ) ) {
 				$chunk = fread( $in, self::CHUNK );
@@ -162,7 +171,7 @@ final class Extract_Job {
 					throw new Invalid_Input( 'The content store is not writable.', 'store_unwritable', $path );
 				}
 			}
-			if ( $read !== $declared ) {
+			if ( $warned || $read !== $declared ) {
 				throw new Invalid_Input( 'A package entry does not match its declared size.', 'zip_invalid', $path );
 			}
 		} catch ( Invalid_Input $e ) {
@@ -170,6 +179,8 @@ final class Extract_Job {
 			fclose( $out );
 			wp_delete_file( $tmp );
 			throw $e;
+		} finally {
+			restore_error_handler();
 		}
 		fclose( $in );
 		fclose( $out );
