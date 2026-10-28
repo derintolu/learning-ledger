@@ -90,7 +90,8 @@ final class Jwt_Module implements Module {
 	}
 
 	/**
-	 * Add each stored RSA key to did.json as a JsonWebKey verification method.
+	 * Add each readable RSA key to did.json as a JsonWebKey verification method. A stored key that
+	 * cannot be read is skipped by Rsa_Key_Store::published(); Site Health reports it.
 	 *
 	 * @param mixed $methods Verification methods.
 	 *
@@ -110,7 +111,7 @@ final class Jwt_Module implements Module {
 				);
 			}
 		} catch ( \RuntimeException $e ) {
-			// A misconfigured RSA key must not take the Ed25519 keys out of did.json.
+			// A misconfigured constant or file RSA key must not take the Ed25519 keys out of did.json.
 			return $methods;
 		}
 		return array_merge( $methods, $added );
@@ -133,11 +134,34 @@ final class Jwt_Module implements Module {
 	}
 
 	/**
-	 * Good in the default format; recommended (degraded) in VC-JWT mode.
+	 * Good in the default format; recommended (degraded) in VC-JWT mode. An RSA key that cannot be
+	 * read is critical in VC-JWT mode (new badges may not sign) and recommended otherwise (badges
+	 * already issued as VC-JWT may stop verifying).
 	 *
 	 * @return array
 	 */
 	public function test_badge_format(): array {
+		$vc_jwt     = self::FORMAT_VC_JWT === self::format();
+		$unreadable = Rsa_Key_Store::unreadable();
+		if ( array() !== $unreadable ) {
+			return array(
+				'label'       => __( 'An RSA badge key cannot be read', 'learning-ledger' ),
+				'status'      => $vc_jwt ? 'critical' : 'recommended',
+				'badge'       => array(
+					'label' => __( 'Learning Ledger', 'learning-ledger' ),
+					'color' => $vc_jwt ? 'red' : 'orange',
+				),
+				'description' => '<p>' . esc_html(
+					sprintf(
+						/* translators: %s: comma-separated RSA key ids (or a key storage tier). */
+						__( 'These RSA keys used for VC-JWT badges cannot be read: %s. A key whose public half does not parse is left out of did.json, so badges signed with it stop verifying; a key whose private half does not open cannot sign new badges.', 'learning-ledger' ),
+						implode( ', ', $unreadable )
+					)
+				) . '</p>',
+				'actions'     => '<p>' . esc_html__( 'Check LLEDGER_BADGE_RSA_KEY or LLEDGER_BADGE_RSA_KEY_FILE, or whether the WordPress salts or LLEDGER_ENCRYPTION_KEY changed since the key was stored.', 'learning-ledger' ) . '</p>',
+				'test'        => self::HEALTH_TEST,
+			);
+		}
 		$result = array(
 			'label'       => __( 'Badges use Data Integrity proofs', 'learning-ledger' ),
 			'status'      => 'good',
@@ -149,7 +173,7 @@ final class Jwt_Module implements Module {
 			'actions'     => '',
 			'test'        => self::HEALTH_TEST,
 		);
-		if ( self::FORMAT_VC_JWT !== self::format() ) {
+		if ( ! $vc_jwt ) {
 			return $result;
 		}
 		$result['label']          = __( 'Badges are issued in degraded VC-JWT mode', 'learning-ledger' );

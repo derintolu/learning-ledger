@@ -29,7 +29,7 @@ use LearningLedger\Vendor\Firebase\JWT\JWK;
 use LearningLedger\Vendor\Firebase\JWT\JWT;
 use LearningLedger\Xapi\Agent_Identity;
 
-// phpcs:disable Generic.Files.OneObjectStructurePerFile.MultipleFound, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- minimal WP_CLI stand-in for this test only.
+// phpcs:disable Generic.Files.OneObjectStructurePerFile.MultipleFound, Generic.Classes.DuplicateClassName.Found, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- minimal WP_CLI stand-in for this test only, defined only when no other test defined one.
 if ( ! class_exists( 'WP_CLI' ) ) {
 	class WP_CLI {
 
@@ -191,6 +191,7 @@ class Vc_Jwt_Signer_Test extends WP_UnitTestCase {
 			$header
 		);
 
+		$this->assertContains( Did_Document::JWK_CONTEXT, Did_Document::document()['@context'] );
 		$jwk = self::published_jwk( $header['kid'] );
 		$this->assertIsArray( $jwk, 'The header kid must resolve to a JsonWebKey assertion method in did.json' );
 		$this->assertSame( 'RSA', $jwk['kty'] );
@@ -277,6 +278,69 @@ class Vc_Jwt_Signer_Test extends WP_UnitTestCase {
 		$this->assertStringContainsString( '1EdTech', $jwt['description'] );
 		$this->assertStringContainsString( 'Learner Credential Wallet', $jwt['description'] );
 		$this->assertStringContainsString( 'badges format di', $jwt['actions'] );
+	}
+
+	public function test_site_health_is_good_when_stored_rsa_keys_are_readable() {
+		( new Jwt_Module() )->register();
+		Rsa_Key_Store::active();
+		$this->assertSame( array(), Rsa_Key_Store::unreadable() );
+		$this->assertSame( 'recommended', self::site_health( 'vc-jwt' )['status'] );
+	}
+
+	// Unreadable stored RSA keys.
+
+	private static function insert_rsa_row( string $kid, string $public_pem, string $sealed ): void {
+		$GLOBALS['wpdb']->insert(
+			Tables::name( 'keys' ),
+			array(
+				'kid'           => $kid,
+				'purpose'       => Rsa_Key_Store::PURPOSE,
+				'public_key'    => $public_pem,
+				'secret_sealed' => $sealed,
+				'created_at'    => '2026-01-01 00:00:00.000000',
+			)
+		);
+	}
+
+	public function test_unreadable_public_key_row_is_skipped_in_did_json_and_reported() {
+		( new Jwt_Module() )->register();
+		$good = Rsa_Key_Store::active();
+		self::insert_rsa_row( 'bad-key', 'not a pem', 'not sealed' );
+
+		$doc = Did_Document::document();
+		$ids = array_column( $doc['verificationMethod'], 'id' );
+		$this->assertContains( Did_Document::did() . '#' . $good['kid'], $ids );
+		$this->assertNotContains( Did_Document::did() . '#bad-key', $ids );
+		$this->assertContains( Did_Document::JWK_CONTEXT, $doc['@context'] );
+		$this->assertSame( array( 'bad-key' ), Rsa_Key_Store::unreadable() );
+
+		$jwt = self::site_health( 'vc-jwt' );
+		$this->assertSame( 'critical', $jwt['status'] );
+		$this->assertSame( 'lledger_badge_format', $jwt['test'] );
+		$this->assertStringContainsString( 'bad-key', $jwt['description'] );
+		$this->assertSame( 'recommended', self::site_health( 'di' )['status'] );
+	}
+
+	public function test_unopenable_private_key_is_reported_but_its_public_half_stays_published() {
+		( new Jwt_Module() )->register();
+		$res     = openssl_pkey_new(
+			array(
+				'private_key_bits' => 2048,
+				'private_key_type' => OPENSSL_KEYTYPE_RSA,
+			)
+		);
+		$details = openssl_pkey_get_details( $res );
+		$kid     = Rsa_Key_Store::thumbprint(
+			array(
+				'n' => JWT::urlsafeB64Encode( $details['rsa']['n'] ),
+				'e' => JWT::urlsafeB64Encode( $details['rsa']['e'] ),
+			)
+		);
+		self::insert_rsa_row( $kid, $details['key'], base64_encode( random_bytes( 64 ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+
+		$this->assertIsArray( self::published_jwk( Did_Document::did() . '#' . $kid ) );
+		$this->assertSame( array( $kid ), Rsa_Key_Store::unreadable() );
+		$this->assertSame( 'critical', self::site_health( 'vc-jwt' )['status'] );
 	}
 
 	// Vc_Jwt_Signer claims.

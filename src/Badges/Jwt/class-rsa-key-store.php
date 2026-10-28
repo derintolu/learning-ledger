@@ -55,6 +55,9 @@ final class Rsa_Key_Store {
 	/**
 	 * The key new VC-JWT badges are signed with. In the database tier it is created on first use.
 	 *
+	 * Two requests that find no key at the same moment each create one and sign with their own.
+	 * Both keys stay published, and later calls use the oldest unretired key.
+	 *
 	 * @return array{kid:string,private_pem:string,public_jwk:array{kty:string,n:string,e:string,alg:string,use:string}}
 	 *
 	 * @throws \RuntimeException When the configured key is not an RSA private key of at least 2048 bits, or storage fails.
@@ -72,10 +75,11 @@ final class Rsa_Key_Store {
 
 	/**
 	 * Every RSA key that has not been removed, oldest first, public halves only. Never creates a key.
+	 * A stored key whose public half cannot be read is skipped (unreadable() reports it).
 	 *
 	 * @return array<int, array{kid:string,public_jwk:array}>
 	 *
-	 * @throws \RuntimeException When a configured or stored key cannot be read.
+	 * @throws \RuntimeException When the constant or file key cannot be read.
 	 */
 	public static function published(): array {
 		if ( Key_Store::TIER_DATABASE !== self::tier() ) {
@@ -89,12 +93,56 @@ final class Rsa_Key_Store {
 		}
 		$keys = array();
 		foreach ( self::database_rows() as $row ) {
+			try {
+				$jwk = self::jwk_from_public_pem( (string) $row->public_key );
+			} catch ( \RuntimeException $e ) {
+				continue;
+			}
 			$keys[] = array(
 				'kid'        => (string) $row->kid,
-				'public_jwk' => self::jwk_from_public_pem( (string) $row->public_key ),
+				'public_jwk' => $jwk,
 			);
 		}
 		return $keys;
+	}
+
+	/**
+	 * Keys that cannot be read: stored keys whose public half does not parse, or whose sealed
+	 * private key cannot be opened or does not match its key id; or, in the constant and file
+	 * tiers, the tier name when that key is unusable. Nothing is created or printed.
+	 *
+	 * @return string[] Key ids (or a tier name).
+	 */
+	public static function unreadable(): array {
+		if ( Key_Store::TIER_DATABASE !== self::tier() ) {
+			try {
+				self::active();
+				return array();
+			} catch ( \RuntimeException $e ) {
+				return array( self::tier() );
+			}
+		}
+		global $wpdb;
+		$rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				'SELECT kid, public_key, secret_sealed FROM ' . Tables::name( 'keys' ) . ' WHERE purpose = %s AND removed_at IS NULL ORDER BY created_at ASC, kid ASC', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name.
+				self::PURPOSE
+			)
+		);
+		$bad  = array();
+		foreach ( $rows ? $rows : array() as $row ) {
+			try {
+				$jwk     = self::jwk_from_public_pem( (string) $row->public_key );
+				$private = self::from_private_pem( Secret_Box::open( (string) $row->secret_sealed, self::SEAL_CONTEXT ), 'stored key' );
+				$usable  = hash_equals( (string) $row->kid, self::thumbprint( $jwk ) ) && hash_equals( (string) $row->kid, $private['kid'] );
+			} catch ( \RuntimeException $e ) {
+				$usable = false;
+			}
+			if ( ! $usable ) {
+				$bad[] = (string) $row->kid;
+			}
+		}
+		return $bad;
 	}
 
 	/**
@@ -157,8 +205,6 @@ final class Rsa_Key_Store {
 
 	/**
 	 * The oldest unretired stored key, unsealed, or null when there is none.
-	 *
-	 * Oldest first, so two requests that both created a key at once settle on the same one.
 	 *
 	 * @return array{kid:string,private_pem:string,public_jwk:array}|null
 	 *

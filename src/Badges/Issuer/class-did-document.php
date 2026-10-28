@@ -22,6 +22,11 @@ final class Did_Document {
 	const CONTEXT = array( 'https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1' );
 
 	/**
+	 * Context defining `JsonWebKey` and `publicKeyJwk`, added only when such a method is published.
+	 */
+	const JWK_CONTEXT = 'https://w3id.org/security/jwk/v1';
+
+	/**
 	 * The issuer DID, from home_url(). A port is encoded as `%3A<port>`.
 	 *
 	 * @return string
@@ -51,7 +56,9 @@ final class Did_Document {
 	}
 
 	/**
-	 * The DID document: one Multikey per published key, all of them assertion methods.
+	 * The DID document: one Multikey per published key, all of them assertion methods, plus any
+	 * methods the `learning_ledger/did_verification_methods` filter adds. The JWK context is
+	 * included only when a JsonWebKey method is published.
 	 *
 	 * @return array
 	 */
@@ -78,8 +85,12 @@ final class Did_Document {
 				$methods[] = $method;
 			}
 		}
+		$context = self::CONTEXT;
+		if ( in_array( 'JsonWebKey', array_column( $methods, 'type' ), true ) ) {
+			$context[] = self::JWK_CONTEXT;
+		}
 		return array(
-			'@context'           => self::CONTEXT,
+			'@context'           => $context,
 			'id'                 => $did,
 			'verificationMethod' => $methods,
 			'assertionMethod'    => array_column( $methods, 'id' ),

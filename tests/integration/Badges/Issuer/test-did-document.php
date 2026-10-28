@@ -124,7 +124,27 @@ class Did_Document_Test extends WP_UnitTestCase {
 
 		$this->assertCount( 1, $seen );
 		$this->assertSame( $extra, $doc['verificationMethod'][1] );
+		$this->assertSame( array( 'https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1', 'https://w3id.org/security/jwk/v1' ), $doc['@context'] );
 		$this->assertSame( array( Did_Document::verification_method_for( $key ), $extra['id'] ), $doc['assertionMethod'] );
+	}
+
+	public function test_jwk_context_is_absent_without_a_json_web_key_method() {
+		Key_Store::generate();
+		$cb = static function ( $methods ) {
+			$methods[] = array(
+				'id'                 => Did_Document::did() . '#other',
+				'type'               => 'Multikey',
+				'controller'         => Did_Document::did(),
+				'publicKeyMultibase' => 'z6Mk',
+			);
+			return $methods;
+		};
+		add_filter( 'learning_ledger/did_verification_methods', $cb );
+		$doc = Did_Document::document();
+		remove_filter( 'learning_ledger/did_verification_methods', $cb );
+
+		$this->assertCount( 2, $doc['verificationMethod'] );
+		$this->assertSame( Did_Document::CONTEXT, $doc['@context'] );
 	}
 
 	public function test_did_json_route_serves_document() {

@@ -59,8 +59,15 @@ final class Vc_Jwt_Signer {
 		}
 		$payload['vc'] = $credential;
 
-		$key = Rsa_Key_Store::active();
-		return JWT::encode( $payload, $key['private_pem'], self::ALG, Did_Document::did() . '#' . $key['kid'] );
+		$key     = Rsa_Key_Store::active();
+		$private = openssl_pkey_get_private( $key['private_pem'] );
+		$kid     = Did_Document::did() . '#' . $key['kid'];
+		unset( $key );
+		if ( false === $private ) {
+			throw new \RuntimeException( 'The RSA badge key cannot be read.' );
+		}
+		// A key object, not the PEM string, so the PEM never appears among a stack trace's arguments.
+		return JWT::encode( $payload, $private, self::ALG, $kid );
 	}
 
 	/**
