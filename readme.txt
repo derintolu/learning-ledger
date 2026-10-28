@@ -73,14 +73,17 @@ Revoke a badge (its status list entry is flipped, so shared copies stop verifyin
 
 `badges format` takes `di` (the default, Data Integrity proofs) or `vc-jwt`. `badges remove-key` first moves the status lists onto the active key, so run `badges rotate` before removing the only key.
 
-If the LRS is behind a reverse proxy or CDN, every client reaches it from the proxy's address, so ten failed sign-ins within a minute, from any of them, lock out all of them. Return the real client address from the `learning_ledger/client_ip` filter, which receives `REMOTE_ADDR` and `$_SERVER`. Trust a forwarded header only when the request came from your own proxy:
+If the LRS is behind a reverse proxy or CDN, every client reaches it from the proxy's address, so ten failed sign-ins within a minute, from any of them, lock out all of them. Return the real client address from the `learning_ledger/client_ip` filter, which receives `REMOTE_ADDR` and `$_SERVER`. Trust a forwarded header only when the request came from your own proxy, and take the entry that proxy appended (the rightmost one), never the leftmost, which the client supplies and can rotate to dodge the lockout:
 
     add_filter( 'learning_ledger/client_ip', function ( $ip, $server ) {
         if ( '10.0.0.5' === $ip && isset( $server['HTTP_X_FORWARDED_FOR'] ) ) {
-            return trim( explode( ',', $server['HTTP_X_FORWARDED_FOR'] )[0] );
+            $hops = array_map( 'trim', explode( ',', $server['HTTP_X_FORWARDED_FOR'] ) );
+            return end( $hops );
         }
         return $ip;
     }, 10, 2 );
+
+Behind Cloudflare, return `$server['HTTP_CF_CONNECTING_IP']` instead (only when `REMOTE_ADDR` is a Cloudflare address), since Cloudflare overwrites that header.
 
 = Connector site =
 
