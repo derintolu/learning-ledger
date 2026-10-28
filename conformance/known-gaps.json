@@ -1,1 +1,9 @@
-{}
+{
+	"XAPI-00117": "Multipart attachments are cut for v1 (spec 6.9): signed statements travel as a JWS multipart/mixed attachment, and multipart/mixed requests get 400.",
+	"XAPI-00127": "Multipart attachments are cut for v1 (spec 6.9): multipart/mixed statement requests get 400 with a clear message; fileUrl-only attachments in application/json are accepted.",
+	"XAPI-00154": "Multipart attachments are cut for v1 (spec 6.9): GET statements with attachments=true answers application/json, not the multipart/mixed response format.",
+	"XAPI-00161": "Multipart attachments are cut for v1 (spec 6.9): the test first stores a statement with a raw attachment over multipart/mixed, which gets 400.",
+	"XAPI-00164": "Multipart attachments are cut for v1 (spec 6.9): the test first stores a statement with a raw attachment over multipart/mixed, which gets 400.",
+	"XAPI-00167": "Multipart attachments are cut for v1 (spec 6.9): the test first stores a statement with a raw attachment over multipart/mixed, which gets 400.",
+	"When comparing Durations (or Statements containing them), any precision beyond 0.01 second precision shall not be included in the comparison.": "Multipart attachments are cut for v1 (spec 6.9): this 2.0 test sends a signed statement, which travels as a JWS multipart/mixed attachment and gets 400."
+}
