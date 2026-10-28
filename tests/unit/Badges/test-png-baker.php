@@ -96,6 +96,18 @@ class Png_Baker_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertSame( 1, count( array_keys( array_column( self::chunks( $twice ), 0 ), 'iTXt', true ) ) );
 	}
 
+	public function test_baking_drops_an_existing_credential_chunk_even_when_it_cannot_be_decoded() {
+		$png  = self::png();
+		$data = "openbadgecredential\0\1\0\0\0not zlib data";
+		$iend = strrpos( $png, 'IEND' ) - 4;
+		$png  = substr( $png, 0, $iend ) . pack( 'N', strlen( $data ) ) . 'iTXt' . $data . pack( 'N', crc32( 'iTXt' . $data ) ) . substr( $png, $iend );
+
+		$baked = Png_Baker::bake( $png, self::CREDENTIAL );
+
+		$this->assertSame( 1, count( array_keys( array_column( self::chunks( $baked ), 0 ), 'iTXt', true ) ) );
+		$this->assertSame( self::CREDENTIAL, Png_Baker::extract( $baked ) );
+	}
+
 	public function test_extract_reads_a_compressed_itxt() {
 		$png  = self::png();
 		$data = "openbadgecredential\0\1\0\0\0" . gzcompress( self::CREDENTIAL );

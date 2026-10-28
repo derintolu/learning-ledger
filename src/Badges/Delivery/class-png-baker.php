@@ -53,7 +53,7 @@ final class Png_Baker {
 		$baked = self::chunk( 'iTXt', self::KEYWORD . "\0\0\0\0\0" . $credential_json );
 		$out   = self::SIGNATURE;
 		foreach ( $chunks as [ $type, $data, $raw ] ) {
-			if ( 'iTXt' === $type && null !== self::credential_text( $data ) ) {
+			if ( 'iTXt' === $type && str_starts_with( $data, self::KEYWORD . "\0" ) ) {
 				continue;
 			}
 			if ( 'IEND' === $type ) {

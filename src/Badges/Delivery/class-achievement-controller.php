@@ -88,45 +88,13 @@ final class Achievement_Controller {
 	}
 
 	/**
-	 * The OB 3.0 Achievement document of a declaration: an `Image` object for the image and
-	 * an `Alignment` type on each alignment, as in the issued credential.
+	 * The OB 3.0 Achievement document of a declaration, exactly as the issued credential embeds it.
 	 *
 	 * @param array $d Declaration's Achievement fields.
 	 *
 	 * @return array
 	 */
 	private static function document( array $d ): array {
-		$out = array(
-			'@context' => Credential_Builder::CONTEXT,
-			'id'       => (string) $d['id'],
-			'type'     => array( 'Achievement' ),
-		);
-		foreach ( array( 'name', 'description' ) as $field ) {
-			if ( is_string( $d[ $field ] ?? null ) ) {
-				$out[ $field ] = $d[ $field ];
-			}
-		}
-		if ( is_string( $d['criteria']['narrative'] ?? null ) ) {
-			$out['criteria'] = array( 'narrative' => $d['criteria']['narrative'] );
-		}
-		if ( is_string( $d['image'] ?? null ) && '' !== $d['image'] ) {
-			$out['image'] = array(
-				'id'   => $d['image'],
-				'type' => 'Image',
-			);
-		}
-		if ( is_string( $d['achievementType'] ?? null ) && '' !== $d['achievementType'] ) {
-			$out['achievementType'] = $d['achievementType'];
-		}
-		$alignments = array();
-		foreach ( is_array( $d['alignment'] ?? null ) ? $d['alignment'] : array() as $alignment ) {
-			if ( is_array( $alignment ) ) {
-				$alignments[] = array( 'type' => array( 'Alignment' ) ) + array_intersect_key( $alignment, array_flip( Credential_Builder::ALIGNMENT_FIELDS ) );
-			}
-		}
-		if ( array() !== $alignments ) {
-			$out['alignment'] = $alignments;
-		}
-		return $out;
+		return array( '@context' => Credential_Builder::CONTEXT ) + Credential_Builder::achievement( $d );
 	}
 }

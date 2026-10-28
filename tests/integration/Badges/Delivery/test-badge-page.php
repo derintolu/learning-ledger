@@ -6,6 +6,7 @@
  */
 
 use LearningLedger\Badges\Claim\Claim_Page;
+use LearningLedger\Badges\Claim\Credential_Builder;
 use LearningLedger\Badges\Delivery\Badge_Page;
 use LearningLedger\Badges\Delivery\Delivery_Module;
 use LearningLedger\Badges\Delivery\Png_Baker;
@@ -255,7 +256,7 @@ class Badge_Page_Test extends WP_UnitTestCase {
 		$purpose        = rtrim( strtr( base64_encode( Hmac::sign( $id . '|' . $exp, 'other-purpose' ) ), '+/', '-_' ), '=' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
 		$cases          = array(
 			'other badge'     => array( $e, $osig ),
-			'changed expiry'  => array( (string) ( $exp + 60 ), $sig ),
+			'changed expiry'  => array( (string) ( $exp - 60 ), $sig ),
 			'other purpose'   => array( $e, $purpose ),
 			'padded'          => array( $e, $sig . '=' ),
 			'empty'           => array( $e, '' ),
@@ -443,6 +444,21 @@ class Badge_Page_Test extends WP_UnitTestCase {
 		);
 		$this->assertStringNotContainsString( self::SALT, (string) wp_json_encode( $data ) );
 		$this->assertNotEmpty( $id );
+	}
+
+	public function test_achievement_route_publishes_the_achievement_exactly_as_the_credential_embeds_it() {
+		$declared = array(
+			'id'              => 'https://example.org/achievements/bare',
+			'name'            => 'Bare',
+			'description'     => 'Kept',
+			'criteria'        => array( 'narrative' => 'Do it.' ),
+			'achievementType' => 'Badge',
+		);
+		$this->issued( true, $declared );
+
+		$data = $this->get_achievement( sha1( $declared['id'] ) )->get_data();
+
+		$this->assertSame( array( '@context' => Credential_Builder::CONTEXT ) + Credential_Builder::achievement( $declared ), $data );
 	}
 
 	public function test_achievement_route_404s_for_an_unknown_or_unissued_achievement() {

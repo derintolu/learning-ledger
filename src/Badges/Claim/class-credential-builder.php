@@ -89,7 +89,7 @@ final class Credential_Builder {
 	 *
 	 * @return array
 	 */
-	private static function achievement( array $a ): array {
+	public static function achievement( array $a ): array {
 		$out = array(
 			'id'          => (string) ( $a['id'] ?? '' ),
 			'type'        => array( 'Achievement' ),
