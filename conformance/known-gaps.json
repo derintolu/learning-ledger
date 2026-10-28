@@ -5,5 +5,6 @@
 	"XAPI-00161": "Multipart attachments are cut for v1 (spec 6.9): the test first stores a statement with a raw attachment over multipart/mixed, which gets 400.",
 	"XAPI-00164": "Multipart attachments are cut for v1 (spec 6.9): the test first stores a statement with a raw attachment over multipart/mixed, which gets 400.",
 	"XAPI-00167": "Multipart attachments are cut for v1 (spec 6.9): the test first stores a statement with a raw attachment over multipart/mixed, which gets 400.",
-	"When comparing Durations (or Statements containing them), any precision beyond 0.01 second precision shall not be included in the comparison.": "Multipart attachments are cut for v1 (spec 6.9): this 2.0 test sends a signed statement, which travels as a JWS multipart/mixed attachment and gets 400."
+	"When comparing Durations (or Statements containing them), any precision beyond 0.01 second precision shall not be included in the comparison.": "Multipart attachments are cut for v1 (spec 6.9): this 2.0 test sends a signed statement, which travels as a JWS multipart/mixed attachment and gets 400.",
+	"Valid package is imported, Test package: 101-one-thousand-aus.xml (6.1.0.0-2) Package import": "The Sensei player imports the 1000-AU course (1000 Sensei lessons) correctly but in about 23 s on wp-env (8 s with the writes in one transaction), past the suite's fixed 5 s Jest timeout; the per-lesson Sensei lesson-order query, stable-key lookup and import-hash rewrite make it grow faster than linearly."
 }

@@ -131,6 +131,22 @@ final class Abandoner {
 	}
 
 	/**
+	 * Close one open session now, whatever its age (the CATAPULT test routes' abandonSession).
+	 *
+	 * @param string $session_id Session id.
+	 *
+	 * @return boolean|null Whether it was abandoned (false: its `terminated` was found), null when it is not open.
+	 * @throws \RuntimeException When the LRS refuses.
+	 */
+	public function close_now( string $session_id ): ?bool {
+		$session = $this->sessions->find( $session_id );
+		if ( null === $session || Session_Repository::OPEN !== $session['status'] ) {
+			return null;
+		}
+		return $this->close( $session );
+	}
+
+	/**
 	 * Close one session.
 	 *
 	 * @param array $session Session row.

@@ -157,10 +157,12 @@ final class Launch_Controller {
 	 * @param integer $user   User id.
 	 * @param integer $lesson Lesson id.
 	 * @param string  $mode   Normal, Browse or Review.
+	 * @param boolean $policy Apply the mode rules (enrolment, Review once satisfied, Browse for
+	 *                        editors). Only the CATAPULT test routes pass false.
 	 *
 	 * @return array{launch_url:string,method:string}|\WP_Error
 	 */
-	public function start( int $user, int $lesson, string $mode ): array|\WP_Error {
+	public function start( int $user, int $lesson, string $mode, bool $policy = true ): array|\WP_Error {
 		if ( ! in_array( $mode, self::MODES, true ) ) {
 			return self::error( 'lledger_invalid_mode', __( 'Unknown launch mode.', 'learning-ledger' ), 400 );
 		}
@@ -172,7 +174,7 @@ final class Launch_Controller {
 		if ( null === $adapter ) {
 			return self::error( 'lledger_unavailable', __( 'The Sensei integration is not available.', 'learning-ledger' ), 503 );
 		}
-		if ( ! $this->may_launch( $adapter, $user, $lesson, $target['course'], $mode ) ) {
+		if ( $user <= 0 || ( $policy && ! $this->may_launch( $adapter, $user, $lesson, $target['course'], $mode ) ) ) {
 			return self::error( 'lledger_forbidden', __( 'You cannot launch this lesson in this mode.', 'learning-ledger' ), 403 );
 		}
 
