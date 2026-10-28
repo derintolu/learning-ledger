@@ -305,7 +305,22 @@ class Au_Store_Test extends WP_UnitTestCase {
 		update_option( 'lledger_cmi5_content_host', 'au.example.org' );
 		$this->assertSame( 'au.example.org', Content_Host::get() );
 		$this->assertSame( 'host', Content_Host::mode() );
+		$https = static fn( $url ) => set_url_scheme( $url, 'https' );
+		add_filter( 'home_url', $https );
 		$this->assertSame( 'https://au.example.org/7/', Content_Host::base_url( 7 ) );
+		remove_filter( 'home_url', $https );
+	}
+
+	/**
+	 * CATAPULT LTS content-host run (http://127.0.0.1:<port>): the content origin uses the site's
+	 * scheme, so a plain-http test site does not get https AU URLs nothing answers.
+	 */
+	public function test_content_host_base_url_follows_the_site_scheme() {
+		update_option( 'lledger_cmi5_content_host', '127.0.0.1:8928' );
+		$http = static fn( $url ) => set_url_scheme( $url, 'http' );
+		add_filter( 'home_url', $http );
+		$this->assertSame( 'http://127.0.0.1:8928/7/', Content_Host::base_url( 7 ) );
+		remove_filter( 'home_url', $http );
 	}
 
 	public function test_host_under_cookie_domain_is_unsafe() {

@@ -70,7 +70,8 @@ final class Content_Host {
 	}
 
 	/**
-	 * Base URL under which a package's files are served, with a trailing slash.
+	 * Base URL under which a package's files are served, with a trailing slash. The content
+	 * host uses https unless the site itself is served over plain http (a local test site).
 	 *
 	 * @param integer $package_id Package id.
 	 *
@@ -78,7 +79,8 @@ final class Content_Host {
 	 */
 	public static function base_url( int $package_id ): string {
 		if ( 'host' === self::mode() ) {
-			return 'https://' . self::get() . '/' . $package_id . '/';
+			$scheme = 'http' === wp_parse_url( home_url(), PHP_URL_SCHEME ) ? 'http' : 'https';
+			return $scheme . '://' . self::get() . '/' . $package_id . '/';
 		}
 		return home_url( '/lledger-au/' . $package_id . '/' );
 	}
