@@ -295,16 +295,16 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$registration = $this->registration_of( $this->learner, $this->t59 );
 		$this->assertNotNull( $registration );
 
-		$b = $this->about( Vocab::SATISFIED, self::BLOCK_B );
+		$b = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) );
 		$this->assertCount( 1, $b, 'the block made only of a NotApplicable AU is satisfied at once' );
 		$this->assert_lms_satisfied( $b[0], $registration );
-		$this->assertSame( array(), $this->about( Vocab::SATISFIED, self::BLOCK_A ) );
-		$this->assertSame( array(), $this->about( Vocab::SATISFIED, self::T59_COURSE ) );
+		$this->assertSame( array(), $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) ) );
+		$this->assertSame( array(), $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::T59_COURSE, 'course' ) ) );
 
 		// The queued sync (due once the launch is listed) pulls it into the inbox; nothing new is satisfied.
 		$this->tick( '10:00:05' );
 		$this->assertGreaterThan( 0, Job_Queue::run() );
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) ) );
 		$this->assertNotSame( array(), ( new Inbox_Repository() )->for_registration( $registration ) );
 		$this->assertTrue( Sensei_Utils::user_completed_lesson( $this->lessons[ self::B1 ], $this->learner ), 'the inbox completes the NotApplicable lesson' );
 		$this->assertFalse( Sensei_Utils::user_completed_lesson( $this->lessons[ self::A1 ], $this->learner ) );
@@ -323,13 +323,13 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->tick( '10:01:00' );
 		$this->sync( $this->t59, $this->learner, $registration );
 
-		$a = $this->about( Vocab::SATISFIED, self::BLOCK_A );
+		$a = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) );
 		$this->assertCount( 1, $a );
 		$this->assert_lms_satisfied( $a[0], $registration );
 		$this->assertSame( $a2['session']['session_id'], $a[0]['context']['extensions'][ Vocab::EXT_SESSIONID ], 'the session that satisfied the block' );
-		$course = $this->about( Vocab::SATISFIED, self::T59_COURSE );
+		$course = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::T59_COURSE, 'course' ) );
 		$this->assertCount( 1, $course );
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) ) );
 
 		// Evaluated again (the LMS statements come back to the inbox), and once more after that.
 		$this->tick( '10:02:00' );
@@ -340,9 +340,9 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		do_action( 'learning_ledger/connector_evaluated', $this->t59, $this->learner, $registration, ( new Player_Evaluator() )->evaluation( ( new Program_Repository() )->structure( $this->t59 ), $this->learner, $registration ) ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
 		$this->assertSame( $posts, $this->statement_posts(), 'nothing is posted again once the inbox has the satisfied statements' );
 
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_A ) );
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::T59_COURSE ) );
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::T59_COURSE, 'course' ) ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) ) );
 	}
 
 	public function test_return_route_processes_statements_before_redirecting() {
@@ -427,7 +427,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 	public function test_satisfied_id_already_held_by_the_lrs_is_copied_and_not_posted_again() {
 		$registration                   = ( new Registration_Map() )->get_or_create( $this->learner, 'cmi5:' . $this->t59 );
 		$session                        = Uuid::v5( Lms_Statements::NAMESPACE, $registration . '|' . self::BLOCK_B . '|satisfied-session' );
-		$expected                       = ( new Lms_Statements() )->satisfied( self::BLOCK_B, $this->actor( $this->learner ), $registration, $session );
+		$expected                       = ( new Lms_Statements() )->satisfied( self::BLOCK_B, 'block', $this->actor( $this->learner ), $registration, $session );
 		$conflicting                    = $expected;
 		$conflicting['verb']['display'] = array( 'en-US' => 'Satisfied (other)' );
 		$this->connector_post( $conflicting );
@@ -441,7 +441,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$posts = $this->statement_posts();
 		$this->sync( $this->t59, $this->learner, $registration );
 		$this->assertSame( $posts, $this->statement_posts(), 'not posted again' );
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) ) );
 	}
 
 	public function test_inbox_terminated_with_matching_session_marks_it_terminated() {
@@ -503,7 +503,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$lesson = $this->cxm_lesson( $cxm, 'what-is-json' );
 		$this->assertTrue( Sensei_Utils::user_completed_lesson( $lesson, $this->learner ) );
 		$this->assertSame( 'Tested Out', ( new Waiver_Ledger() )->get( $this->learner, $lesson )['reason'] );
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Program_Iris::block_iri( ( new Program_Repository() )->get( $cxm ), 'json' ) ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( Program_Iris::block_iri( ( new Program_Repository() )->get( $cxm ), 'json' ), 'block' ) ) );
 
 		$this->sync( $cxm, $this->learner, $registration );
 		$this->assertCount( 1, $this->statements( Vocab::WAIVED ), 'never waived twice' );
@@ -572,6 +572,6 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->fail = null;
 		$this->tick( '10:05:00' );
 		Job_Queue::run();
-		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) ) );
 	}
 }

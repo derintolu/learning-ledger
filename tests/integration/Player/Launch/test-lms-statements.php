@@ -135,10 +135,25 @@ class Lms_Statements_Test extends WP_UnitTestCase {
 		$this->assertContains( Vocab::CAT_MOVEON, array_column( $st['context']['contextActivities']['category'], 'id' ) );
 	}
 
-	public function test_satisfied_names_the_block_or_course() {
-		$st = ( new Lms_Statements() )->satisfied( 'https://example.org/course/block/1', self::actor(), self::REG, self::SESSION );
-		$this->assert_cmi5( $st, 'https://example.org/course/block/1', Vocab::SATISFIED, null );
-		$this->assertArrayNotHasKey( 'result', $st );
+	/**
+	 * CATAPULT 001-essentials, cmi5 9.3.9.0-2/-4/-6/-8 and 9.6.2.3-2: `satisfied` is about the
+	 * LMS's own block or course activity (typed, never the publisher id), grouped under the publisher id.
+	 */
+	public function test_satisfied_names_the_lms_block_or_course_grouped_under_the_publisher_id() {
+		foreach ( array(
+			'block'  => 'https://w3id.org/xapi/cmi5/activitytype/block',
+			'course' => 'https://w3id.org/xapi/cmi5/activitytype/course',
+		) as $kind => $type ) {
+			$publisher = 'https://example.org/course/' . $kind . '/1';
+			$st        = ( new Lms_Statements() )->satisfied( $publisher, $kind, self::actor(), self::REG, self::SESSION );
+			$lms_id    = Lms_Statements::satisfied_id( $publisher, $kind );
+			$this->assertNotSame( $publisher, $lms_id );
+			$this->assertSame( $publisher . '/' . $kind, $lms_id );
+			$this->assertSame( array( 'type' => $type ), $st['object']['definition'] );
+			unset( $st['object']['definition'] );
+			$this->assert_cmi5( $st, $lms_id, Vocab::SATISFIED, $publisher );
+			$this->assertArrayNotHasKey( 'result', $st );
+		}
 	}
 
 	public function test_ids_differ_by_session_and_verb() {

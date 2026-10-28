@@ -469,20 +469,20 @@ final class Player_Evaluator {
 		$targets = array();
 		foreach ( $structure->blocks() as $block ) {
 			if ( $e->block_satisfied( $block->id(), Waiver_Policy::ALL ) ) {
-				$targets[ $block->id() ] = $e->block_satisfying_statement( $block->id(), Waiver_Policy::ALL );
+				$targets[] = array( $block->id(), 'block', $e->block_satisfying_statement( $block->id(), Waiver_Policy::ALL ) );
 			}
 		}
 		if ( $e->course_satisfied( Waiver_Policy::ALL ) ) {
-			$targets[ $structure->course_id() ] = self::latest_satisfying( $structure, $e, $rows );
+			$targets[] = array( $structure->course_id(), 'course', self::latest_satisfying( $structure, $e, $rows ) );
 		}
 
 		$lms = new Lms_Statements();
-		foreach ( $targets as $object_id => $statement_id ) {
-			if ( isset( $have[ $object_id ] ) ) {
+		foreach ( $targets as list( $publisher_id, $kind, $statement_id ) ) {
+			if ( isset( $have[ Lms_Statements::satisfied_id( $publisher_id, $kind ) ] ) ) {
 				continue;
 			}
-			$session = self::session_of( $rows, $statement_id ) ?? Uuid::v5( Lms_Statements::NAMESPACE, strtolower( $registration ) . '|' . $object_id . '|satisfied-session' );
-			$this->record( $lms->satisfied( (string) $object_id, $actor, $registration, $session ) );
+			$session = self::session_of( $rows, $statement_id ) ?? Uuid::v5( Lms_Statements::NAMESPACE, strtolower( $registration ) . '|' . $publisher_id . '|satisfied-session' );
+			$this->record( $lms->satisfied( $publisher_id, $kind, $actor, $registration, $session ) );
 		}
 	}
 

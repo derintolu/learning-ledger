@@ -27,6 +27,12 @@ final class Lms_Statements {
 	const NAMESPACE = 'c3e1a8d4-2f6b-5c7e-9a1d-4b8f0e2c6a53';
 
 	/**
+	 * Activity types of the LMS's block and course activities [cmi5 9.3.9].
+	 */
+	const TYPE_BLOCK  = 'https://w3id.org/xapi/cmi5/activitytype/block';
+	const TYPE_COURSE = 'https://w3id.org/xapi/cmi5/activitytype/course';
+
+	/**
 	 * The `launched` statement [cmi5 9.3.1], with the masteryScore when the AU has one [cmi5 9.6.3.2].
 	 *
 	 * @param Au          $au                AU.
@@ -103,17 +109,35 @@ final class Lms_Statements {
 	}
 
 	/**
-	 * The `satisfied` statement for a block or the course [cmi5 9.3.9].
+	 * The `satisfied` statement for a block or the course [cmi5 9.3.9]: its object is the LMS's
+	 * activity for the block or course (typed, never the publisher id), grouped under the
+	 * publisher id [cmi5 9.6.2.3].
 	 *
-	 * @param string $object_id    Block or course publisher id.
+	 * @param string $publisher_id Block or course publisher id.
+	 * @param string $kind         `block` or `course`.
 	 * @param array  $actor        Learner actor.
 	 * @param string $registration Registration UUID.
 	 * @param string $session      Session id.
 	 *
 	 * @return array
 	 */
-	public function satisfied( string $object_id, array $actor, string $registration, string $session ): array {
-		return self::statement( $actor, Vocab::SATISFIED, 'Satisfied', $object_id, $registration, $session, null );
+	public function satisfied( string $publisher_id, string $kind, array $actor, string $registration, string $session ): array {
+		$st                         = self::statement( $actor, Vocab::SATISFIED, 'Satisfied', self::satisfied_id( $publisher_id, $kind ), $registration, $session, $publisher_id );
+		$st['object']['definition'] = array( 'type' => 'course' === $kind ? self::TYPE_COURSE : self::TYPE_BLOCK );
+		return $st;
+	}
+
+	/**
+	 * The LMS's activity id for a block or the course: `{id}/block` or `{id}/course`, stable
+	 * and never the publisher id [cmi5 9.3.9], as AUs are `{au@id}/au`.
+	 *
+	 * @param string $publisher_id Block or course publisher id.
+	 * @param string $kind         `block` or `course`.
+	 *
+	 * @return string
+	 */
+	public static function satisfied_id( string $publisher_id, string $kind ): string {
+		return $publisher_id . '/' . ( 'course' === $kind ? 'course' : 'block' );
 	}
 
 	/**
