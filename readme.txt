@@ -35,6 +35,8 @@ Learning Ledger is not affiliated with or endorsed by the makers of these plugin
 * PHP 8.2 or later.
 * WordPress 6.6 or later.
 * For the LRS role: MySQL 8.0 or later, or MariaDB 10.6 or later. Enabling the LRS role on an older database fails with an error that says so. The connector role needs nothing beyond what WordPress needs.
+* Pretty permalinks (Settings > Permalinks, any setting but Plain). The `/xapi/` alias, badge claim and badge pages, record pages, the issuer's `/.well-known/did.json` and the cmi5 player's sandboxed course frame are rewrite rules, which plain permalinks do not serve.
+* For badges, WordPress installed at the root of its domain. The issuer is `did:web:<host>`, which verifiers resolve at `https://<host>/.well-known/did.json` (or `https://<host>/issuer/did.json` after `wp learning-ledger badges did-mode path`); a site in a subdirectory, such as `https://example.org/blog/`, cannot serve either address, so did:web badges are not supported there.
 
 == Installation ==
 
@@ -62,20 +64,54 @@ Send new statements to a webhook:
 
     wp learning-ledger subscription create --target=https://hooks.example.org/xapi
 
+Revoke a badge (its status list entry is flipped, so shared copies stop verifying), choose the badge proof format, and re-issue the badges a removed key signed:
+
+    wp learning-ledger badges revoke <badge id> --reason="Issued in error"
+    wp learning-ledger badges format di
+    wp learning-ledger badges remove-key <kid>
+    wp learning-ledger badges reissue --kid=<kid>
+
+`badges format` takes `di` (the default, Data Integrity proofs) or `vc-jwt`. `badges remove-key` first moves the status lists onto the active key, so run `badges rotate` before removing the only key.
+
+If the LRS is behind a reverse proxy or CDN, every client reaches it from the proxy's address, so ten failed sign-ins within a minute, from any of them, lock out all of them. Return the real client address from the `learning_ledger/client_ip` filter, which receives `REMOTE_ADDR` and `$_SERVER`. Trust a forwarded header only when the request came from your own proxy:
+
+    add_filter( 'learning_ledger/client_ip', function ( $ip, $server ) {
+        if ( '10.0.0.5' === $ip && isset( $server['HTTP_X_FORWARDED_FOR'] ) ) {
+            return trim( explode( ',', $server['HTTP_X_FORWARDED_FOR'] )[0] );
+        }
+        return $ip;
+    }, 10, 2 );
+
 = Connector site =
 
     wp learning-ledger role enable connector
     wp learning-ledger connector connect --lrs=https://lrs.example.org/xapi/ --client=my-lms
 
-`connector connect` pins the LRS's notification key and generates this site's secret, which stays on the site. An administrator reads its SHA-256 from the `connector.secret_sha256` field of `GET /wp-json/learning-ledger/v1/status` (sign in with an Application Password), and the LRS administrator registers it:
+`connector connect` pins the LRS's notification key and generates this site's secret, which stays on the site. An administrator reads its SHA-256 from the `connector.secret_sha256` field of `GET /wp-json/learning-ledger/v1/status` (sign in with an Application Password), and the LRS administrator registers it, bound to the connector site's own learners:
 
     wp learning-ledger client create --id=my-lms --secret-sha256=<the hash> --scopes=statements/read,actors/erase,records/view-links,badges/claim-links --bind-actor-home-page=https://lms.example.org
+
+Add scopes for what the connector does beyond reading; `client update` replaces the scope list. Courses that send LMS progress to the LRS (`wp learning-ledger course direction2 <course id> on`) need `statements/write`, limited to the connector's activity IRIs, which start with `https://lms.example.org/activities/` unless the course comes from a package:
+
+    wp learning-ledger client update my-lms --scopes=statements/read,actors/erase,records/view-links,badges/claim-links,statements/write --write-activity-prefix=https://lms.example.org/activities/
+
+The cmi5 player also needs `tokens/mint`, `void`, `state` and `profile`, and `--write-activity-prefix` must list the IRI base of each player course as well (comma-separated):
+
+    wp learning-ledger client update my-lms --scopes=statements/read,actors/erase,records/view-links,badges/claim-links,statements/write,tokens/mint,void,state,profile --write-activity-prefix=https://lms.example.org/activities/,https://courses.example.org/json-basics/
+
+Then, on the LRS, subscribe the connector's inbox to its learners' statements, so progress recorded elsewhere reaches the LMS:
+
+    wp learning-ledger subscription create --target=https://lms.example.org/wp-json/learning-ledger/v1/inbox --actor-home-page=https://lms.example.org
 
 To let a course server call the connector's signed routes, trust its Ed25519 public key (only the public key crosses WP-CLI):
 
     wp learning-ledger connector trust-key --id=course-server --public-key=<base64 public key>
 
 Set a separate content host for cmi5 courses with `wp learning-ledger cmi5 content-host <host>`; without one, the player runs courses in a sandboxed frame.
+
+= Uninstalling =
+
+Deleting the plugin keeps its tables and settings, so records survive a reinstall. To remove them too, add `define( 'LLEDGER_UNINSTALL_DELETE_DATA', true );` to `wp-config.php` before deleting the plugin.
 
 == Frequently Asked Questions ==
 
@@ -99,7 +135,7 @@ No. See "External services" below.
 
 Learning Ledger connects only to addresses that the site's administrator configures. It contains no tracking, analytics or telemetry, loads no remote scripts, styles or fonts, and fetches nothing else at runtime (the JSON-LD contexts used for badges are bundled). Each of these services is run by you or by whoever runs the site at that address, under their own terms and privacy policy.
 
-* **The LRS URL** (connector role), set with `wp learning-ledger connector connect --lrs=<url>`. The connector reads the LRS's `/about` document when pairing. It then sends xAPI statements for LMS progress (the learner's account actor, which is the site's URL plus a user identifier, and the activity, result and timestamps), reads statements for its learners, and asks the LRS for record view links, badge claim links, launch tokens for cmi5 courses and the erasure of a learner's records when a WordPress personal-data erasure runs. Requests carry the connector's client credentials.
+* **The LRS URL** (connector role), set with `wp learning-ledger connector connect --lrs=<url>`. The connector reads the LRS's `/about` document when pairing. It then sends xAPI statements for LMS progress (the learner's account actor, which is the site's URL plus a user identifier, and the activity, result and timestamps), reads statements for its learners, and asks the LRS for record view links, launch tokens for cmi5 courses and the erasure of a learner's records when a WordPress personal-data erasure runs. Requests carry the connector's client credentials.
 * **Webhook URLs** (LRS role), set with `wp learning-ledger subscription create --target=<url>`. When statements matching a subscription are stored, the LRS sends them in signed batches (up to 100 statements, Ed25519 signature) to that URL.
 * **Course-server URLs** (connector role), set on a program. The connector sends a signed request to `<course server>/link-codes/redeem` with the one-time code a learner enters to link their record, and to `<course server>/content-changed` with the program key, version and ETag when a program's content changes. When an administrator or a trusted course server imports a course package or a cmi5 package, the connector downloads it from the https URL given for that import.
 
