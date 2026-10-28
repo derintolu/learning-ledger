@@ -5,6 +5,11 @@
  * @package LearningLedger
  */
 
+use LearningLedger\Cmi5\Au;
+use LearningLedger\Cmi5\Vocab;
+use LearningLedger\Connector\Identity\Identity_Map;
+use LearningLedger\Connector\Inbox\Inbox_Processor;
+use LearningLedger\Connector\Inbox\Inbox_Repository;
 use LearningLedger\Connector\Ledger\Waiver_Ledger;
 use LearningLedger\Connector\Lms\Activity_Ref;
 use LearningLedger\Connector\Lms\Apply_Outcome;
@@ -15,10 +20,13 @@ use LearningLedger\Connector\Lms\Lms_Object;
 use LearningLedger\Connector\Lms\Neutral_Event;
 use LearningLedger\Connector\Lms\Result;
 use LearningLedger\Connector\Programs\Program_Module;
+use LearningLedger\Connector\Programs\Program_Repository;
 use LearningLedger\Db\Installer;
+use LearningLedger\Db\Tables;
 use LearningLedger\Integrations\Sensei\Sensei_Adapter;
 use LearningLedger\Integrations\Sensei\Sensei_Integration;
 use LearningLedger\Integrations\Sensei\Sensei_Iris;
+use LearningLedger\Player\Import\Player_Importer;
 use LearningLedger\Util\Uuid;
 
 /**
@@ -261,6 +269,93 @@ class Sensei_Adapter_Test extends WP_UnitTestCase {
 		// A lesson IRI under the wrong course base is not ours.
 		$this->assertNull( $this->adapter->resolve( new Activity_Ref( Sensei_Iris::course( $solo ) . '/lessons/' . $lesson ) ) );
 		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.org/not-ours/1' ) ) );
+	}
+
+	/**
+	 * Import tests/fixtures/cmi5/nested-blocks.xml through the player.
+	 *
+	 * @return array{program:int,a:int,b:int,a1:int,b1:int,b2:int}
+	 */
+	private function import_nested(): array {
+		( new Program_Module() )->register_meta();
+		$xml  = tempnam( sys_get_temp_dir(), 'llxml' );
+		$copy = copy( LEARNING_LEDGER_DIR . 'tests/fixtures/cmi5/nested-blocks.xml', $xml );
+		$this->assertTrue( $copy );
+		$report = ( new Player_Importer( $this->adapter ) )->import( $xml );
+		wp_delete_file( $xml );
+		$this->assertTrue( $report->ok(), wp_json_encode( $report->errors ) );
+		$courses = ( new Program_Repository() )->get( $report->program_id )->course_ids;
+		$lessons = array();
+		foreach ( $courses as $course ) {
+			foreach ( $this->adapter->course_tree( $course )->lessons as $node ) {
+				$lessons[ (string) get_post_meta( $node->id, Player_Importer::AU_META, true ) ] = $node->id;
+			}
+		}
+		return array(
+			'program' => $report->program_id,
+			'a'       => $courses[0],
+			'b'       => $courses[1],
+			'a1'      => $lessons['https://example.org/courses/nested/aus/a1'],
+			'b1'      => $lessons['https://example.org/courses/nested/aus/b1'],
+			'b2'      => $lessons['https://example.org/courses/nested/aus/b2'],
+		);
+	}
+
+	public function test_resolve_player_au_ids_to_lessons_and_top_level_blocks_to_courses() {
+		$ids = $this->import_nested();
+		$au  = 'https://example.org/courses/nested/aus/';
+
+		$this->assertEquals( new Lms_Object( 'lesson', $ids['a1'] ), $this->adapter->resolve( new Activity_Ref( $au . 'a1' ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $ids['a1'] ), $this->adapter->resolve( new Activity_Ref( Au::activity_id( $au . 'a1' ) ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $ids['b1'] ), $this->adapter->resolve( new Activity_Ref( $au . 'b1' ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $ids['b2'] ), $this->adapter->resolve( new Activity_Ref( Au::activity_id( $au . 'b2' ) ) ) );
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( $au . 'a1/other' ) ) );
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( $au . 'a' ) ) );
+
+		$this->assertEquals( new Lms_Object( 'course', $ids['a'] ), $this->adapter->resolve( new Activity_Ref( 'https://example.org/courses/nested/blocks/a' ) ) );
+		$this->assertEquals( new Lms_Object( 'course', $ids['b'] ), $this->adapter->resolve( new Activity_Ref( 'https://example.org/courses/nested/blocks/b' ) ) );
+		// A nested block is flattened into its top-level course; it is not that course.
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.org/courses/nested/blocks/b1' ) ) );
+
+		// A lesson that left the program's courses no longer resolves.
+		update_post_meta( $ids['program'], '_lledger_courses', array( $ids['b'] ) );
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( $au . 'a1' ) ) );
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.org/courses/nested/blocks/a' ) ) );
+	}
+
+	public function test_inbox_completes_a_plain_player_lesson_and_its_block_course() {
+		global $wpdb;
+		$wpdb->query( 'DELETE FROM ' . Tables::name( 'conn_inbox' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
+		$ids  = $this->import_nested();
+		$user = self::factory()->user->create();
+		$this->assertTrue( $this->adapter->enrol( $user, $ids['a'] ) );
+		$au = 'https://example.org/courses/nested/aus/a1';
+		$st = array(
+			'id'      => Uuid::v4(),
+			'actor'   => ( new Identity_Map() )->actor_for_user( $user ),
+			'verb'    => array( 'id' => Vocab::COMPLETED ),
+			'object'  => array(
+				'objectType' => 'Activity',
+				'id'         => Au::activity_id( $au ),
+			),
+			'result'  => array( 'completion' => true ),
+			'context' => array(
+				'registration'      => Uuid::v4(),
+				'contextActivities' => array(
+					'category' => array( array( 'id' => Vocab::CAT_CMI5 ) ),
+					'grouping' => array( array( 'id' => $au ) ),
+				),
+			),
+			'stored'  => '2026-10-27T10:00:00.000000Z',
+		);
+		$this->assertTrue( ( new Inbox_Repository() )->add( $st, 'webhook' ) );
+
+		$adapter = $this->adapter;
+		$this->assertSame( 1, ( new Inbox_Processor( null, null, null, null, static fn() => $adapter ) )->process_pending() );
+
+		$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $ids['a1'], $user ), 'the moveOn Completed AU completes its Sensei lesson' );
+		$this->assertTrue( (bool) \Sensei_Utils::user_completed_course( $ids['a'], $user ), 'the satisfied block completes its course' );
+		$this->assertFalse( (bool) \Sensei_Utils::user_completed_course( $ids['b'], $user ) );
 	}
 
 	public function test_direction2_iri_filter() {

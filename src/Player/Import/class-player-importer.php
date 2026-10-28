@@ -44,6 +44,11 @@ final class Player_Importer {
 	public const AU_META = '_lledger_au_id';
 
 	/**
+	 * Course meta holding the id of the top-level block the course was made from.
+	 */
+	public const BLOCK_META = '_lledger_block_id';
+
+	/**
 	 * Program meta: the content store package the stored structure's AU URLs point at.
 	 */
 	public const PACKAGE_META = '_lledger_cmi5_package';
@@ -574,7 +579,7 @@ final class Player_Importer {
 	 *
 	 * @param Course_Structure $structure Structure.
 	 *
-	 * @return array<array{key:string,title:array,description:array,aus:Au[]}>
+	 * @return array<array{key:string,block:string,title:array,description:array,aus:Au[]}>
 	 */
 	private static function plan( Course_Structure $structure ): array {
 		$courses = array();
@@ -583,6 +588,7 @@ final class Player_Importer {
 			if ( $child instanceof Block ) {
 				$courses[] = array(
 					'key'         => self::key_for( $child->id() ),
+					'block'       => $child->id(),
 					'title'       => $child->title(),
 					'description' => Import_Writer::description_of( $child ),
 					'aus'         => Import_Writer::flatten( $child ),
@@ -594,6 +600,7 @@ final class Player_Importer {
 				$root      = count( $courses );
 				$courses[] = array(
 					'key'         => self::key_for( $structure->course_id() ),
+					'block'       => '',
 					'title'       => $structure->title(),
 					'description' => (array) ( $data['description'] ?? array() ),
 					'aus'         => array(),
@@ -619,8 +626,9 @@ final class Player_Importer {
 	private function write_course( LMS_Adapter $adapter, int $program_id, array &$hashes, array $course, array &$created, array &$updated ): int {
 		$title   = sanitize_text_field( Import_Writer::pick( $course['title'], $course['key'] ) );
 		$content = Import_Writer::paragraph( sanitize_textarea_field( Import_Writer::pick( $course['description'], '' ) ) );
-		$spec    = new Course_Spec( $course['key'], $title, $content, 'publish', array() );
-		$hash    = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $content ) ) );
+		$meta    = '' === $course['block'] ? array() : array( self::BLOCK_META => $course['block'] );
+		$spec    = new Course_Spec( $course['key'], $title, $content, 'publish', $meta );
+		$hash    = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $content, $meta ) ) );
 		return self::saved( $this->writer->write_item( $program_id, $hashes, 'course:' . $course['key'], $hash, $created, $updated, fn(): int => $adapter->upsert_course( $spec ) ), 'course:' . $course['key'] );
 	}
 

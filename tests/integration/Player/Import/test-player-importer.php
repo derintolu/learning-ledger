@@ -204,6 +204,9 @@ class Player_Importer_Test extends WP_UnitTestCase {
 			array_column( $this->lessons( $courses[1] ), 'au' )
 		);
 		$this->assertSame( array( 'B1', 'B2' ), array_column( $this->lessons( $courses[1] ), 'title' ) );
+		// Each course records the top-level block it came from.
+		$this->assertSame( 'https://example.org/courses/nested/blocks/a', get_post_meta( $courses[0], Player_Importer::BLOCK_META, true ) );
+		$this->assertSame( 'https://example.org/courses/nested/blocks/b', get_post_meta( $courses[1], Player_Importer::BLOCK_META, true ) );
 
 		// The stored tree keeps the nesting for satisfaction.
 		$structure = $this->repo->structure( $report->program_id );
@@ -230,6 +233,7 @@ class Player_Importer_Test extends WP_UnitTestCase {
 			array( 'https://w3id.org/xapi/cmi5/catapult/lts/au/002-allowed', 'https://w3id.org/xapi/cmi5/catapult/lts/au/002-allowed-second' ),
 			array_column( $this->lessons( $courses[0] ), 'au' )
 		);
+		$this->assertFalse( metadata_exists( 'post', $courses[0], Player_Importer::BLOCK_META ), 'the course made of root AUs has no block' );
 	}
 
 	public function test_relative_urls_resolve_under_the_content_base_and_absolute_ones_stay_remote() {

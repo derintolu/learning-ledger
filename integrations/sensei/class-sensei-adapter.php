@@ -33,6 +33,16 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 	const STABLE_KEY = '_lledger_stable_key';
 
 	/**
+	 * Lesson meta the cmi5 player import writes: the AU id.
+	 */
+	const AU_META = '_lledger_au_id';
+
+	/**
+	 * Course meta the cmi5 player import writes: the top-level block id.
+	 */
+	const BLOCK_META = '_lledger_block_id';
+
+	/**
 	 * Integration id.
 	 *
 	 * @return string
@@ -102,7 +112,7 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 	}
 
 	/**
-	 * Map a program IRI or a direction-2 IRI to a Sensei object.
+	 * Map a program IRI, a cmi5 player AU or block id, or a direction-2 IRI to a Sensei object.
 	 *
 	 * @param Activity_Ref $ref Reference.
 	 *
@@ -113,7 +123,7 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 		if ( '' === $iri ) {
 			return null;
 		}
-		return $this->resolve_program( $iri ) ?? $this->resolve_direction2( $iri );
+		return $this->resolve_program( $iri ) ?? $this->resolve_player( $iri ) ?? $this->resolve_direction2( $iri );
 	}
 
 	/**
@@ -285,6 +295,75 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 			return null !== $id ? new Lms_Object( 'lesson', $id ) : null;
 		}
 		return null;
+	}
+
+	/**
+	 * Resolve a cmi5 player id: an AU id, or its AU activity id `{au}/au`, to the lesson of the
+	 * player program's courses carrying it in `_lledger_au_id` (the exact id first); a top-level
+	 * block id to the player program course carrying it in `_lledger_block_id`.
+	 *
+	 * @param string $iri IRI.
+	 *
+	 * @return Lms_Object|null
+	 */
+	private function resolve_player( string $iri ): ?Lms_Object {
+		$repo = new Program_Repository();
+		$pid  = $repo->for_activity( $iri );
+		if ( null !== $pid ) {
+			$program = $repo->get( $pid );
+			$courses = $program ? $program->course_ids : array();
+			$ids     = str_ends_with( $iri, '/au' ) ? array( $iri, substr( $iri, 0, -3 ) ) : array( $iri );
+			foreach ( $courses ? $ids : array() as $id ) {
+				$lesson = $this->find_unique( 'lesson', self::AU_META, $id, $courses );
+				if ( null !== $lesson ) {
+					return new Lms_Object( 'lesson', $lesson );
+				}
+			}
+		}
+
+		$course = $this->find_unique( 'course', self::BLOCK_META, $iri );
+		if ( null === $course ) {
+			return null;
+		}
+		$owner = $repo->for_lms_course( $course );
+		return null !== $owner && (int) get_post_meta( $owner, '_lledger_player', true ) ? new Lms_Object( 'course', $course ) : null;
+	}
+
+	/**
+	 * The one post with a meta value, or null when none or more than one has it.
+	 *
+	 * @param string $post_type Post type.
+	 * @param string $meta_key  Meta key.
+	 * @param string $value     Meta value.
+	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 *
+	 * @return integer|null
+	 */
+	private function find_unique( string $post_type, string $meta_key, string $value, array $courses = array() ): ?int {
+		$query = array(
+			array(
+				'key'   => $meta_key,
+				'value' => $value,
+			),
+		);
+		if ( $courses ) {
+			$query[] = array(
+				'key'     => '_lesson_course',
+				'value'   => array_map( 'strval', $courses ),
+				'compare' => 'IN',
+			);
+		}
+		$ids = get_posts(
+			array(
+				'post_type'      => $post_type,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'posts_per_page' => 2,
+				'no_found_rows'  => true,
+				'meta_query'     => $query, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			)
+		);
+		return 1 === count( $ids ) ? (int) $ids[0] : null;
 	}
 
 	/**
