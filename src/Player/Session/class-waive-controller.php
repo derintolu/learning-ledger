@@ -21,7 +21,8 @@ use LearningLedger\Player\Launch\Lms_Statements;
  * [cmi5 9.3.7] in the learner's cmi5 registration (created when missing), then pulls the
  * registration so the inbox completes the Sensei lesson and records the reason. For a user who
  * can edit the lesson, or holds `lledger_manage_connector`; REST nonce unless an Application
- * Password authenticated the request. An AU already satisfied or waived is a 409.
+ * Password authenticated the request. An AU already satisfied or waived is a 409; a waiver
+ * that was recorded but whose follow-up sync failed is a 202 (the sync is queued).
  */
 final class Waive_Controller {
 
@@ -121,9 +122,6 @@ final class Waive_Controller {
 		if ( false === get_userdata( $user ) ) {
 			return self::error( 'lledger_unknown_user', __( 'Unknown user.', 'learning-ledger' ), 404 );
 		}
-		if ( ! in_array( $reason, self::REASONS, true ) ) {
-			return self::error( 'lledger_invalid_reason', __( 'Unknown waiver reason.', 'learning-ledger' ), 400 );
-		}
 
 		$au      = $target['au'];
 		$program = $target['program'];
@@ -137,10 +135,18 @@ final class Waive_Controller {
 			if ( 409 === $this->evaluator->record( $statement ) ) {
 				return self::error( 'lledger_already_satisfied', __( 'This lesson is already waived for the learner.', 'learning-ledger' ), 409 );
 			}
+		} catch ( \RuntimeException $e ) {
+			return self::error( 'lledger_lrs_unavailable', __( 'The LRS could not be reached. Try again shortly.', 'learning-ledger' ), 502 );
+		}
+
+		$status = 200;
+		try {
 			// moveOn is evaluated on each waiver: the inbox applies it to Sensei with the reason.
 			$this->evaluator->sync( $program, $user, $registration );
 		} catch ( \RuntimeException $e ) {
-			return self::error( 'lledger_lrs_unavailable', __( 'The LRS could not be reached. Try again shortly.', 'learning-ledger' ), 502 );
+			// The waiver is recorded; Sensei follows once the queued sync gets through.
+			Player_Evaluator::queue_sync( $program, $user, $registration, 60 );
+			$status = 202;
 		}
 
 		return new \WP_REST_Response(
@@ -148,7 +154,7 @@ final class Waive_Controller {
 				'statement_id' => $statement['id'],
 				'registration' => $registration,
 			),
-			200
+			$status
 		);
 	}
 

@@ -118,6 +118,55 @@ class Abandoner_Test extends Lledger_Session_Test_Case {
 		$this->assertNull( ( new Session_Repository() )->find( $a1['session']['session_id'] )['abandoned_at'], 'nothing stamped before the LRS answered' );
 	}
 
+	public function test_a_session_that_keeps_failing_is_backed_off() {
+		$a1 = $this->launch_au( self::A1 );
+		$id = $a1['session']['session_id'];
+		$this->tick( '18:00:01' );
+		$this->fail = 'statements';
+		$this->assertSame( 0, ( new Abandoner() )->run() );
+		$this->assertSame( 1, get_option( Abandoner::BACKOFF_OPTION )[ $id ]['attempts'] );
+
+		$this->fail = null;
+		$this->tick( '18:00:30' );
+		$this->http = array();
+		$this->assertSame( 0, ( new Abandoner() )->run(), 'waits out the first minute' );
+		$this->assertSame( array(), $this->http, 'without asking the LRS' );
+
+		$this->tick( '18:01:01' );
+		$this->fail = 'statements';
+		$this->assertSame( 0, ( new Abandoner() )->run() );
+		$this->assertSame( 2, get_option( Abandoner::BACKOFF_OPTION )[ $id ]['attempts'] );
+		$this->tick( '18:05:00' );
+		$this->assertSame( 0, ( new Abandoner() )->run(), 'then five minutes' );
+		$this->assertSame( 2, get_option( Abandoner::BACKOFF_OPTION )[ $id ]['attempts'] );
+
+		$this->fail = null;
+		$this->tick( '18:06:02' );
+		$this->assertSame( 1, ( new Abandoner() )->run() );
+		$this->assertSame( Session_Repository::ABANDONED, ( new Session_Repository() )->find( $id )['status'] );
+		$this->assertFalse( get_option( Abandoner::BACKOFF_OPTION ), 'forgotten once closed' );
+	}
+
+	public function test_backed_off_sessions_do_not_hold_up_others() {
+		$first = $this->launch_au( self::A1 );
+		$this->tick( '10:10:00' );
+		$second = $this->launch_au( self::A2 );
+		update_option(
+			Abandoner::BACKOFF_OPTION,
+			array(
+				$first['session']['session_id'] => array(
+					'attempts' => 5,
+					'next'     => strtotime( '2026-10-28 00:00:00 UTC' ),
+				),
+			),
+			false
+		);
+		$this->tick( '18:10:01' );
+		$this->assertSame( 1, ( new Abandoner() )->run() );
+		$this->assertSame( Session_Repository::OPEN, ( new Session_Repository() )->find( $first['session']['session_id'] )['status'] );
+		$this->assertSame( Session_Repository::ABANDONED, ( new Session_Repository() )->find( $second['session']['session_id'] )['status'] );
+	}
+
 	public function test_runs_every_cron_minute() {
 		$a1 = $this->launch_au( self::A1 );
 		$this->tick( '18:00:01' );

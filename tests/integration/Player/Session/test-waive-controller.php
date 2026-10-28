@@ -7,10 +7,11 @@
 
 use LearningLedger\Cmi5\Au;
 use LearningLedger\Cmi5\Vocab;
-use LearningLedger\Connector\Ledger\Registration_Map;
 use LearningLedger\Connector\Ledger\Waiver_Ledger;
 use LearningLedger\Connector\Programs\Program_Module;
+use LearningLedger\Db\Tables;
 use LearningLedger\Player\Session\Player_Evaluator;
+use LearningLedger\Queue\Job_Queue;
 use LearningLedger\Xapi\Statement_Validator;
 
 require_once __DIR__ . '/test-player-evaluator.php';
@@ -35,9 +36,7 @@ class Waive_Controller_Test extends Lledger_Session_Test_Case {
 	}
 
 	public function test_waive_writes_waived_and_the_sensei_lesson_completes_with_the_reason() {
-		$cxm    = $this->import_cxm();
-		$lesson = $this->cxm_lesson( $cxm, 'what-is-json' );
-		$au     = $this->cxm_au( $cxm, 'what-is-json' );
+		$lesson = $this->lessons[ self::A1 ];
 		$calls  = array();
 		add_action(
 			'learning_ledger/cmi5_registration_created',
@@ -57,17 +56,19 @@ class Waive_Controller_Test extends Lledger_Session_Test_Case {
 			)
 		);
 		$this->assertSame( 200, $res->get_status(), wp_json_encode( $res->get_data() ) );
-		$registration = ( new Registration_Map() )->find( $this->learner, 'cmi5:' . $cxm );
+		$registration = $this->registration_of( $this->learner, $this->t59 );
 		$this->assertSame( $registration, $res->get_data()['registration'] );
-		$this->assertSame( array( array( $this->learner, $cxm, $registration ) ), $calls, 'the registration is created and announced' );
+		$this->assertSame( array( array( $this->learner, $this->t59, $registration ) ), $calls, 'the registration is created and announced' );
 
 		$waived = $this->statements( Vocab::WAIVED );
 		$this->assertCount( 1, $waived );
 		Statement_Validator::validate( $waived[0], '1.0.3' );
 		$this->assertSame( $res->get_data()['statement_id'], $waived[0]['id'] );
-		$this->assertSame( Au::activity_id( $au ), $waived[0]['object']['id'] );
+		$this->assertSame( Au::activity_id( self::A1 ), $waived[0]['object']['id'] );
+		$this->assertSame( self::A1, $waived[0]['context']['contextActivities']['grouping'][0]['id'] );
 		$this->assertSame( $this->actor( $this->learner ), array_intersect_key( $waived[0]['actor'], array_flip( array( 'objectType', 'account' ) ) ) );
 		$this->assertSame( $registration, $waived[0]['context']['registration'] );
+		$this->assertSame( Player_Evaluator::waiver_session( $registration, self::A1 ), $waived[0]['context']['extensions'][ Vocab::EXT_SESSIONID ] );
 		$this->assertSame( 'Equivalent AU', $waived[0]['result']['extensions'][ Vocab::EXT_REASON ] );
 		$this->assertTrue( $waived[0]['result']['success'] );
 		$this->assertTrue( $waived[0]['result']['completion'] );
@@ -80,7 +81,7 @@ class Waive_Controller_Test extends Lledger_Session_Test_Case {
 		$this->assertSame( $registration, $ledger['registration'] );
 	}
 
-	public function test_waive_on_a_plain_cmi5_lesson_uses_the_learners_registration() {
+	public function test_waive_uses_the_learners_existing_registration() {
 		$this->launch_au( self::A1 );
 		$registration = $this->registration_of( $this->learner, $this->t59 );
 		wp_set_current_user( $this->manager() );
@@ -92,16 +93,15 @@ class Waive_Controller_Test extends Lledger_Session_Test_Case {
 			)
 		);
 		$this->assertSame( 200, $res->get_status(), wp_json_encode( $res->get_data() ) );
+		$this->assertSame( $registration, $res->get_data()['registration'] );
 		$waived = $this->about( Vocab::WAIVED, Au::activity_id( self::A2 ) );
 		$this->assertCount( 1, $waived );
 		$this->assertSame( $registration, $waived[0]['context']['registration'] );
-		$this->assertSame( Player_Evaluator::waiver_session( $registration, self::A2 ), $waived[0]['context']['extensions'][ Vocab::EXT_SESSIONID ] );
-		$this->assertSame( self::A2, $waived[0]['context']['contextActivities']['grouping'][0]['id'] );
+		$this->assertSame( 'Administrative', ( new Waiver_Ledger() )->get( $this->learner, $this->lessons[ self::A2 ] )['reason'] );
 	}
 
 	public function test_a_second_waive_is_409_and_writes_nothing() {
-		$cxm    = $this->import_cxm();
-		$lesson = $this->cxm_lesson( $cxm, 'json-syntax' );
+		$lesson = $this->lessons[ self::A2 ];
 		wp_set_current_user( $this->manager() );
 		$body = array(
 			'user'   => $this->learner,
@@ -114,6 +114,41 @@ class Waive_Controller_Test extends Lledger_Session_Test_Case {
 		$this->assertSame( 409, $again->get_status() );
 		$this->assertCount( 1, $this->statements( Vocab::WAIVED ) );
 		$this->assertSame( 'Tested Out', ( new Waiver_Ledger() )->get( $this->learner, $lesson )['reason'] );
+	}
+
+	public function test_recorded_waiver_whose_sync_fails_is_202_and_the_sync_is_queued() {
+		wp_set_current_user( $this->manager() );
+		$posted = false;
+		add_filter(
+			'pre_http_request',
+			static function ( $pre, $args, $url ) use ( &$posted ) {
+				if ( 'POST' === $args['method'] && str_ends_with( (string) wp_parse_url( $url, PHP_URL_PATH ), '/statements' ) && str_contains( (string) $args['body'], Vocab::WAIVED ) ) {
+					$posted = true;
+				} elseif ( $posted && str_contains( $url, 'registration=' ) ) {
+					return new WP_Error( 'http_request_failed', 'cURL error 7: refused' );
+				}
+				return $pre;
+			},
+			20,
+			3
+		);
+		$res = $this->waive(
+			array(
+				'user'   => $this->learner,
+				'lesson' => $this->lessons[ self::A1 ],
+				'reason' => 'Tested Out',
+			)
+		);
+		$this->assertSame( 202, $res->get_status(), wp_json_encode( $res->get_data() ) );
+		$this->assertCount( 1, $this->statements( Vocab::WAIVED ) );
+		$this->assertSame( $this->statements( Vocab::WAIVED )[0]['id'], $res->get_data()['statement_id'] );
+		global $wpdb;
+		$this->assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Tables::name( 'jobs' ) . ' WHERE type = %s', Player_Evaluator::SYNC_JOB ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+
+		remove_all_filters( 'pre_http_request', 20 );
+		$this->tick( '10:05:00' );
+		Job_Queue::run();
+		$this->assertTrue( Sensei_Utils::user_completed_lesson( $this->lessons[ self::A1 ], $this->learner ), 'the queued sync completes the lesson' );
 	}
 
 	public function test_lesson_editors_and_managers_may_waive_and_nobody_else() {

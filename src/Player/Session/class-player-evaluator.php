@@ -62,11 +62,6 @@ final class Player_Evaluator {
 	const PULL_PAGES = 20;
 
 	/**
-	 * Inbox batches processed after a pull, at most.
-	 */
-	const PROCESS_ROUNDS = 5;
-
-	/**
 	 * Waiver reason for recommended waivers.
 	 */
 	const TESTED_OUT = 'Tested Out';
@@ -157,10 +152,10 @@ final class Player_Evaluator {
 		try {
 			if ( $this->write( $program_id, $user, $registration, $e ) ) {
 				// The new waivers complete their lessons once the inbox has them.
-				self::queue( $program_id, $user, $registration );
+				self::queue_sync( $program_id, $user, $registration );
 			}
 		} catch ( \RuntimeException $ex ) {
-			self::queue( $program_id, $user, $registration, 60 );
+			self::queue_sync( $program_id, $user, $registration, 60 );
 		}
 	}
 
@@ -184,9 +179,9 @@ final class Player_Evaluator {
 		try {
 			$this->sync( $found['program'], $session['user_id'], $session['registration'] );
 			// What the AU sent in the last second is not listed yet; pick it up shortly.
-			self::queue( $found['program'], $session['user_id'], $session['registration'], self::SETTLE );
+			self::queue_sync( $found['program'], $session['user_id'], $session['registration'], self::SETTLE );
 		} catch ( \RuntimeException $e ) {
-			self::queue( $found['program'], $session['user_id'], $session['registration'], 60 );
+			self::queue_sync( $found['program'], $session['user_id'], $session['registration'], 60 );
 		}
 	}
 
@@ -204,9 +199,9 @@ final class Player_Evaluator {
 	public function on_registration_created( int $user, int $program_id, string $registration ): void {
 		try {
 			$this->write( $program_id, $user, $registration, null );
-			self::queue( $program_id, $user, $registration, self::SETTLE );
+			self::queue_sync( $program_id, $user, $registration, self::SETTLE );
 		} catch ( \RuntimeException $e ) {
-			self::queue( $program_id, $user, $registration, 60 );
+			self::queue_sync( $program_id, $user, $registration, 60 );
 		}
 	}
 
@@ -227,8 +222,8 @@ final class Player_Evaluator {
 	}
 
 	/**
-	 * Pull the registration, process the inbox, and write the LMS statements unless the inbox
-	 * evaluation already did.
+	 * Pull the registration, process its pending inbox rows (only this registration's), and
+	 * write the LMS statements unless the inbox evaluation already did.
 	 *
 	 * @param integer $program_id   Program id.
 	 * @param integer $user         User id.
@@ -241,13 +236,9 @@ final class Player_Evaluator {
 		$key = strtolower( $registration );
 		unset( $this->evaluated[ $key ] );
 		$this->pull( $registration );
-		$processor = new Inbox_Processor( $this->inbox );
-		$rounds    = 0;
-		while ( $rounds < self::PROCESS_ROUNDS && $processor->process_pending( self::PULL_LIMIT ) > 0 ) {
-			++$rounds;
-		}
+		( new Inbox_Processor( $this->inbox ) )->process_registration( $registration );
 		if ( empty( $this->evaluated[ $key ] ) && $this->write( $program_id, $user, $registration, null ) ) {
-			self::queue( $program_id, $user, $registration );
+			self::queue_sync( $program_id, $user, $registration );
 		}
 		unset( $this->evaluated[ $key ] );
 	}
@@ -373,7 +364,8 @@ final class Player_Evaluator {
 
 	/**
 	 * Write an LMS statement and copy the LRS's copy into the inbox by id (a registration query
-	 * would not list it for another second), so the next evaluation sees it.
+	 * would not list it for another second), so the next evaluation sees it. On a 409 the LRS
+	 * already holds a statement with this id: that one is copied, so it is not posted again.
 	 *
 	 * @param array $statement Statement.
 	 *
@@ -382,11 +374,8 @@ final class Player_Evaluator {
 	 */
 	public function record( array $statement ): int {
 		$status = self::post( $this->lrs, $statement );
-		if ( 409 === $status ) {
-			return $status;
-		}
-		$res  = $this->lrs->xapi( 'GET', 'statements', array( 'statementId' => $statement['id'] ) );
-		$data = 200 === $res->status ? $res->json() : null;
+		$res    = $this->lrs->xapi( 'GET', 'statements', array( 'statementId' => $statement['id'] ) );
+		$data   = 200 === $res->status ? $res->json() : null;
 		if ( ! is_array( $data ) || Inbox_Repository::ERROR === $this->inbox->store( $data, 'poll' ) ) {
 			throw new \RuntimeException( 'LRS answered ' . (int) $res->status ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- never echoed.
 		}
@@ -405,17 +394,17 @@ final class Player_Evaluator {
 	 * @throws \RuntimeException When the LRS refuses.
 	 */
 	private function write( int $program_id, int $user, string $registration, ?Satisfaction_Result $e ): bool {
-		if ( $user <= 0 || ! Uuid::is_valid( $registration ) ) {
+		if ( $user <= 0 || ! Uuid::is_valid( $registration ) || ! (int) get_post_meta( $program_id, '_lledger_player', true ) ) {
 			return false;
 		}
-		$rows = $this->rows( $user, $registration );
-		$this->close_terminated( $rows, $user, $registration );
-
 		$program   = $this->programs->get( $program_id );
 		$structure = $this->programs->structure( $program_id );
-		if ( null === $program || null === $structure || ! (int) get_post_meta( $program_id, '_lledger_player', true ) ) {
+		if ( null === $program || null === $structure ) {
 			return false;
 		}
+		// Sessions close in any registration of a player program, a preview one included.
+		$rows = $this->rows( $user, $registration );
+		$this->close_terminated( $rows, $user, $registration );
 		if ( strtolower( (string) self::registration( $user, $program_id, false ) ) !== strtolower( $registration ) ) {
 			return false; // A preview registration, or one that has ended.
 		}
@@ -634,7 +623,7 @@ final class Player_Evaluator {
 	}
 
 	/**
-	 * Queue a sync of a registration (one pending job per registration).
+	 * Queue a sync of a registration (one pending job per registration); its handler retries on failure.
 	 *
 	 * @param integer $program_id   Program id.
 	 * @param integer $user         User id.
@@ -643,7 +632,7 @@ final class Player_Evaluator {
 	 *
 	 * @return void
 	 */
-	private static function queue( int $program_id, int $user, string $registration, int $delay = 0 ): void {
+	public static function queue_sync( int $program_id, int $user, string $registration, int $delay = 0 ): void {
 		Job_Queue::push(
 			self::SYNC_JOB,
 			array(

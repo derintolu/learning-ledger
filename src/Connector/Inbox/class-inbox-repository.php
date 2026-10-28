@@ -143,6 +143,32 @@ final class Inbox_Repository {
 	}
 
 	/**
+	 * Pending rows of one registration, oldest stored first.
+	 *
+	 * @param string  $registration Registration UUID.
+	 * @param integer $limit        Maximum rows.
+	 *
+	 * @return array[]
+	 */
+	public function pending_for_registration( string $registration, int $limit ): array {
+		global $wpdb;
+		$table = Tables::name( 'conn_inbox' );
+		if ( ! Uuid::is_valid( $registration ) ) {
+			return array();
+		}
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM `{$table}` WHERE registration = %s AND status = %s ORDER BY `stored`, received_at, statement_id LIMIT %d",
+				Uuid::to_bin( $registration ),
+				self::PENDING,
+				max( 1, $limit )
+			),
+			ARRAY_A
+		);
+		return self::shape_all( $rows );
+	}
+
+	/**
 	 * Every row of a registration, whatever its status, in stored order.
 	 *
 	 * @param string $registration Registration UUID.

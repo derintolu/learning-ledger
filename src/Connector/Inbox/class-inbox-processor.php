@@ -33,6 +33,11 @@ use LearningLedger\Util\Uuid;
 final class Inbox_Processor {
 
 	/**
+	 * Seconds process_registration() waits for the lock.
+	 */
+	const LOCK_WAIT = 2;
+
+	/**
 	 * Inbox.
 	 *
 	 * @var Inbox_Repository
@@ -106,6 +111,32 @@ final class Inbox_Processor {
 	}
 
 	/**
+	 * Process one registration's pending rows (the return route and the waive route), under the
+	 * same lock as process_pending(). A run holding the lock is waited for up to LOCK_WAIT
+	 * seconds; after that the rows stay pending for the next run.
+	 *
+	 * @param string  $registration Registration UUID.
+	 * @param integer $limit        Maximum rows to read.
+	 *
+	 * @return integer Rows that left pending.
+	 */
+	public function process_registration( string $registration, int $limit = 500 ): int {
+		global $wpdb;
+		if ( ! Uuid::is_valid( $registration ) ) {
+			return 0;
+		}
+		$lock = self::lock_name();
+		if ( '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, self::LOCK_WAIT ) ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			return 0;
+		}
+		try {
+			return $this->run_rows( $this->inbox->pending_for_registration( $registration, $limit ) );
+		} finally {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		}
+	}
+
+	/**
 	 * Name of the MySQL advisory lock for this site's inbox.
 	 *
 	 * @return string
@@ -123,10 +154,21 @@ final class Inbox_Processor {
 	 * @return integer Rows that left pending.
 	 */
 	private function run_pending( int $limit ): int {
+		return $this->run_rows( $this->inbox->pending( $limit ) );
+	}
+
+	/**
+	 * Process pending rows; the caller holds the lock.
+	 *
+	 * @param array[] $pending Pending rows, oldest stored first.
+	 *
+	 * @return integer Rows that left pending.
+	 */
+	private function run_rows( array $pending ): int {
 		$done   = 0;
 		$groups = array();
 
-		foreach ( $this->inbox->pending( $limit ) as $row ) {
+		foreach ( $pending as $row ) {
 			$statement = $row['statement'];
 
 			if ( Inbox_Repository::VOIDED === $row['verb_id'] ) {
@@ -167,7 +209,7 @@ final class Inbox_Processor {
 		}
 
 		foreach ( $groups as $group ) {
-			$done += $this->process_registration( $group['program'], $group['user'], $group['registration'], $group['rows'] );
+			$done += $this->apply_registration( $group['program'], $group['user'], $group['registration'], $group['rows'] );
 		}
 		return $done;
 	}
@@ -184,7 +226,7 @@ final class Inbox_Processor {
 	 *
 	 * @return integer Rows that left pending.
 	 */
-	private function process_registration( int $program_id, int $user, string $registration, array $rows ): int {
+	private function apply_registration( int $program_id, int $user, string $registration, array $rows ): int {
 		$program   = $this->programs->get( $program_id );
 		$structure = $this->programs->structure( $program_id );
 		if ( ! $program || ! $structure ) {

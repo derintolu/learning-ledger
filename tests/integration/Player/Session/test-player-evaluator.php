@@ -11,6 +11,7 @@
 
 use LearningLedger\Cmi5\Au;
 use LearningLedger\Cmi5\Vocab;
+use LearningLedger\Connector\Inbox\Inbox_Processor;
 use LearningLedger\Connector\Inbox\Inbox_Repository;
 use LearningLedger\Connector\Ledger\Registration_Map;
 use LearningLedger\Connector\Ledger\Waiver_Ledger;
@@ -20,12 +21,14 @@ use LearningLedger\Db\Tables;
 use LearningLedger\Integrations\Sensei\Sensei_Adapter;
 use LearningLedger\Package\Package_Writer;
 use LearningLedger\Player\Import\Player_Importer;
+use LearningLedger\Player\Launch\Lms_Statements;
 use LearningLedger\Player\Launch\Session_Repository;
 use LearningLedger\Player\Session\Player_Evaluator;
 use LearningLedger\Player\Session\Session_Module;
 use LearningLedger\Queue\Job_Queue;
 use LearningLedger\Tests\Xapi_Test_Client;
 use LearningLedger\Util\Clock;
+use LearningLedger\Util\Uuid;
 use LearningLedger\Xapi\Statement_Validator;
 
 require_once dirname( __DIR__ ) . '/Launch/test-launch.php';
@@ -298,6 +301,8 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->assertGreaterThan( 0, Job_Queue::run() );
 		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
 		$this->assertNotSame( array(), ( new Inbox_Repository() )->for_registration( $registration ) );
+		$this->assertTrue( Sensei_Utils::user_completed_lesson( $this->lessons[ self::B1 ], $this->learner ), 'the inbox completes the NotApplicable lesson' );
+		$this->assertFalse( Sensei_Utils::user_completed_lesson( $this->lessons[ self::A1 ], $this->learner ) );
 	}
 
 	public function test_block_satisfied_by_au_statements_is_written_once() {
@@ -345,6 +350,12 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->post_as( $a1['client'], $this->au_statement( $this->learner, Vocab::TERMINATED, self::A1, $session['session_id'], $registration ) );
 		$this->assertSame( array( Vocab::SATISFIED ), array_column( ( new Inbox_Repository() )->for_registration( $registration ), 'verb_id' ), 'only the LMS\'s own satisfied for block B is in the inbox yet' );
 
+		// Another learner's pending row in another registration.
+		$other_user = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		$other_reg  = wp_generate_uuid4();
+		$other      = $this->au_statement( $other_user, Vocab::COMPLETED, self::A2, wp_generate_uuid4(), $other_reg, array( 'completion' => true ) );
+		$this->assertSame( Inbox_Repository::ADDED, ( new Inbox_Repository() )->store( $other, 'webhook' ) );
+
 		$seen = array();
 		add_action(
 			'learning_ledger/cmi5_return',
@@ -372,6 +383,60 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->assertSame( Session_Repository::TERMINATED, $seen[0]['session']['status'], 'the inbox terminated closes the session' );
 		$this->assertSame( '2026-10-27 10:00:20.000000', $seen[0]['session']['terminated_at'] );
 		$this->assertSame( array(), $this->statements( Vocab::ABANDONED ) );
+		$this->assertTrue( Sensei_Utils::user_completed_lesson( $this->lessons[ self::A1 ], $this->learner ), 'Sensei has the completion before the redirect' );
+
+		$untouched = ( new Inbox_Repository() )->for_registration( $other_reg );
+		$this->assertCount( 1, $untouched );
+		$this->assertSame( Inbox_Repository::PENDING, $untouched[0]['status'], 'other registrations are left to the inbox' );
+	}
+
+	public function test_return_waits_for_a_held_inbox_lock_then_leaves_the_rows_pending() {
+		$a1      = $this->launch_au( self::A1 );
+		$session = $a1['session'];
+		$this->tick( '10:00:10' );
+		$this->post_as( $a1['client'], $this->au_statement( $this->learner, Vocab::COMPLETED, self::A1, $session['session_id'], $session['registration'], array( 'completion' => true ) ) );
+		$this->tick( '10:00:20' );
+
+		$holder = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->assertSame( '1', (string) $holder->get_var( $holder->prepare( 'SELECT GET_LOCK(%s, 0)', Inbox_Processor::lock_name() ) ) );
+		try {
+			$started = microtime( true );
+			$res     = rest_get_server()->dispatch( new WP_REST_Request( 'GET', '/learning-ledger/v1/cmi5/return/' . $session['session_id'] ) );
+			$waited  = microtime( true ) - $started;
+		} finally {
+			$holder->get_var( $holder->prepare( 'SELECT RELEASE_LOCK(%s)', Inbox_Processor::lock_name() ) );
+			$holder->close();
+		}
+		$this->assertSame( 302, $res->get_status(), 'the learner is redirected anyway' );
+		$this->assertGreaterThanOrEqual( Inbox_Processor::LOCK_WAIT - 0.5, $waited, 'the lock was waited for' );
+		$rows = ( new Inbox_Repository() )->for_registration( $session['registration'] );
+		$this->assertContains( Vocab::COMPLETED, array_column( $rows, 'verb_id' ), 'pulled' );
+		$this->assertSame( array( Inbox_Repository::PENDING ), array_values( array_unique( array_column( array_filter( $rows, static fn( $r ) => Vocab::COMPLETED === $r['verb_id'] ), 'status' ) ) ), 'left for the run holding the lock' );
+		$this->assertFalse( Sensei_Utils::user_completed_lesson( $this->lessons[ self::A1 ], $this->learner ) );
+
+		// Once the lock is free, the next return proceeds.
+		$this->assertSame( 302, rest_get_server()->dispatch( new WP_REST_Request( 'GET', '/learning-ledger/v1/cmi5/return/' . $session['session_id'] ) )->get_status() );
+		$this->assertTrue( Sensei_Utils::user_completed_lesson( $this->lessons[ self::A1 ], $this->learner ) );
+	}
+
+	public function test_satisfied_id_already_held_by_the_lrs_is_copied_and_not_posted_again() {
+		$registration                   = ( new Registration_Map() )->get_or_create( $this->learner, 'cmi5:' . $this->t59 );
+		$session                        = Uuid::v5( Lms_Statements::NAMESPACE, $registration . '|' . self::BLOCK_B . '|satisfied-session' );
+		$expected                       = ( new Lms_Statements() )->satisfied( self::BLOCK_B, $this->actor( $this->learner ), $registration, $session );
+		$conflicting                    = $expected;
+		$conflicting['verb']['display'] = array( 'en-US' => 'Satisfied (other)' );
+		$this->connector_post( $conflicting );
+
+		do_action( 'learning_ledger/cmi5_registration_created', $this->learner, $this->t59, $registration ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+		$rows = array_filter( ( new Inbox_Repository() )->for_registration( $registration ), static fn( $r ) => $expected['id'] === $r['statement_id'] );
+		$this->assertCount( 1, $rows, 'the LRS copy is in the inbox' );
+		global $wpdb;
+		$this->assertSame( '0', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Tables::name( 'jobs' ) . ' WHERE type = %s AND run_after > %s', Player_Evaluator::SYNC_JOB, '2026-10-27 10:00:30' ) ), 'no retry is queued' );
+
+		$posts = $this->statement_posts();
+		$this->sync( $this->t59, $this->learner, $registration );
+		$this->assertSame( $posts, $this->statement_posts(), 'not posted again' );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, self::BLOCK_B ) );
 	}
 
 	public function test_inbox_terminated_with_matching_session_marks_it_terminated() {
@@ -469,6 +534,9 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 
 	public function test_preview_registration_gets_no_lms_statements_and_is_not_pulled_on_return() {
 		$editor = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		foreach ( ( new Program_Repository() )->get( $this->t59 )->course_ids as $course ) {
+			$this->assertTrue( ( new Sensei_Adapter() )->enrol( $editor, $course ) );
+		}
 		wp_set_current_user( $editor );
 		$browse  = $this->launch_au( self::A1, 'Browse' );
 		$preview = $browse['session']['registration'];
@@ -485,6 +553,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->assertSame( array(), $this->statements( Vocab::SATISFIED ), 'the NotApplicable block is not satisfied in a preview registration' );
 		$this->assertSame( array(), $this->statements( Vocab::WAIVED ) );
 		$this->assertSame( Session_Repository::TERMINATED, ( new Session_Repository() )->find( $browse['session']['session_id'] )['status'], 'its terminated still closes the session' );
+		$this->assertFalse( Sensei_Utils::user_completed_lesson( $this->lessons[ self::B1 ], $editor ), 'nothing reaches Sensei' );
 	}
 
 	public function test_lrs_failure_while_writing_queues_a_retry() {

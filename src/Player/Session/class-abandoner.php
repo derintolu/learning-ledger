@@ -24,7 +24,8 @@ use LearningLedger\Util\Timestamp;
  * expired) is closed [cmi5 9.3.6]. The LRS is asked for the session's `terminated` first; a
  * session that has one is marked terminated. Any other gets `abandoned` with the duration up to
  * the abandon time stamped on the session, which a retry keeps, so a resend is identical
- * [cmi5 9.5.4]. Its token is revoked either way.
+ * [cmi5 9.5.4]. Its token is revoked either way. A session that fails is retried after 1, 5,
+ * 15 and 60 minutes, then every 6 hours, so one the LRS keeps refusing does not hold up the rest.
  */
 final class Abandoner {
 
@@ -32,6 +33,22 @@ final class Abandoner {
 	 * Sessions closed per run, at most.
 	 */
 	const BATCH = 50;
+
+	/**
+	 * Expired sessions read per run, so sessions waiting out a backoff do not fill the batch.
+	 */
+	const SCAN = 200;
+
+	/**
+	 * Option (not autoloaded) holding failing sessions: id => {attempts, next} (Unix time).
+	 */
+	const BACKOFF_OPTION = 'lledger_abandon_backoff';
+
+	/**
+	 * Retry delays in seconds after the 1st to 4th failure, then after every later one.
+	 */
+	const BACKOFF       = array( 60, 300, 900, 3600 );
+	const BACKOFF_LATER = 21600;
 
 	/**
 	 * Page size and page cap when looking for a session's `terminated`.
@@ -65,20 +82,49 @@ final class Abandoner {
 	}
 
 	/**
-	 * Close the expired open sessions. A session the LRS could not be asked about stays open
-	 * for the next run.
+	 * Close up to BATCH expired open sessions. A session that fails stays open and is backed off.
 	 *
 	 * @return integer Sessions abandoned.
 	 */
 	public function run(): int {
+		$now       = Clock::now()->getTimestamp();
+		$stored    = get_option( self::BACKOFF_OPTION, array() );
+		$backoff   = is_array( $stored ) ? $stored : array();
+		$before    = $backoff;
 		$abandoned = 0;
-		foreach ( $this->sessions->expired_open( self::BATCH ) as $session ) {
+		$tried     = 0;
+		$seen      = array();
+		foreach ( $this->sessions->expired_open( self::SCAN ) as $session ) {
+			$id          = $session['session_id'];
+			$seen[ $id ] = true;
+			if ( (int) ( $backoff[ $id ]['next'] ?? 0 ) > $now || $tried >= self::BATCH ) {
+				continue;
+			}
+			++$tried;
 			try {
 				if ( $this->close( $session ) ) {
 					++$abandoned;
 				}
+				unset( $backoff[ $id ] );
 			} catch ( \RuntimeException $e ) {
-				continue;
+				$attempts       = (int) ( $backoff[ $id ]['attempts'] ?? 0 ) + 1;
+				$backoff[ $id ] = array(
+					'attempts' => $attempts,
+					'next'     => $now + ( self::BACKOFF[ $attempts - 1 ] ?? self::BACKOFF_LATER ),
+				);
+			}
+		}
+		foreach ( array_keys( $backoff ) as $id ) {
+			// Forget sessions closed elsewhere (a relaunch).
+			if ( ! isset( $seen[ $id ] ) && Session_Repository::OPEN !== ( $this->sessions->find( (string) $id )['status'] ?? null ) ) {
+				unset( $backoff[ $id ] );
+			}
+		}
+		if ( $backoff !== $before ) {
+			if ( array() === $backoff ) {
+				delete_option( self::BACKOFF_OPTION );
+			} else {
+				update_option( self::BACKOFF_OPTION, $backoff, false );
 			}
 		}
 		return $abandoned;
