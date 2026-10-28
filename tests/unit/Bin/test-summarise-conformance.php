@@ -33,4 +33,58 @@ class Summarise_Conformance_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertStringContainsString( 'keep me', $text );
 		$this->assertStringContainsString( '[REDACTED]', $text );
 	}
+
+	/**
+	 * Run lledger_redact over a file body and return the exit code and the rewritten text.
+	 *
+	 * @param string $body   File contents.
+	 * @param string $secret Secret.
+	 *
+	 * @return array{0:int,1:string}
+	 */
+	private function redact( string $body, string $secret ): array {
+		$file = tempnam( sys_get_temp_dir(), 'lledger-redact' );
+		file_put_contents( $file, $body ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		$script = dirname( __DIR__, 3 ) . '/bin/redact.sh';
+		$cmd    = 'bash -c ' . escapeshellarg( '. "$1"; lledger_redact "$2" conformance "$3"' ) . ' _ ' . escapeshellarg( $script ) . ' ' . escapeshellarg( $file ) . ' ' . escapeshellarg( $secret );
+		exec( $cmd, $out, $code ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+		$text = file_get_contents( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		unlink( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		return array( $code, $text );
+	}
+
+	public function test_redaction_removes_url_encoded_credentials_in_a_form_body() {
+		$secret = 'p@?w/>d+ 1';
+		$cred   = base64_encode( 'conformance:' . $secret ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+		$this->assertStringContainsString( '/', $cred );
+		$this->assertStringContainsString( '+', $cred );
+		$this->assertStringContainsString( '=', $cred );
+		$lower_hex           = preg_replace_callback( '/%[0-9A-F]{2}/', static fn( $m ) => strtolower( $m[0] ), rawurlencode( $cred ) );
+		$body                = implode(
+			"\n",
+			array(
+				'method=GET&Authorization=Basic%20' . rawurlencode( $cred ) . '&content-type=application%2Fjson',
+				'Authorization=Basic+' . urlencode( $cred ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+				'Authorization=Basic%20' . $lower_hex,
+				'Authorization%3DBasic%20' . rawurlencode( $cred ),
+				'authorization=Bearer%20tok%2B123%3D&x=1',
+				'authorization=Bearer+tok456',
+				'client_secret=' . rawurlencode( $secret ) . '&b=1',
+				'client_secret=' . urlencode( $secret ) . '&b=2', // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+				'cred=' . rawurlencode( $cred ),
+				'cred=' . str_replace( '/', '\\/', $cred ),
+				'keep me',
+			)
+		);
+		list( $code, $text ) = $this->redact( $body, $secret );
+		$this->assertSame( 0, $code );
+		foreach ( array( $secret, $cred, rawurlencode( $secret ), urlencode( $secret ), rawurlencode( $cred ), urlencode( $cred ), 'tok%2B123', 'tok456' ) as $leak ) { // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+			$this->assertStringNotContainsString( $leak, $text );
+		}
+		$this->assertStringNotContainsString( $lower_hex, $text );
+		$this->assertStringContainsString( 'method=GET&Authorization=Basic%20[REDACTED]&content-type=application%2Fjson', $text );
+		$this->assertStringContainsString( 'authorization=Bearer%20[REDACTED]&x=1', $text );
+		$this->assertStringContainsString( 'client_secret=[REDACTED]&b=1', $text );
+		$this->assertStringContainsString( 'keep me', $text );
+	}
 }
