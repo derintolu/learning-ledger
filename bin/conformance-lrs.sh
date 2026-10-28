@@ -13,7 +13,8 @@ Usage: bin/conformance-lrs.sh --xapi <1.0.3|2.0.x> --endpoint <url> --key <key> 
                  suite through the environment, so it never appears in a process list or log.
   --grep         Only run suite tests matching this pattern.
 
-Writes conformance/raw/lrs-<xapi>-<YYYYMMDD>.json. Exits non-zero when the suite reports failures.
+Writes conformance/raw/lrs-<xapi>-<YYYYMMDD>.json. Exits non-zero only when a failing test is
+not listed in conformance/known-gaps.json (the ids are printed).
 The suite is cloned at LRS_SUITE_SHA (bin/versions.env) into .cache/lrs-conformance.
 Only run this against an LRS you operate; the suite writes and voids data.
 USAGE
@@ -96,4 +97,7 @@ lledger_redact "$out_file" "$key" "$secret"
 lledger_redact "$root/.cache/lrs-last-run.txt" "$key" "$secret"
 tail -n 40 "$root/.cache/lrs-last-run.txt"
 echo "Wrote ${out_file#"$root"/} (suite exit status: $status)"
-exit "$status"
+# The gate: fail only on a failing test that conformance/known-gaps.json does not list.
+gate=0
+php "$root/bin/summarise-conformance.php" --check "$out_file" --suite-status "$status" || gate=$?
+exit "$gate"

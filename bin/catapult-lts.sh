@@ -15,7 +15,8 @@ Usage: bin/catapult-lts.sh --site <url> --content-host <url> --key <key> --secre
 
 Clones CATAPULT at CATAPULT_SHA (bin/versions.env) into .cache/catapult, builds the LTS package
 library, installs tests/catapult/adapter.js as the LMS adapter (lib/lms.custom.js) and runs the
-suite unchanged. Writes conformance/raw/catapult-lts-<YYYYMMDD>.json (Jest JSON report).
+suite unchanged. Writes conformance/raw/catapult-lts-<YYYYMMDD>.json (Jest JSON report) and
+exits non-zero only when a failing test is not listed in conformance/known-gaps.json.
 Secrets reach the adapter through environment variables only.
 USAGE
 }
@@ -95,4 +96,7 @@ if [ ! -s "$out_file" ]; then
 fi
 lledger_redact "$out_file" "$key" "$lrs_secret" "$test_secret"
 echo "Wrote ${out_file#"$root"/} (suite exit status: $status)"
-exit "$status"
+# The gate: fail only on a failing test that conformance/known-gaps.json does not list.
+gate=0
+php "$root/bin/summarise-conformance.php" --check "$out_file" --suite-status "$status" || gate=$?
+exit "$gate"

@@ -6,6 +6,10 @@
  * suites carry "XAPI-nnnnn" ids) and a Jest JSON report (CATAPULT LTS, cmi5 ids such as
  * "9.3.0.0-1"). CLI: php bin/summarise-conformance.php conformance/raw/*.json > conformance/SUMMARY.md
  *
+ * Gate: php bin/summarise-conformance.php --check <raw.json> [--known-gaps <file>] [--suite-status <n>]
+ * exits 1 and prints the ids when a failing test is not listed in conformance/known-gaps.json
+ * (or when the suite exited non-zero without recording any failure), 0 otherwise.
+ *
  * @package LearningLedger
  */
 
@@ -86,16 +90,9 @@ function lledger_conformance_collect_jest( array $raw, array &$reqs ): void {
  * @return string Markdown: heading, counts and a table of failing requirements only.
  */
 function lledger_summarise_conformance( array $raw, array $known_gaps, string $title ): string {
-	$reqs = array();
-	if ( isset( $raw['log'] ) && is_array( $raw['log'] ) ) {
-		lledger_conformance_walk_adl( $raw['log'], '', $reqs );
-	} elseif ( isset( $raw['testResults'] ) ) {
-		lledger_conformance_collect_jest( $raw, $reqs );
-	}
-
-	$failing = array_keys( array_filter( $reqs, static fn( $r ) => $r['failed'] ) );
-	sort( $failing, SORT_NATURAL );
-	$passed = count( $reqs ) - count( $failing );
+	$reqs    = lledger_conformance_requirements( $raw );
+	$failing = lledger_conformance_failing( $reqs );
+	$passed  = count( $reqs ) - count( $failing );
 
 	$md  = "### {$title}\n\n";
 	$md .= sprintf( "Requirements passed: %d. Requirements failing: %d.\n\n", $passed, count( $failing ) );
@@ -108,6 +105,48 @@ function lledger_summarise_conformance( array $raw, array $known_gaps, string $t
 }
 
 /**
+ * Per-requirement results of a raw suite result (ADL run record or Jest JSON).
+ *
+ * @param array<string,mixed> $raw Raw suite result.
+ *
+ * @return array<string,array> id => [ 'failed' => bool, 'errors' => string[] ].
+ */
+function lledger_conformance_requirements( array $raw ): array {
+	$reqs = array();
+	if ( isset( $raw['log'] ) && is_array( $raw['log'] ) ) {
+		lledger_conformance_walk_adl( $raw['log'], '', $reqs );
+	} elseif ( isset( $raw['testResults'] ) ) {
+		lledger_conformance_collect_jest( $raw, $reqs );
+	}
+	return $reqs;
+}
+
+/**
+ * Failing ids, in natural order.
+ *
+ * @param array<string,array> $reqs Per-requirement results.
+ *
+ * @return string[]
+ */
+function lledger_conformance_failing( array $reqs ): array {
+	$failing = array_map( 'strval', array_keys( array_filter( $reqs, static fn( $r ) => $r['failed'] ) ) );
+	sort( $failing, SORT_NATURAL );
+	return $failing;
+}
+
+/**
+ * Failing ids that conformance/known-gaps.json does not list: what fails the gate.
+ *
+ * @param array<string,mixed>  $raw        Raw suite result.
+ * @param array<string,string> $known_gaps Requirement id => reason.
+ *
+ * @return string[]
+ */
+function lledger_conformance_unlisted( array $raw, array $known_gaps ): array {
+	return array_values( array_filter( lledger_conformance_failing( lledger_conformance_requirements( $raw ) ), static fn( $id ) => ! isset( $known_gaps[ $id ] ) || '' === $known_gaps[ $id ] ) );
+}
+
+/**
  * Make a string safe for a single Markdown table cell.
  *
  * @param string $text Cell text.
@@ -116,6 +155,40 @@ function lledger_summarise_conformance( array $raw, array $known_gaps, string $t
  */
 function lledger_conformance_cell( string $text ): string {
 	return trim( str_replace( array( '|', "\r", "\n" ), array( '\|', ' ', ' ' ), $text ) );
+}
+
+if ( isset( $_SERVER['SCRIPT_FILENAME'] ) && realpath( $_SERVER['SCRIPT_FILENAME'] ) === __FILE__ && '--check' === ( $argv[1] ?? '' ) ) {
+	$lledger_opts = array(
+		'--check'        => '',
+		'--known-gaps'   => dirname( __DIR__ ) . '/conformance/known-gaps.json',
+		'--suite-status' => '0',
+	);
+	$lledger_argc = count( $argv );
+	for ( $lledger_i = 1; $lledger_i + 1 < $lledger_argc; $lledger_i += 2 ) {
+		if ( ! array_key_exists( $argv[ $lledger_i ], $lledger_opts ) ) {
+			fwrite( STDERR, "Unknown argument: {$argv[ $lledger_i ]}\n" );
+			exit( 2 );
+		}
+		$lledger_opts[ $argv[ $lledger_i ] ] = $argv[ $lledger_i + 1 ];
+	}
+	$lledger_raw  = is_readable( $lledger_opts['--check'] ) ? json_decode( (string) file_get_contents( $lledger_opts['--check'] ), true ) : null;
+	$lledger_gaps = is_readable( $lledger_opts['--known-gaps'] ) ? json_decode( (string) file_get_contents( $lledger_opts['--known-gaps'] ), true ) : null;
+	if ( ! is_array( $lledger_raw ) || ! is_array( $lledger_gaps ) ) {
+		fwrite( STDERR, "Cannot read the raw result or the known gaps.\n" );
+		exit( 1 );
+	}
+	$lledger_failing  = lledger_conformance_failing( lledger_conformance_requirements( $lledger_raw ) );
+	$lledger_unlisted = lledger_conformance_unlisted( $lledger_raw, $lledger_gaps );
+	if ( array() !== $lledger_unlisted ) {
+		fwrite( STDERR, "Failing tests not listed in conformance/known-gaps.json:\n  " . implode( "\n  ", $lledger_unlisted ) . "\n" );
+		exit( 1 );
+	}
+	if ( array() === $lledger_failing && '0' !== (string) $lledger_opts['--suite-status'] ) {
+		fwrite( STDERR, "The suite exited {$lledger_opts['--suite-status']} without recording a failing test.\n" );
+		exit( 1 );
+	}
+	echo 'Every failing test (' . count( $lledger_failing ) . ") is listed in conformance/known-gaps.json.\n";
+	exit( 0 );
 }
 
 if ( isset( $_SERVER['SCRIPT_FILENAME'] ) && realpath( $_SERVER['SCRIPT_FILENAME'] ) === __FILE__ ) {

@@ -15,6 +15,83 @@ class Summarise_Conformance_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertStringNotContainsString( 'XAPI-00300', $md ); // passing ids are counted, not listed.
 	}
 
+	public function test_unlisted_failures_are_the_failing_ids_known_gaps_do_not_name() {
+		require_once dirname( __DIR__, 3 ) . '/bin/summarise-conformance.php';
+		$raw = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/fixtures/conformance/sample-raw.json' ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$this->assertSame( array( 'XAPI-00200' ), lledger_conformance_unlisted( $raw, array( 'XAPI-00100' => 'cut' ) ) );
+		$this->assertSame(
+			array(),
+			lledger_conformance_unlisted(
+				$raw,
+				array(
+					'XAPI-00100' => 'cut',
+					'XAPI-00200' => 'cut',
+				)
+			)
+		);
+
+		$jest = array(
+			'testResults' => array(
+				array(
+					'assertionResults' => array(
+						array(
+							'fullName'        => 'Package import',
+							'status'          => 'failed',
+							'failureMessages' => array( 'Exceeded timeout of 5000 ms' ),
+						),
+						array(
+							'fullName'        => 'AU execution',
+							'status'          => 'failed',
+							'failureMessages' => array( '9.3.0.0-2 (d) rejected' ),
+						),
+						array(
+							'fullName' => 'passes',
+							'status'   => 'passed',
+						),
+					),
+				),
+			),
+		);
+		$this->assertSame( array( '9.3.0.0-2' ), lledger_conformance_unlisted( $jest, array( 'Package import' => 'slow' ) ) );
+	}
+
+	/**
+	 * Run the gate on a raw file: exit code and output.
+	 *
+	 * @param array $raw  Raw result.
+	 * @param array $gaps Known gaps.
+	 *
+	 * @return array{0:int,1:string}
+	 */
+	private function gate( array $raw, array $gaps ): array {
+		$dir = sys_get_temp_dir() . '/lledger-gate-' . bin2hex( random_bytes( 4 ) );
+		mkdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		file_put_contents( $dir . '/raw.json', json_encode( $raw ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions, WordPress.WP.AlternativeFunctions.json_encode_json_encode
+		file_put_contents( $dir . '/gaps.json', json_encode( $gaps ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions, WordPress.WP.AlternativeFunctions.json_encode_json_encode
+		$cmd = 'php ' . escapeshellarg( dirname( __DIR__, 3 ) . '/bin/summarise-conformance.php' ) . ' --check ' . escapeshellarg( $dir . '/raw.json' ) . ' --known-gaps ' . escapeshellarg( $dir . '/gaps.json' ) . ' 2>&1';
+		exec( $cmd, $out, $code ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+		array_map( 'unlink', glob( $dir . '/*' ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		return array( $code, implode( "\n", $out ) );
+	}
+
+	public function test_check_fails_only_on_unlisted_failures_and_prints_them() {
+		$raw            = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/fixtures/conformance/sample-raw.json' ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		[ $code, $out ] = $this->gate( $raw, array( 'XAPI-00100' => 'cut' ) );
+		$this->assertSame( 1, $code );
+		$this->assertStringContainsString( 'XAPI-00200', $out );
+		$this->assertStringNotContainsString( 'XAPI-00100', $out );
+
+		[ $code ] = $this->gate(
+			$raw,
+			array(
+				'XAPI-00100' => 'cut',
+				'XAPI-00200' => 'cut',
+			)
+		);
+		$this->assertSame( 0, $code );
+	}
+
 	public function test_redaction_removes_secret_basic_credential_and_authorization_header() {
 		$file   = tempnam( sys_get_temp_dir(), 'lledger-redact' );
 		$secret = 'abc123secret';
