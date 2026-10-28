@@ -45,7 +45,19 @@ class Importing_Fake_Adapter extends Fake_Adapter {
 
 	public function upsert_course( Course_Spec $spec ): int {
 		$this->course_specs[] = $spec;
-		return parent::upsert_course( $spec );
+		$id                   = parent::upsert_course( $spec );
+		// The importer trusts a stored hash only while the LMS post exists.
+		if ( ! get_post( $id ) ) {
+			wp_insert_post(
+				array(
+					'import_id'   => $id,
+					'post_title'  => $spec->title,
+					'post_status' => 'publish',
+					'post_type'   => 'post',
+				)
+			);
+		}
+		return $id;
 	}
 
 	public function upsert_lesson( int $course_id, Lesson_Spec $spec ): int {

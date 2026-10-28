@@ -320,6 +320,27 @@ class Player_Importer_Test extends WP_UnitTestCase {
 		$this->assertSame( 'Renamed AU', get_the_title( $lesson ) );
 	}
 
+	public function test_deleted_lesson_and_course_are_recreated_on_an_unchanged_reimport() {
+		$zip    = $this->zip( $this->fixture( '001-essentials/cmi5.xml' ) );
+		$first  = $this->importer()->import( $zip );
+		$course = $this->repo->get( $first->program_id )->course_ids[0];
+		$lesson = $this->lessons( $course )[0]['id'];
+
+		wp_delete_post( $lesson, true );
+		$again = $this->importer()->import( $zip );
+		$this->assertTrue( $again->ok(), wp_json_encode( $again->errors ) );
+		$this->assertSame( 1, $this->count_posts( 'lesson' ), 'the deleted lesson is written again' );
+		$this->assertNotSame( $lesson, $this->lessons( $course )[0]['id'] );
+
+		wp_delete_post( $course, true );
+		$third = $this->importer()->import( $zip );
+		$this->assertTrue( $third->ok(), wp_json_encode( $third->errors ) );
+		$this->assertSame( 1, $this->count_posts( 'course' ), 'the deleted course is written again' );
+		$new_course = $this->repo->get( $third->program_id )->course_ids[0];
+		$this->assertNotSame( $course, $new_course );
+		$this->assertCount( 1, $this->lessons( $new_course ) );
+	}
+
 	public function test_imported_titles_are_sanitized() {
 		$xml    = str_replace( 'CATAPULT LMS Test Course: 001 Essentials</langstring>', '<![CDATA[<script>alert(1)</script><b>Essentials</b>]]></langstring>', $this->fixture( '001-essentials/cmi5.xml' ) );
 		$report = $this->importer()->import( $this->zip( $xml ) );

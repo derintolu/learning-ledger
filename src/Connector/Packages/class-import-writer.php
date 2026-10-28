@@ -106,7 +106,8 @@ final class Import_Writer {
 	}
 
 	/**
-	 * Runs the write for an item unless the stored hash matches, then records the new hash.
+	 * Runs the write for an item unless the stored hash matches and the recorded LMS post
+	 * still exists, then records the new hash.
 	 *
 	 * @param integer  $program_id Program id.
 	 * @param array    $hashes     Hashes, updated in place.
@@ -120,7 +121,7 @@ final class Import_Writer {
 	 */
 	public function write_item( int $program_id, array &$hashes, string $ref, string $hash, array &$created, array &$updated, callable $write ): int {
 		$known = $hashes[ $ref ] ?? null;
-		if ( is_array( $known ) && ( $known['h'] ?? '' ) === $hash && (int) ( $known['id'] ?? 0 ) > 0 ) {
+		if ( is_array( $known ) && ( $known['h'] ?? '' ) === $hash && (int) ( $known['id'] ?? 0 ) > 0 && get_post( (int) $known['id'] ) ) {
 			return (int) $known['id'];
 		}
 		$id = (int) $write();
