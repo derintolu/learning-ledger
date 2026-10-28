@@ -315,6 +315,27 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 		$this->assertSame( 2, self::count_rows() );
 	}
 
+	/**
+	 * CATAPULT 005-2-invalid-au, cmi5 9.3.0.0-2 and 9.3.0.0-3: within one session a cmi5 defined
+	 * verb is not repeated, and only one of passed or failed is sent; a later session may retry.
+	 */
+	public function test_repeated_verb_or_second_judgement_in_the_session_is_rejected() {
+		[ $s1 ] = $this->child();
+		$this->assert_status( 200, self::post( $s1, array( self::defined( Vocab::INITIALIZED ) ) ), 'initialized' );
+		$this->assert_status( 403, self::post( $s1, array( self::defined( Vocab::INITIALIZED ) ) ), 'initialized again' );
+		$this->assert_status( 200, self::post( $s1, array( self::defined( Vocab::FAILED ) ) ), 'failed' );
+		$this->assert_status( 403, self::post( $s1, array( self::defined( Vocab::FAILED ) ) ), 'failed again' );
+		$this->assert_status( 403, self::post( $s1, array( self::defined( Vocab::PASSED ) ) ), 'passed after failed' );
+		$this->assertSame( 2, self::count_rows() );
+
+		[ $s2 ] = $this->child( 'Normal', self::SESSION2 );
+		$this->assert_status( 403, self::post( $s2, array( self::defined( Vocab::FAILED, self::SESSION2 ), self::defined( Vocab::FAILED, self::SESSION2 ) ) ), 'failed twice in one batch' );
+		$this->assert_status( 200, self::post( $s2, array( self::defined( Vocab::INITIALIZED, self::SESSION2 ), self::defined( Vocab::FAILED, self::SESSION2 ) ) ), 'a later session retries' );
+		[ $s3 ] = $this->child( 'Normal', self::SESSION3 );
+		$this->assert_status( 200, self::post( $s3, array( self::defined( Vocab::PASSED, self::SESSION3 ) ) ), 'passed in a later session' );
+		$this->assertSame( 5, self::count_rows() );
+	}
+
 	public function test_second_completed_is_rejected() {
 		[ $s1 ] = $this->child();
 		$this->assert_status( 200, self::post( $s1, array( self::defined( Vocab::COMPLETED ) ) ) );

@@ -64,7 +64,7 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 	/**
 	 * What the registration and session already hold, plus this batch; null until first needed.
 	 *
-	 * @var array{passed:bool,completed:bool,terminated:bool,terminated_at:?\DateTimeImmutable}|null
+	 * @var array{passed:bool,completed:bool,terminated:bool,terminated_at:?\DateTimeImmutable,session:array<string,true>}|null
 	 */
 	private ?array $state = null;
 
@@ -168,7 +168,15 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 		if ( Vocab::COMPLETED === $verb && $state['completed'] ) {
 			throw new Xapi_Error( 403, 'The AU has already been completed in this registration.' );
 		}
+		// In one session no cmi5 defined verb repeats [cmi5 9.3.0.0-2] and only one of passed or failed is sent [9.3.0.0-3].
+		if ( isset( $state['session'][ $verb ] ) ) {
+			throw new Xapi_Error( 403, 'The AU session already has a ' . $verb . ' statement.' );
+		}
+		if ( ( Vocab::PASSED === $verb || Vocab::FAILED === $verb ) && ( isset( $state['session'][ Vocab::PASSED ] ) || isset( $state['session'][ Vocab::FAILED ] ) ) ) {
+			throw new Xapi_Error( 403, 'The AU session already has a passed or failed statement.' );
+		}
 
+		$this->state['session'][ $verb ] = true;
 		if ( Vocab::PASSED === $verb ) {
 			$this->state['passed'] = true;
 		} elseif ( Vocab::COMPLETED === $verb ) {
@@ -222,11 +230,12 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 	 * What the token's registration and session already hold (loaded once per request, when first needed).
 	 *
 	 * Passed and completed count the learner's unvoided cmi5 defined statements about the AU;
-	 * the session counts as terminated once a cmi5 defined `terminated` with its session id is stored.
+	 * the session counts as terminated once a cmi5 defined `terminated` with its session id is stored;
+	 * `session` holds the cmi5 defined verbs the learner's statements in this session already used.
 	 *
 	 * @param Child_Token $token Token.
 	 *
-	 * @return array{passed:bool,completed:bool,terminated:bool,terminated_at:?\DateTimeImmutable}
+	 * @return array{passed:bool,completed:bool,terminated:bool,terminated_at:?\DateTimeImmutable,session:array<string,true>}
 	 */
 	private function state( Child_Token $token ): array {
 		if ( null !== $this->state ) {
@@ -237,6 +246,7 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 			'completed'     => false,
 			'terminated'    => null !== $token->terminated_at,
 			'terminated_at' => $token->terminated_at,
+			'session'       => array(),
 		);
 		$actor = Ref_Indexer::agent_hash( $token->actor );
 		foreach ( $this->statements->for_registration( $token->registration ) as $row ) {
@@ -253,6 +263,9 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 			}
 			if ( $row->actor_hash !== $actor || ( $st['object']['id'] ?? null ) !== $token->activity_id ) {
 				continue;
+			}
+			if ( is_string( $session ) && strtolower( $session ) === strtolower( $token->session_id ) ) {
+				$state['session'][ $verb ] = true;
 			}
 			if ( Vocab::PASSED === $verb ) {
 				$state['passed'] = true;
