@@ -17,6 +17,8 @@ use LearningLedger\Player\Launch\Session_Repository;
 
 /**
  * The learning-ledger/cmi5-lesson block: status, launch buttons and the editor warning.
+ *
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- Test class.
 class Cmi5_Lesson_Test extends WP_UnitTestCase {

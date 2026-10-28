@@ -273,6 +273,11 @@ abstract class Lledger_Session_Test_Case extends Lledger_Launch_Test_Case {
 	}
 }
 
+/**
+ * Player session evaluation tests.
+ *
+ * @requires function Sensei
+ */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- Test class.
 class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 

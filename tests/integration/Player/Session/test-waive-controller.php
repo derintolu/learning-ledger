@@ -16,6 +16,11 @@ use LearningLedger\Xapi\Statement_Validator;
 
 require_once __DIR__ . '/test-player-evaluator.php';
 
+/**
+ * Player session waive endpoint tests.
+ *
+ * @requires function Sensei
+ */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- Test class.
 class Waive_Controller_Test extends Lledger_Session_Test_Case {
 

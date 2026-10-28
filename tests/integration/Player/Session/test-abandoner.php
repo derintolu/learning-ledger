@@ -15,6 +15,11 @@ use LearningLedger\Player\Session\Abandoner;
 
 require_once __DIR__ . '/test-player-evaluator.php';
 
+/**
+ * Player session abandonment tests.
+ *
+ * @requires function Sensei
+ */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- Test class.
 class Abandoner_Test extends Lledger_Session_Test_Case {
 
