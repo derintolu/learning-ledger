@@ -155,6 +155,8 @@ final class Statement_Query {
 	 * A related_activities or related_agents filter drives the query from
 	 * `lledger_statement_refs`: one range per ref kind, read in seq order and cut at
 	 * limit + 1, so the cost follows the page and not the number of matching statements.
+	 * When a registration or actor narrows the query (its own or the caller's binding), that
+	 * index is read instead and the related_* filter is checked per statement.
 	 *
 	 * @param Query_Params     $q      Query.
 	 * @param array            $read   Read filter on `s`.
@@ -165,8 +167,8 @@ final class Statement_Query {
 	 */
 	private function direct( Query_Params $q, array $read, array $bounds, ?More_Cursor $c ): array {
 		$drive = self::ref_driver( $q );
-		if ( null === $drive ) {
-			$match = self::match_filter( $q, 's' );
+		$match = self::match_filter( $q, 's' );
+		if ( null === $drive || self::narrows( array_merge( $read['drivers'], $match['drivers'] ) ) ) {
 			return $this->select(
 				'',
 				array( 's.voided = 0', ...$read['where'], ...$match['where'], ...$bounds['where'] ),
@@ -225,7 +227,7 @@ final class Statement_Query {
 	private function referrers( Query_Params $q, Principal $p, array $bounds, array $direct, ?More_Cursor $c ): array {
 		$target = self::match_filter( $q, 't' );
 		$read_t = self::read_filter( $p, 't' );
-		$narrow = array() !== array_intersect( array( 'registration', 'actor', 'agent' ), array_merge( $target['drivers'], $read_t['drivers'] ) );
+		$narrow = self::narrows( array_merge( $target['drivers'], $read_t['drivers'] ) );
 		$full   = count( $direct ) > $q->limit;
 		if ( $narrow || ( ! $full && null === $q->since && null === $q->until && null === $c ) ) {
 			return $this->from_targets( $q, $p, $bounds, $narrow ? null : self::ref_driver( $q ) );
@@ -464,6 +466,18 @@ final class Statement_Query {
 			$f['drivers'][] = 'verb';
 		}
 		return $f;
+	}
+
+	/**
+	 * Whether a registration or actor narrows the statements: those indexes hold one
+	 * learner's statements, so reading them beats any other range.
+	 *
+	 * @param string[] $drivers Driving filters present.
+	 *
+	 * @return boolean
+	 */
+	private static function narrows( array $drivers ): bool {
+		return array() !== array_intersect( array( 'registration', 'actor', 'agent' ), $drivers );
 	}
 
 	/**

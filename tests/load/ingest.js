@@ -10,7 +10,24 @@ const BASE = __ENV.BASE_URL;
 const AUTH = 'Basic ' + encoding.b64encode( __ENV.LRS_KEY + ':' + __ENV.LRS_SECRET );
 const ACTORS = parseInt( __ENV.ACTORS || '1000', 10 );
 const REGISTRATIONS = parseInt( __ENV.REGISTRATIONS || '10000', 10 );
-const SUSTAIN = __ENV.SUSTAIN_DURATION || '60s';
+// Sustained phase length in seconds: a k6 duration such as 90s, 2m or 1m30s, or a plain number of seconds.
+function seconds( value ) {
+	const text = String( value ).trim();
+	if ( /^\d+$/.test( text ) ) {
+		return parseInt( text, 10 );
+	}
+	const units = { h: 3600, m: 60, s: 1 };
+	let total = 0;
+	const rest = text.replace( /(\d+)([hms])/g, ( all, n, unit ) => {
+		total += parseInt( n, 10 ) * units[ unit ];
+		return '';
+	} );
+	if ( '' !== rest || 0 === total ) {
+		throw new Error( 'SUSTAIN_DURATION must be like 60, 90s, 2m or 1m30s; got ' + text );
+	}
+	return total;
+}
+const SUSTAIN = seconds( __ENV.SUSTAIN_DURATION || '60' );
 const BURST_BATCH = 100;
 const stored = new Counter( 'statements_stored' );
 
@@ -21,7 +38,7 @@ export const options = {
 			executor: 'constant-arrival-rate',
 			rate: 50,
 			timeUnit: '1s',
-			duration: SUSTAIN,
+			duration: SUSTAIN + 's',
 			preAllocatedVUs: 20,
 			maxVUs: 100,
 			exec: 'single',
@@ -33,7 +50,7 @@ export const options = {
 			duration: '10s',
 			preAllocatedVUs: 10,
 			maxVUs: 50,
-			startTime: '' + ( parseInt( SUSTAIN, 10 ) + 5 ) + 's',
+			startTime: SUSTAIN + 5 + 's',
 			exec: 'burst',
 		},
 	},

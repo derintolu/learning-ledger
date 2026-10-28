@@ -6,8 +6,10 @@
 # Environment:
 #   WP_ENV_PORT              wp-env port of the LRS site (default 8888).
 #   LLEDGER_TEST_BASE_URL    LRS site as seen from this machine (default http://localhost:$WP_ENV_PORT).
-#   LLEDGER_K6_BASE_URL      the same site as seen from the k6 container (default: localhost -> host.docker.internal).
-#   LLEDGER_K6_NETWORK       Docker network for the k6 container (then LLEDGER_K6_BASE_URL may name a container).
+#   LLEDGER_K6_BASE_URL      the same site as seen from the k6 container
+#                            (default: localhost, 127.0.0.1 or [::1] -> host.docker.internal).
+#   LLEDGER_K6_NETWORK       Docker network for the k6 container; LLEDGER_K6_BASE_URL must then name a
+#                            container (or a container alias) on that network.
 #   LLEDGER_XAPI_PATH        xAPI base path (default /wp-json/learning-ledger/xapi).
 #   LLEDGER_WP               WP-CLI prefix for the LRS site (default: npx @wordpress/env run cli wp).
 #   LLEDGER_WP_CONNECTOR     WP-CLI prefix for a site with Sensei, for the connector measurement
@@ -16,14 +18,15 @@
 #   SUSTAIN_DURATION, QUERY_RATE, QUERY_DURATION, STATE_RATE, STATE_DURATION are passed to the k6 scripts.
 #
 # The LRS site needs LLEDGER_TESTING (for the seed command) and the lrs role. Load only ever goes
-# to this machine: any other host is refused. The client secret is generated here and given to k6
-# only; WP-CLI sees its SHA-256.
+# to this machine: the site URL, the k6 URL and the siteurl of every WP-CLI target must be local,
+# or nothing is seeded, created or loaded. The client secret is generated here and given to k6
+# only, through an env file readable by this user alone; WP-CLI sees its SHA-256. The load client
+# is deleted when the script exits.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 WP_ENV_PORT=${WP_ENV_PORT:-8888}
 BASE_URL=${LLEDGER_TEST_BASE_URL:-http://localhost:$WP_ENV_PORT}
-K6_BASE_URL=${LLEDGER_K6_BASE_URL:-${BASE_URL/localhost/host.docker.internal}}
 K6_NETWORK=${LLEDGER_K6_NETWORK:-}
 XAPI_PATH=${LLEDGER_XAPI_PATH:-/wp-json/learning-ledger/xapi}
 K6_IMAGE=${LLEDGER_K6_IMAGE:-grafana/k6:0.54.0}
@@ -46,23 +49,63 @@ for arg in "$@"; do
 	esac
 done
 
-host_of() { local h=${1#*://}; h=${h%%/*}; echo "${h%:*}"; }
-case "$(host_of "$BASE_URL")" in
-	localhost|127.0.0.1|'[::1]') ;;
-	*) echo "Refusing to load $BASE_URL: only this machine may be load tested." >&2; exit 2 ;;
-esac
+# Host of a URL, without userinfo or port; an IPv6 literal keeps its brackets.
+host_of() {
+	local h=${1#*://}
+	h=${h%%/*}
+	h=${h##*@}
+	if [[ $h == \[* ]]; then
+		echo "${h%%]*}]"
+	else
+		echo "${h%%:*}"
+	fi
+}
+is_local() { case "$1" in localhost|127.0.0.1|'[::1]') return 0 ;; *) return 1 ;; esac; }
+refuse() { echo "Refusing to load $1: only this machine may be load tested." >&2; exit 2; }
+
+is_local "$(host_of "$BASE_URL")" || refuse "$BASE_URL"
+if [ -z "${LLEDGER_K6_BASE_URL:-}" ]; then
+	BASE_HOST=$(host_of "$BASE_URL")
+	K6_BASE_URL=${BASE_URL/"$BASE_HOST"/host.docker.internal}
+else
+	K6_BASE_URL=$LLEDGER_K6_BASE_URL
+fi
+K6_HOST=$(host_of "$K6_BASE_URL")
 if [ -z "$K6_NETWORK" ]; then
-	case "$(host_of "$K6_BASE_URL")" in
-		localhost|127.0.0.1|host.docker.internal) ;;
-		*) echo "Refusing to load $K6_BASE_URL: only this machine may be load tested." >&2; exit 2 ;;
-	esac
+	is_local "$K6_HOST" || [ "$K6_HOST" = host.docker.internal ] || refuse "$K6_BASE_URL"
+else
+	# With a network, the k6 host must be a container (by name or alias) on that network.
+	members=" "
+	for id in $(docker network inspect "$K6_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{end}}'); do
+		members+="$(docker inspect "$id" --format '{{.Name}}' | tr -d '/') "
+		for field in Aliases DNSNames; do
+			members+="$(docker inspect "$id" --format "{{with index .NetworkSettings.Networks \"$K6_NETWORK\"}}{{range .$field}}{{.}} {{end}}{{end}}" 2>/dev/null || true) "
+		done
+	done
+	[[ "$members" == *" $K6_HOST "* ]] || refuse "$K6_BASE_URL (not a container on $K6_NETWORK)"
 fi
 
 wp() { "${WP[@]}" "$@" 2> >(grep -v -E '^(ℹ|✔)' >&2); }
 wants() { [[ ",$ONLY," == *",$1,"* ]]; }
 
+# Every WP-CLI target must be a site on this machine before anything is written to it.
+check_site() {
+	local url
+	url=$("$@" option get siteurl 2>/dev/null | tail -n 1)
+	is_local "$(host_of "$url")" || refuse "the WP-CLI target ($* -> ${url:-no siteurl})"
+}
+check_site "${WP[@]}"
+if wants connector; then
+	check_site "${WP_CONNECTOR[@]}"
+fi
+
+DELETE_CLIENT='global $wpdb; $wpdb->delete( $wpdb->prefix . "lledger_clients", array( "id" => "lledger-load" ) );'
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+cleanup() {
+	wp eval "$DELETE_CLIENT" >/dev/null 2>&1 || true
+	rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 SEED_SECONDS=null
 if [ "$SEED" -gt 0 ]; then
@@ -84,16 +127,16 @@ echo "Statements: $ROWS on $DB_VERSION; since=$SINCE"
 
 SECRET=$(openssl rand -hex 32)
 SECRET_SHA=$(printf '%s' "$SECRET" | openssl dgst -sha256 -r | cut -d' ' -f1)
-if ! wp learning-ledger client update lledger-load --secret-sha256="$SECRET_SHA" >/dev/null 2>&1; then
-	wp learning-ledger client create --id=lledger-load --name="Load test" --secret-sha256="$SECRET_SHA" --scopes=all --rate-class=unlimited >/dev/null
-fi
+wp eval "$DELETE_CLIENT" >/dev/null
+wp learning-ledger client create --id=lledger-load --name="Load test" --secret-sha256="$SECRET_SHA" --scopes=all --rate-class=unlimited >/dev/null
+( umask 077 && printf 'LRS_SECRET=%s\n' "$SECRET" >"$WORK/k6.env" )
 
 k6() {
 	local script=$1
 	local status=0
 	docker run --rm ${K6_NETWORK:+--network "$K6_NETWORK"} \
-		-v "$PWD/tests/load:/scripts:ro" -v "$WORK:/out" \
-		-e BASE_URL="$K6_BASE_URL$XAPI_PATH" -e LRS_KEY=lledger-load -e LRS_SECRET="$SECRET" \
+		-v "$PWD/tests/load:/scripts:ro" -v "$WORK:/out" --env-file "$WORK/k6.env" \
+		-e BASE_URL="$K6_BASE_URL$XAPI_PATH" -e LRS_KEY=lledger-load \
 		-e ACTORS="$ACTORS" -e REGISTRATIONS="$REGISTRATIONS" -e SINCE="$SINCE" \
 		-e SUSTAIN_DURATION -e QUERY_RATE -e QUERY_DURATION -e STATE_RATE -e STATE_DURATION \
 		"$K6_IMAGE" run --quiet "/scripts/$script.js" || status=$?

@@ -301,6 +301,31 @@ class Statement_Query_Test extends WP_UnitTestCase {
 		$this->assertSame( array( array( $v, $s6 ), array( $s4, $s2 ) ), $pages( array( 'since' => '2026-10-27T08:00:01Z' ) + $related ) );
 	}
 
+	public function test_related_query_narrowed_by_registration_or_binding() {
+		$course = 'https://site.example/course/1';
+		$in     = static function ( string $actor, string $registration ) use ( $course ) {
+			$st                                 = self::statement( $actor, 'https://site.example/lesson/1', 'completed', $registration );
+			$st['context']['contextActivities'] = array( 'parent' => array( array( 'id' => $course ) ) );
+			return $st;
+		};
+		[ $a ]  = $this->store_at( '2026-10-27T08:00:01Z', array( $in( 'u1', self::REG_1 ) ) );
+		[ $b ]  = $this->store_at( '2026-10-27T08:00:02Z', array( $in( 'u2', self::REG_2 ) ) );
+		[ $c ]  = $this->store_at( '2026-10-27T08:00:03Z', array( $in( 'u1', self::REG_1 ) ) );
+		[ $v ]  = $this->store_at( '2026-10-27T08:00:04Z', array( self::ref_to( $a ) ) );
+		$query  = array(
+			'activity'           => $course,
+			'related_activities' => 'true',
+		);
+
+		$this->assertSame( array( $v, $c, $b ), self::ids( $this->query( $query ) ) );
+		$this->assertSame( array( $v, $c ), self::ids( $this->query( array( 'registration' => self::REG_1 ) + $query ) ) );
+		$this->assertSame( array( $b ), self::ids( $this->query( array( 'registration' => self::REG_2 ) + $query ) ) );
+
+		$bound = self::principal( array( 'statements/read' ), array( 'bindings' => array( 'registration' => self::REG_1 ) ) );
+		$this->assertSame( array( $c ), self::ids( $this->query( $query, $bound ) ), 'the voiding statement has no registration, so the binding hides it' );
+		$this->assertSame( array( $c ), self::ids( $this->query( array( 'limit' => '1' ) + $query, $bound ) ) );
+	}
+
 	public function test_voided_excluded_voiding_included() {
 		[ $target, $other ] = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement(), self::statement( 'u2' ) ) );
 		$voiding            = self::statement( 'u1' );

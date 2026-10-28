@@ -79,7 +79,12 @@ class Seed_Command_Test extends WP_UnitTestCase {
 		( new Seed_Command() )->seed( 0, 3, 6 );
 	}
 
-	public function test_registers_the_command_only_when_testing() {
+	/**
+	 * Only the enabled side can be observed: the tests env defines LLEDGER_TESTING for the whole
+	 * run and a constant cannot be undefined, so the inert side (register() returning early) is
+	 * covered by enabled() reading the constant alone.
+	 */
+	public function test_enabled_follows_lledger_testing() {
 		$this->assertTrue( defined( 'LLEDGER_TESTING' ) && LLEDGER_TESTING, 'the tests env defines LLEDGER_TESTING' );
 		$this->assertTrue( Seed_Command::enabled() );
 	}
