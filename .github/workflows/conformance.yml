@@ -10,6 +10,7 @@ permissions:
   contents: read
 
 env:
+  COMPOSER_PROCESS_TIMEOUT: 0
   WP_ENV_PORT: 8888
   LLEDGER_SITE: http://localhost:8888
 
@@ -35,15 +36,15 @@ jobs:
       - run: composer prefix
       - run: npm ci
       - run: npm run build
-      - run: npx wp-env start
+      - run: npx @wordpress/env start
       - name: Enable the LRS role
-        run: npx wp-env run cli wp learning-ledger role enable lrs
+        run: npx @wordpress/env run cli wp learning-ledger role enable lrs
       - name: Register a conformance client (only the SHA-256 reaches WordPress)
         run: |
           umask 077
           openssl rand -hex 32 | tr -d '\n' > "$RUNNER_TEMP/lrs-secret"
           hash="$(sha256sum "$RUNNER_TEMP/lrs-secret" | cut -d' ' -f1)"
-          npx wp-env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define
+          npx @wordpress/env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define --rate-class=unlimited
       - name: Run the ADL LRS suite
         run: |
           bin/conformance-lrs.sh --xapi "${{ matrix.xapi }}" \
@@ -55,7 +56,7 @@ jobs:
           name: conformance-lrs-${{ matrix.xapi }}
           path: conformance/raw/
           if-no-files-found: warn
-      - run: npx wp-env stop
+      - run: npx @wordpress/env stop
         if: always()
 
   catapult:
@@ -83,12 +84,12 @@ jobs:
           jq -n --rawfile s "$RUNNER_TEMP/catapult-test-secret" \
             '{config: {LLEDGER_CATAPULT_TEST_ROUTES: true, LLEDGER_CMI5_CONTENT_HOST: "127.0.0.1:8888", LLEDGER_CATAPULT_TEST_SECRET: $s}}' \
             > .wp-env.override.json
-      - run: npx wp-env start
+      - run: npx @wordpress/env start
       - name: Enable the LRS role and register a conformance client
         run: |
-          npx wp-env run cli wp learning-ledger role enable lrs
+          npx @wordpress/env run cli wp learning-ledger role enable lrs
           hash="$(sha256sum "$RUNNER_TEMP/lrs-secret" | cut -d' ' -f1)"
-          npx wp-env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define
+          npx @wordpress/env run cli wp learning-ledger client create --id=conformance --secret-sha256="$hash" --scopes=all,void,state,profile,define --rate-class=unlimited
       - name: Run the CATAPULT LTS
         run: |
           bin/catapult-lts.sh --site "$LLEDGER_SITE" \
@@ -101,5 +102,5 @@ jobs:
           name: conformance-catapult
           path: conformance/raw/
           if-no-files-found: warn
-      - run: npx wp-env stop
+      - run: npx @wordpress/env stop
         if: always()
