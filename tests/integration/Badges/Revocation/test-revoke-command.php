@@ -84,7 +84,7 @@ class Revoke_Command_Test extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'key id', $error );
 	}
 
-	public function test_remove_key_with_a_kid_resigns_the_lists_first() {
+	public function test_remove_key_with_a_kid_resigns_the_lists_first_without_printing_the_hint() {
 		$old               = substr( $this->old_vm, strrpos( $this->old_vm, '#' ) + 1 );
 		WP_CLI::$arguments = array( 'learning-ledger', 'badges', 'remove-key', $old );
 
@@ -92,7 +92,43 @@ class Revoke_Command_Test extends WP_UnitTestCase {
 		( new Revoke_Command() )->before_remove_key();
 
 		$this->assertSame( Did_Document::verification_method_for( Key_Store::active() ), $this->list_vm() );
+		$this->assertSame( array(), $GLOBALS['lledger_revoke_cli_log'], 'The reissue hint was printed before the removal ran.' );
+	}
+
+	public function test_reissue_hint_is_printed_after_the_key_is_removed() {
+		$old               = substr( $this->old_vm, strrpos( $this->old_vm, '#' ) + 1 );
+		WP_CLI::$arguments = array( 'learning-ledger', 'badges', 'remove-key', $old );
+		( new Revoke_Command() )->before_remove_key();
+		Key_Store::remove( $old );
+
+		$GLOBALS['lledger_revoke_cli_log'] = array();
+		( new Revoke_Command() )->after_remove_key();
+
 		$this->assertCount( 1, $GLOBALS['lledger_revoke_cli_log'] );
 		$this->assertStringContainsString( 'wp learning-ledger badges reissue --kid=' . $old, $GLOBALS['lledger_revoke_cli_log'][0] );
+	}
+
+	public function test_no_reissue_hint_when_the_key_is_still_published() {
+		$old               = substr( $this->old_vm, strrpos( $this->old_vm, '#' ) + 1 );
+		WP_CLI::$arguments = array( 'learning-ledger', 'badges', 'remove-key', $old );
+
+		$GLOBALS['lledger_revoke_cli_log'] = array();
+		( new Revoke_Command() )->after_remove_key();
+
+		$this->assertSame( array(), $GLOBALS['lledger_revoke_cli_log'] );
+	}
+
+	public function test_no_reissue_hint_when_no_key_is_left_active() {
+		$old    = substr( $this->old_vm, strrpos( $this->old_vm, '#' ) + 1 );
+		$active = Key_Store::active()->kid;
+		Key_Store::remove( $active );
+		Key_Store::remove( $old );
+		$this->assertNull( Key_Store::active() );
+		WP_CLI::$arguments = array( 'learning-ledger', 'badges', 'remove-key', $old );
+
+		$GLOBALS['lledger_revoke_cli_log'] = array();
+		( new Revoke_Command() )->after_remove_key();
+
+		$this->assertSame( array(), $GLOBALS['lledger_revoke_cli_log'], 'Reissue needs an active key.' );
 	}
 }

@@ -7,6 +7,8 @@
 
 namespace LearningLedger\Badges\Revocation;
 
+use LearningLedger\Badges\Issuer\Key_Store;
+
 /**
  * `wp learning-ledger badges revoke` and `badges reissue`, plus the hooks that keep status
  * lists signed by the active key around `badges rotate` and `badges remove-key`.
@@ -93,9 +95,7 @@ final class Revoke_Command {
 	 * @return void
 	 */
 	public function before_remove_key(): void {
-		$argv = (array) \WP_CLI::get_runner()->arguments;
-		$at   = array_search( 'remove-key', $argv, true );
-		$kid  = false === $at ? '' : (string) ( $argv[ $at + 1 ] ?? '' );
+		$kid = self::removed_kid();
 		if ( '' === $kid ) {
 			// Without the key id the lists could be re-signed with the very key being removed.
 			\WP_CLI::error( 'Could not read the key id of `badges remove-key`; nothing was removed.' );
@@ -105,7 +105,31 @@ final class Revoke_Command {
 		} catch ( \RuntimeException | \InvalidArgumentException $e ) {
 			\WP_CLI::error( $e->getMessage() );
 		}
-		\WP_CLI::log( sprintf( 'Status lists are signed by the active key. Badges signed by %1$s stop verifying once it is removed: run `wp learning-ledger badges reissue --kid=%1$s` to re-issue them.', $kid ) );
+	}
+
+	/**
+	 * After `badges remove-key <kid>`: point at `badges reissue` once the key is gone and another
+	 * key is active to sign the re-issued badges.
+	 *
+	 * @return void
+	 */
+	public function after_remove_key(): void {
+		$kid = self::removed_kid();
+		if ( '' === $kid || null !== Key_Store::find( $kid ) || null === Key_Store::active() ) {
+			return;
+		}
+		\WP_CLI::log( sprintf( 'Badges signed by %1$s stop verifying now that it is removed: run `wp learning-ledger badges reissue --kid=%1$s` to re-issue them.', $kid ) );
+	}
+
+	/**
+	 * The key id argument of `badges remove-key`, or an empty string.
+	 *
+	 * @return string
+	 */
+	private static function removed_kid(): string {
+		$argv = (array) \WP_CLI::get_runner()->arguments;
+		$at   = array_search( 'remove-key', $argv, true );
+		return false === $at ? '' : (string) ( $argv[ $at + 1 ] ?? '' );
 	}
 
 	/**

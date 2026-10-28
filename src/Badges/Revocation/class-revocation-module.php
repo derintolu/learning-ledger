@@ -29,6 +29,7 @@ final class Revocation_Module implements Module {
 			\WP_CLI::add_command( 'learning-ledger badges revoke', array( $command, 'revoke' ) );
 			\WP_CLI::add_command( 'learning-ledger badges reissue', array( $command, 'reissue' ) );
 			\WP_CLI::add_hook( 'before_invoke:learning-ledger badges remove-key', array( $command, 'before_remove_key' ) );
+			\WP_CLI::add_hook( 'after_invoke:learning-ledger badges remove-key', array( $command, 'after_remove_key' ) );
 			\WP_CLI::add_hook( 'after_invoke:learning-ledger badges rotate', array( $command, 'after_rotate' ) );
 		}
 	}
