@@ -89,6 +89,11 @@ final class Lms_Statements {
 			$extensions[ Vocab::CXM_EXT_CARRIED_OVER ] = true;
 		}
 		$st           = self::statement( $actor, Vocab::WAIVED, 'Waived', Au::activity_id( $au->id() ), $registration, $session, $au->id() );
+		// A waiver satisfies the AU's moveOn, so it is a moveOn statement [cmi5 9.6.2.2].
+		$st['context']['contextActivities']['category'][] = array(
+			'objectType' => 'Activity',
+			'id'         => Vocab::CAT_MOVEON,
+		);
 		$st['result'] = array(
 			'success'    => true,
 			'completion' => true,

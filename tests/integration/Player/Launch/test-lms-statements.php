@@ -112,6 +112,8 @@ class Lms_Statements_Test extends WP_UnitTestCase {
 
 	public function test_waived_carries_the_reason_and_carried_over_only_when_set() {
 		$st = ( new Lms_Statements() )->waived( self::au(), self::actor(), self::REG, self::SESSION, 'Tested Out' );
+		$this->assertSame( array( Vocab::CAT_CMI5, Vocab::CAT_MOVEON ), array_column( $st['context']['contextActivities']['category'], 'id' ) );
+		$st['context']['contextActivities']['category'] = array_slice( $st['context']['contextActivities']['category'], 0, 1 );
 		$this->assert_cmi5( $st, self::AU_ID . '/au', Vocab::WAIVED, self::AU_ID );
 		$this->assertSame(
 			array(
@@ -123,6 +125,14 @@ class Lms_Statements_Test extends WP_UnitTestCase {
 		);
 		$carried = ( new Lms_Statements() )->waived( self::au(), self::actor(), self::REG, self::SESSION, 'Tested Out', true );
 		$this->assertTrue( $carried['result']['extensions'][ Vocab::CXM_EXT_CARRIED_OVER ] );
+	}
+
+	/**
+	 * CATAPULT 009-1-waived, cmi5 9.6.2.2-1: `waived` is a moveOn statement, so it carries the moveon category.
+	 */
+	public function test_waived_carries_the_moveon_category() {
+		$st = ( new Lms_Statements() )->waived( self::au(), self::actor(), self::REG, self::SESSION, 'Administrative' );
+		$this->assertContains( Vocab::CAT_MOVEON, array_column( $st['context']['contextActivities']['category'], 'id' ) );
 	}
 
 	public function test_satisfied_names_the_block_or_course() {
