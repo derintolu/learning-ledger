@@ -9,6 +9,7 @@ namespace LearningLedger\Integrations\Tutor;
 
 use LearningLedger\Connector\Lms\Event_Sink;
 use LearningLedger\Connector\Lms\Neutral_Event;
+use LearningLedger\Connector\Programs\Program_Repository;
 
 // phpcs:disable WordPress.NamingConventions.ValidHookName.UseUnderscores -- Tutor's own hook names.
 
@@ -88,6 +89,8 @@ final class Tutor_Listeners {
 	/**
 	 * `tutor_quiz/attempt_ended( $attempt_id, $course_id, $user_id )`. An attempt with
 	 * a pass or fail result is also graded; one waiting for review is only submitted.
+	 * Courses in a program are skipped: a Tutor quiz belongs to no lesson, and
+	 * program IRIs have no quiz outside a lesson.
 	 *
 	 * @param mixed $attempt_id Attempt ID.
 	 * @param mixed $course_id  Course ID.
@@ -103,6 +106,9 @@ final class Tutor_Listeners {
 		$quiz   = (int) $attempt->quiz_id;
 		$user   = (int) $user_id > 0 ? (int) $user_id : (int) $attempt->user_id;
 		$course = (int) $course_id > 0 ? (int) $course_id : Tutor_Adapter::course_of( $quiz );
+		if ( null !== ( new Program_Repository() )->for_lms_course( $course ) ) {
+			return;
+		}
 		$result = (string) $attempt->result;
 		$graded = in_array( $result, array( 'pass', 'fail' ), true );
 		$scaled = $graded ? self::scaled( $attempt->earned_marks, $attempt->total_marks ) : null;

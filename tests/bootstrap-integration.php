@@ -38,6 +38,10 @@ tests_add_filter(
 		if ( file_exists( $lifterlms ) ) {
 			require_once $lifterlms;
 		}
+		$tutor = WP_PLUGIN_DIR . '/tutor/tutor.php';
+		if ( file_exists( $tutor ) ) {
+			require_once $tutor;
+		}
 		require_once dirname( __DIR__ ) . '/learning-ledger.php';
 	}
 );

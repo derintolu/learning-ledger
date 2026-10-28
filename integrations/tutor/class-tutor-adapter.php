@@ -289,8 +289,8 @@ final class Tutor_Adapter implements LMS_Adapter {
 	}
 
 	/**
-	 * Enrol through Tutor's own enrolment. A paid course gets a pending
-	 * enrolment, which does not count.
+	 * Enrol through Tutor's own enrolment. A purchasable course is left alone:
+	 * Tutor would only create a pending enrolment, which does not count.
 	 *
 	 * @param integer $user_id   User ID.
 	 * @param integer $course_id Course ID.
@@ -301,9 +301,13 @@ final class Tutor_Adapter implements LMS_Adapter {
 		if ( $user_id <= 0 || self::COURSE !== get_post_type( $course_id ) ) {
 			return false;
 		}
-		if ( ! tutor_utils()->is_enrolled( $course_id, $user_id ) ) {
-			tutor_utils()->do_enroll( $course_id, 0, $user_id );
+		if ( tutor_utils()->is_enrolled( $course_id, $user_id ) ) {
+			return true;
 		}
+		if ( tutor_utils()->is_course_purchasable( $course_id ) ) {
+			return false;
+		}
+		tutor_utils()->do_enroll( $course_id, 0, $user_id );
 		return (bool) tutor_utils()->is_enrolled( $course_id, $user_id );
 	}
 
@@ -376,8 +380,9 @@ final class Tutor_Adapter implements LMS_Adapter {
 			return null !== $id && ( ! $courses || in_array( $id, $courses, true ) ) ? new Lms_Object( 'course', $id ) : null;
 		}
 		if ( 'lesson' === $parsed['kind'] ) {
-			$id = $this->find_by_key( self::LESSON, $parsed['key'], $courses );
-			return null !== $id ? new Lms_Object( 'lesson', $id ) : null;
+			// Lesson keys are unique within a program; a key on two of its lessons resolves to nothing.
+			$ids = $this->find_all_by_key( self::LESSON, $parsed['key'], $courses );
+			return 1 === count( $ids ) ? new Lms_Object( 'lesson', $ids[0] ) : null;
 		}
 		return null;
 	}
@@ -508,7 +513,7 @@ final class Tutor_Adapter implements LMS_Adapter {
 	}
 
 	/**
-	 * Post with a stable key.
+	 * First post with a stable key.
 	 *
 	 * @param string $post_type Post type.
 	 * @param string $key       Stable key.
@@ -517,15 +522,29 @@ final class Tutor_Adapter implements LMS_Adapter {
 	 * @return integer|null
 	 */
 	private function find_by_key( string $post_type, string $key, array $courses = array() ): ?int {
+		$ids = $this->find_all_by_key( $post_type, $key, $courses );
+		return $ids ? $ids[0] : null;
+	}
+
+	/**
+	 * Posts with a stable key, oldest first.
+	 *
+	 * @param string $post_type Post type.
+	 * @param string $key       Stable key.
+	 * @param int[]  $courses   For lessons: limit to these courses when not empty.
+	 *
+	 * @return int[]
+	 */
+	private function find_all_by_key( string $post_type, string $key, array $courses = array() ): array {
 		if ( '' === $key ) {
-			return null;
+			return array();
 		}
-		$ids = get_posts(
+		$ids     = get_posts(
 			array(
 				'post_type'      => $post_type,
 				'post_status'    => 'any',
 				'fields'         => 'ids',
-				'posts_per_page' => $courses ? -1 : 1,
+				'posts_per_page' => -1,
 				'orderby'        => 'ID',
 				'order'          => 'ASC',
 				'no_found_rows'  => true,
@@ -533,13 +552,13 @@ final class Tutor_Adapter implements LMS_Adapter {
 				'meta_value'     => $key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 			)
 		);
-		foreach ( $ids as $id ) {
-			// A lesson's course is its topic's parent, which a meta query cannot reach.
-			if ( ! $courses || in_array( self::course_of( (int) $id ), array_map( 'intval', $courses ), true ) ) {
-				return (int) $id;
-			}
+		$ids     = array_map( 'intval', $ids );
+		$courses = array_map( 'intval', $courses );
+		if ( ! $courses ) {
+			return $ids;
 		}
-		return null;
+		// A lesson's course is its topic's parent, which a meta query cannot reach.
+		return array_values( array_filter( $ids, static fn( int $id ): bool => in_array( self::course_of( $id ), $courses, true ) ) );
 	}
 
 	/**

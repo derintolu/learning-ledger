@@ -1,7 +1,8 @@
 <?php
 /**
  * Tutor LMS integration descriptor. Evaluated by Integration_Loader, possibly
- * more than once, so it declares nothing.
+ * more than once, so it declares nothing. Unavailable while Sensei LMS is
+ * active: both register the `lesson` post type.
  *
  * @package LearningLedger
  */
@@ -13,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 
 $lledger_tutor = new Integration_Descriptor(
 	'tutor',
-	static fn() => function_exists( 'tutor' ) && defined( 'TUTOR_VERSION' ) && version_compare( (string) TUTOR_VERSION, '3.0', '>=' ),
+	static fn() => function_exists( 'tutor' ) && defined( 'TUTOR_VERSION' ) && version_compare( (string) TUTOR_VERSION, '3.0', '>=' ) && ! function_exists( 'Sensei' ),
 	static fn() => new Tutor_Adapter(),
 	'3.0',
 	'3.9',

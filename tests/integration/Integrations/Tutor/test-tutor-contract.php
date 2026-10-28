@@ -14,11 +14,15 @@ use LearningLedger\Connector\Lms\LMS_Adapter;
 use LearningLedger\Connector\Lms\Lms_Object;
 use LearningLedger\Connector\Lms\Neutral_Event;
 use LearningLedger\Connector\Lms\Result;
+use LearningLedger\Connector\Outbox\Outbox_Sink;
+use LearningLedger\Connector\Programs\Program_Module;
 use LearningLedger\Db\Installer;
+use LearningLedger\Db\Tables;
 use LearningLedger\Integrations\Tutor\Tutor_Adapter;
 use LearningLedger\Integrations\Tutor\Tutor_Iris;
 use LearningLedger\Tests\Adapter_Contract_Test_Case;
 use LearningLedger\Tests\Recording_Sink;
+use LearningLedger\Queue\Shutdown_Runner;
 
 // phpcs:disable WordPress.NamingConventions.ValidHookName.UseUnderscores, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- The tests fire Tutor's hooks and read the plugin's filters.
 
@@ -31,24 +35,13 @@ use LearningLedger\Tests\Recording_Sink;
 class Tutor_Contract_Test extends Adapter_Contract_Test_Case {
 
 	/**
-	 * Load Tutor LMS as WordPress would for an active plugin. The integration test
-	 * bootstrap loads only Sensei, and `init` has already run, so Tutor's post types
-	 * are registered by hand. Its quiz tables are created once.
+	 * Tutor's quiz tables, which its activation would create. Its dbDelta run
+	 * fails on tables it already created, so it runs once per database.
 	 */
 	public static function set_up_before_class(): void {
 		parent::set_up_before_class();
-		if ( ! function_exists( 'tutor' ) ) {
-			require_once WP_PLUGIN_DIR . '/tutor/tutor.php';
-		}
-		$types = new \TUTOR\Post_types();
-		$types->register_course_post_types();
-		$types->register_lesson_post_types();
-		$types->register_quiz_post_types();
-		$types->register_topic_post_types();
-		$types->register_tutor_enrolled_post_types();
 		global $wpdb;
 		$attempts = $wpdb->prefix . 'tutor_quiz_attempts';
-		// Tutor's dbDelta run fails on tables it already created, so it runs once per database.
 		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $attempts ) ) !== $attempts ) {
 			\TUTOR\Tutor::create_database();
 		}
@@ -56,6 +49,7 @@ class Tutor_Contract_Test extends Adapter_Contract_Test_Case {
 
 	public function set_up(): void {
 		Installer::install();
+		( new Program_Module() )->register_post_type();
 		parent::set_up();
 		Tutor_Adapter::boot();
 	}
@@ -75,6 +69,80 @@ class Tutor_Contract_Test extends Adapter_Contract_Test_Case {
 			'course'  => $course,
 			'lessons' => $ids,
 		);
+	}
+
+	/**
+	 * A program over the given courses, with path keys for them.
+	 *
+	 * @param int[] $courses Course IDs.
+	 */
+	private function program( array $courses ): int {
+		$program = self::factory()->post->create(
+			array(
+				'post_type'   => 'lledger_program',
+				'post_status' => 'publish',
+			)
+		);
+		update_post_meta( $program, '_lledger_stable_key', 'learn-wp' );
+		update_post_meta( $program, '_lledger_iri_base', 'https://example.test/activities/' );
+		update_post_meta( $program, '_lledger_courses', $courses );
+		$keys = array();
+		foreach ( $courses as $course ) {
+			$keys[ $course ] = (string) get_post_meta( $course, '_lledger_stable_key', true );
+		}
+		update_post_meta( $program, '_lledger_path_keys', $keys );
+		return $program;
+	}
+
+	/**
+	 * Object IRIs of the queued outbox statements.
+	 *
+	 * @return string[]
+	 */
+	private static function outbox_objects(): array {
+		global $wpdb;
+		$bodies = $wpdb->get_col( 'SELECT body FROM ' . Tables::name( 'conn_outbox' ) . ' ORDER BY id' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery
+		return array_map( static fn( $b ) => json_decode( $b, true )['object']['id'], $bodies );
+	}
+
+	/**
+	 * Listen through the real Outbox_Sink, with no HTTP and no shutdown flush.
+	 */
+	private function listen_to_outbox(): void {
+		add_filter( 'pre_http_request', static fn() => new WP_Error( 'http_not_allowed', 'No HTTP during an LMS action.' ) );
+		remove_action( 'shutdown', array( Shutdown_Runner::class, 'on_shutdown' ) );
+		$this->adapter->register_event_listeners( new Outbox_Sink() );
+	}
+
+	/**
+	 * A Tutor quiz in the topic of the course's first lesson, and an ended attempt at it.
+	 *
+	 * @param array  $made   Course from make_course().
+	 * @param int    $user   User ID.
+	 * @param string $result Attempt result.
+	 */
+	private function ended_attempt( array $made, int $user, string $result ): int {
+		global $wpdb;
+		$quiz = self::factory()->post->create(
+			array(
+				'post_type'   => 'tutor_quiz',
+				'post_parent' => (int) wp_get_post_parent_id( $made['lessons'][0] ),
+			)
+		);
+		$wpdb->insert(
+			$wpdb->prefix . 'tutor_quiz_attempts',
+			array(
+				'course_id'      => $made['course'],
+				'quiz_id'        => $quiz,
+				'user_id'        => $user,
+				'total_marks'    => 4,
+				'earned_marks'   => 'pending' === $result ? 0 : 3,
+				'attempt_status' => 'pending' === $result ? 'review_required' : 'attempt_ended',
+				'result'         => $result,
+			)
+		);
+		do_action( 'tutor_quiz/attempt_ended', $wpdb->insert_id, $made['course'], $user );
+		return $quiz;
 	}
 
 	protected function lesson_iri( int $course_id, int $lesson_id ): string {
@@ -300,5 +368,91 @@ class Tutor_Contract_Test extends Adapter_Contract_Test_Case {
 		$this->assertSame( array( 'quiz', $quiz ), array( $found->kind, $found->id ) );
 		$other = $this->make_course( 1 );
 		$this->assertNull( $this->adapter->resolve( new Activity_Ref( Tutor_Iris::lesson( $other['course'], $made['lessons'][0] ) ) ), 'a lesson under another course IRI' );
+	}
+
+	public function test_same_lesson_key_in_two_courses_keeps_separate_lessons() {
+		$a     = $this->adapter->upsert_course( new Course_Spec( 'path-a', 'A', '', 'publish', array() ) );
+		$b     = $this->adapter->upsert_course( new Course_Spec( 'path-b', 'B', '', 'publish', array() ) );
+		$in_a  = $this->adapter->upsert_lesson( $a, new Lesson_Spec( 'intro', 'Intro A', '', 1, 'publish', array() ) );
+		$in_b  = $this->adapter->upsert_lesson( $b, new Lesson_Spec( 'intro', 'Intro B', '', 1, 'publish', array() ) );
+		$again = $this->adapter->upsert_lesson( $b, new Lesson_Spec( 'intro', 'Intro B, renamed', '', 1, 'publish', array() ) );
+		$this->assertNotSame( $in_a, $in_b );
+		$this->assertSame( $in_b, $again );
+		$this->assertSame( 'Intro A', get_the_title( $in_a ) );
+		$this->assertSame( 'Intro B, renamed', get_the_title( $in_b ) );
+		$this->assertSame( $a, Tutor_Adapter::course_of( $in_a ) );
+		$this->assertSame( $b, Tutor_Adapter::course_of( $in_b ) );
+	}
+
+	public function test_resolve_program_iris() {
+		$made    = $this->make_course( 1 );
+		$program = $this->program( array( $made['course'] ) );
+		$lesson  = 'https://example.test/activities/lessons/' . get_post_meta( $made['lessons'][0], '_lledger_stable_key', true );
+		$path    = 'https://example.test/activities/paths/' . get_post_meta( $made['course'], '_lledger_stable_key', true );
+
+		$this->assertEquals( new Lms_Object( 'lesson', $made['lessons'][0] ), $this->adapter->resolve( new Activity_Ref( $lesson ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $made['lessons'][0] ), $this->adapter->resolve( new Activity_Ref( $lesson . '/au' ) ) );
+		$this->assertEquals( new Lms_Object( 'course', $made['course'] ), $this->adapter->resolve( new Activity_Ref( $path ) ) );
+		$this->assertEquals( new Lms_Object( 'program', $program ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities' ) ) );
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/unknown' ) ) );
+	}
+
+	public function test_resolve_program_lesson_key_matching_two_lessons_is_null() {
+		$a = $this->adapter->upsert_course( new Course_Spec( 'path-a', 'A', '', 'publish', array() ) );
+		$b = $this->adapter->upsert_course( new Course_Spec( 'path-b', 'B', '', 'publish', array() ) );
+		$this->adapter->upsert_lesson( $a, new Lesson_Spec( 'intro', 'Intro A', '', 1, 'publish', array() ) );
+		$this->adapter->upsert_lesson( $b, new Lesson_Spec( 'intro', 'Intro B', '', 1, 'publish', array() ) );
+		$only = $this->adapter->upsert_lesson( $b, new Lesson_Spec( 'only-b', 'Only B', '', 2, 'publish', array() ) );
+		$this->program( array( $a, $b ) );
+
+		$this->assertNull( $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/intro' ) ) );
+		$this->assertEquals( new Lms_Object( 'lesson', $only ), $this->adapter->resolve( new Activity_Ref( 'https://example.test/activities/lessons/only-b' ) ) );
+	}
+
+	public function test_direction2_iris_null_for_a_program_course() {
+		$made = $this->make_course( 1 );
+		$this->program( array( $made['course'] ) );
+		$user = self::factory()->user->create();
+		$this->assertNull( apply_filters( 'learning_ledger/direction2_iris', null, new Neutral_Event( Neutral_Event::LESSON_COMPLETED, 'tutor', $user, $made['course'], $made['lessons'][0] ) ) );
+	}
+
+	public function test_outbox_queues_on_site_completions_but_not_applied_ones() {
+		$this->listen_to_outbox();
+		$made = $this->make_course( 2 );
+		$user = self::factory()->user->create();
+		$this->adapter->enrol( $user, $made['course'] );
+		$before = self::outbox_objects();
+
+		// The connector's own write is not echoed back to the LRS.
+		$this->adapter->apply( $this->result( Result::LESSON_COMPLETED, $user, $made['lessons'][0] ) );
+		$this->assertSame( $before, self::outbox_objects() );
+
+		// The learner's own completion is queued.
+		\Tutor\Models\LessonModel::mark_lesson_complete( $made['lessons'][1], $user );
+		$this->assertSame( array( Tutor_Iris::lesson( $made['course'], $made['lessons'][1] ) ), array_slice( self::outbox_objects(), count( $before ) ) );
+	}
+
+	public function test_quiz_attempts_in_a_program_course_queue_nothing() {
+		$this->listen_to_outbox();
+		$made = $this->make_course( 1 );
+		$this->program( array( $made['course'] ) );
+		$user   = self::factory()->user->create();
+		$before = self::outbox_objects();
+
+		$this->ended_attempt( $made, $user, 'fail' );
+		$this->assertSame( $before, self::outbox_objects(), 'a quiz outside any lesson has no program IRI' );
+
+		// Lessons in the same program course still go out under their program IRI.
+		\Tutor\Models\LessonModel::mark_lesson_complete( $made['lessons'][0], $user );
+		$key = get_post_meta( $made['lessons'][0], '_lledger_stable_key', true );
+		$this->assertSame( array( 'https://example.test/activities/lessons/' . $key ), array_slice( self::outbox_objects(), count( $before ) ) );
+	}
+
+	public function test_enrol_leaves_a_purchasable_course_alone() {
+		$made = $this->make_course( 1 );
+		update_post_meta( $made['course'], '_tutor_course_price_type', 'paid' );
+		$user = self::factory()->user->create();
+		$this->assertFalse( $this->adapter->enrol( $user, $made['course'] ) );
+		$this->assertFalse( tutor_utils()->is_enrolled( $made['course'], $user, false ), 'no pending enrolment either' );
 	}
 }
