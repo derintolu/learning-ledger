@@ -1,0 +1,130 @@
+{
+	"date": "2026-10-28T04:37:07.707Z",
+	"host": "local",
+	"database": "8.0.44",
+	"statements": 2032335,
+	"actors": 1000,
+	"registrations": 10000,
+	"seed": null,
+	"since": "2026-10-28T04:29:05.417533Z",
+	"scenarios": {
+		"burst": {
+			"label": "Batched POST, 100 statements (500 statements/s for 10 s)",
+			"target_p95_ms": null,
+			"requests": 50,
+			"med_ms": 65.63,
+			"p90_ms": 90.38,
+			"p95_ms": 103.22,
+			"p99_ms": 141.91,
+			"max_ms": 154.24,
+			"met": null
+		},
+		"single": {
+			"label": "Single-statement POST (50/s sustained)",
+			"target_p95_ms": 150,
+			"requests": 3001,
+			"med_ms": 11.53,
+			"p90_ms": 16.8,
+			"p95_ms": 23.64,
+			"p99_ms": 95.3,
+			"max_ms": 3311.46,
+			"met": true
+		},
+		"activity_since": {
+			"label": "Filtered GET activity + since, limit 100",
+			"target_p95_ms": 300,
+			"requests": 151,
+			"med_ms": 37.74,
+			"p90_ms": 46.19,
+			"p95_ms": 53.28,
+			"p99_ms": 78.46,
+			"max_ms": 96.3,
+			"met": true
+		},
+		"agent_registration": {
+			"label": "Filtered GET agent + registration, limit 100",
+			"target_p95_ms": 300,
+			"requests": 151,
+			"med_ms": 58.15,
+			"p90_ms": 184.04,
+			"p95_ms": 207.48,
+			"p99_ms": 257.41,
+			"max_ms": 271.39,
+			"met": true
+		},
+		"related_activities": {
+			"label": "related_activities GET, limit 100",
+			"target_p95_ms": 800,
+			"requests": 151,
+			"med_ms": 33.41,
+			"p90_ms": 40.3,
+			"p95_ms": 42.14,
+			"p99_ms": 61.04,
+			"max_ms": 70.12,
+			"met": true
+		},
+		"related_agents": {
+			"label": "related_agents GET, limit 100",
+			"target_p95_ms": 800,
+			"requests": 151,
+			"med_ms": 51.97,
+			"p90_ms": 57.52,
+			"p95_ms": 70.84,
+			"p99_ms": 95.53,
+			"max_ms": 102.85,
+			"met": true
+		},
+		"state_put": {
+			"label": "State PUT",
+			"target_p95_ms": 80,
+			"requests": 601,
+			"med_ms": 10.51,
+			"p90_ms": 13.49,
+			"p95_ms": 15.12,
+			"p99_ms": 24.87,
+			"max_ms": 66.89,
+			"met": true
+		},
+		"state_get": {
+			"label": "State GET",
+			"target_p95_ms": 80,
+			"requests": 601,
+			"med_ms": 15.87,
+			"p90_ms": 18.19,
+			"p95_ms": 19.57,
+			"p99_ms": 24.23,
+			"max_ms": 72.02,
+			"met": true
+		}
+	},
+	"ingest": {
+		"statements_stored": 8001,
+		"burst_statements_stored": 5000,
+		"dropped_iterations": 0,
+		"burst_checks_passed": 1
+	},
+	"ingest_checks_passed": 1,
+	"query_checks_passed": 1,
+	"state_checks_passed": 1,
+	"connector_lesson_completion": {
+		"target_ms": 2,
+		"judged_on": "steady_ms.med",
+		"met": true,
+		"first_event_ms": {
+			"med": 4.258,
+			"p(95)": 6.671,
+			"count": 40
+		},
+		"steady_ms": {
+			"med": 1.477,
+			"p(95)": 2.226,
+			"max": 4.624,
+			"count": 200
+		},
+		"inserts_per_event": 1,
+		"queries_per_event": {
+			"med": 4,
+			"max": 6
+		}
+	}
+}
