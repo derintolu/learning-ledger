@@ -23,9 +23,10 @@ final class Certificates_Route {
 	const ROUTE = '/course-server/learners/(?P<id>\d+)/certificates/(?P<course>\d+)';
 
 	/**
-	 * Integration id => class whose static `available()` says whether its certificates can be rendered.
+	 * Integration id => certificate provider class: static `available(): bool` and
+	 * `certificate( int $user, int $course ): string|\WP_Error|null`.
 	 */
-	const AVAILABILITY = array(
+	const PROVIDERS = array(
 		'sensei' => Sensei_Certificate_Provider::class,
 	);
 
@@ -107,11 +108,17 @@ final class Certificates_Route {
 		if ( ! $adapter instanceof LMS_Adapter ) {
 			return self::error( 'lledger_unknown_course', 'No active LMS integration handles this course.', 404 );
 		}
-		if ( ! $adapter instanceof Certificate_Provider || ! self::available( $adapter->id() ) ) {
+		$provider = self::provider( $adapter->id() );
+		if ( null === $provider ) {
 			return self::error( 'certificate_unavailable', 'Certificates are not available for this course.', 501 );
 		}
-		$pdf = $adapter->certificate_pdf( $user, $course );
-		if ( null === $pdf ) {
+		// Called directly rather than through the guarded adapter, so that a certificate that
+		// cannot be drawn is a 500 for this request and does not pause the integration.
+		$pdf = $provider->certificate( $user, $course );
+		if ( is_wp_error( $pdf ) ) {
+			return self::error( 'certificate_render_failed', 'The certificate could not be drawn.', 500 );
+		}
+		if ( ! is_string( $pdf ) ) {
 			return self::error( 'lledger_no_certificate', 'The learner has no certificate for this course.', 404 );
 		}
 		$res = new \WP_REST_Response( $pdf, 200 );
@@ -144,15 +151,19 @@ final class Certificates_Route {
 	}
 
 	/**
-	 * Whether an integration can render certificates right now.
+	 * The integration's certificate provider when it can render certificates right now.
 	 *
 	 * @param string $integration Integration id.
 	 *
-	 * @return boolean
+	 * @return Certificate_Provider|null
 	 */
-	private static function available( string $integration ): bool {
-		$class = self::AVAILABILITY[ $integration ] ?? null;
-		return null !== $class && class_exists( $class ) && $class::available();
+	private static function provider( string $integration ): ?Certificate_Provider {
+		$class = self::PROVIDERS[ $integration ] ?? null;
+		if ( null === $class || ! class_exists( $class ) || ! $class::available() ) {
+			return null;
+		}
+		$provider = new $class();
+		return $provider instanceof Certificate_Provider && method_exists( $provider, 'certificate' ) ? $provider : null;
 	}
 
 	/**

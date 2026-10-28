@@ -57,7 +57,7 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 	}
 
 	/**
-	 * The learner's certificate PDF for a course, or null when they have none.
+	 * The learner's certificate PDF for a course, or null when they have none (or it cannot be drawn).
 	 *
 	 * @param integer $user_id   User ID.
 	 * @param integer $course_id Course ID.
@@ -65,6 +65,20 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 	 * @return string|null
 	 */
 	public function certificate_pdf( int $user_id, int $course_id ): ?string {
+		$pdf = $this->certificate( $user_id, $course_id );
+		return is_string( $pdf ) ? $pdf : null;
+	}
+
+	/**
+	 * The learner's certificate PDF for a course: the bytes, null when they have none, or a
+	 * `certificate_render_failed` error when the certificate exists but cannot be drawn.
+	 *
+	 * @param integer $user_id   User ID.
+	 * @param integer $course_id Course ID.
+	 *
+	 * @return string|\WP_Error|null
+	 */
+	public function certificate( int $user_id, int $course_id ): string|\WP_Error|null {
 		if ( ! self::available() || $user_id <= 0 || 'course' !== get_post_type( $course_id ) || ! get_userdata( $user_id ) ) {
 			return null;
 		}
@@ -79,7 +93,13 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 		if ( '' === $hash ) {
 			$hash = (string) get_post_field( 'post_name', $certificate );
 		}
-		return $this->render( new \WooThemes_Sensei_PDF_Certificate( $hash, $certificate ) );
+		try {
+			return $this->render( new \WooThemes_Sensei_PDF_Certificate( $hash, $certificate ) );
+		} catch ( \Throwable $t ) {
+			// A broken template image or font fails this one certificate, not the whole integration.
+			error_log( 'Learning Ledger: Sensei certificate ' . $certificate . ' could not be drawn: ' . get_class( $t ) . ': ' . $t->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- operator diagnostics; ids and the library message only.
+			return new \WP_Error( 'certificate_render_failed', 'The certificate could not be drawn.', array( 'status' => 500 ) );
+		}
 	}
 
 	/**
@@ -108,9 +128,11 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 	 *
 	 * @param \WooThemes_Sensei_PDF_Certificate $pdf Certificate object.
 	 *
-	 * @return string|null
+	 * @return string
+	 *
+	 * @throws \RuntimeException When the background image is unusable or no PDF comes out; tFPDF throws its own.
 	 */
-	private function render( \WooThemes_Sensei_PDF_Certificate $pdf ): ?string {
+	private function render( \WooThemes_Sensei_PDF_Certificate $pdf ): string {
 		do_action( 'sensei_certificates_set_background_image', $pdf );
 
 		if ( isset( $pdf->bg_image_src ) && '' !== $pdf->bg_image_src ) {
@@ -121,7 +143,7 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 		}
 		$size = is_readable( $image ) ? getimagesize( $image ) : false;
 		if ( ! is_array( $size ) || $size[0] <= 0 || $size[1] <= 0 ) {
-			return null;
+			throw new \RuntimeException( 'The certificate background is not a readable image.' );
 		}
 
 		$fpdf = \Woothemes_Sensei_Certificates_TFPDF::get_tfpdf_object(
@@ -146,6 +168,9 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 		do_action( 'sensei_certificates_before_pdf_output', $pdf, $fpdf );
 
 		$bytes = $fpdf->output();
-		return is_string( $bytes ) && str_starts_with( $bytes, '%PDF' ) ? $bytes : null;
+		if ( ! is_string( $bytes ) || ! str_starts_with( $bytes, '%PDF' ) ) {
+			throw new \RuntimeException( 'tFPDF produced no PDF.' );
+		}
+		return $bytes;
 	}
 }
