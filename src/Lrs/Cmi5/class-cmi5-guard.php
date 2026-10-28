@@ -15,7 +15,8 @@ use LearningLedger\Lrs\Auth\Token_Repository;
 use LearningLedger\Lrs\Documents\Doc_Key;
 use LearningLedger\Lrs\Documents\Document_Store;
 use LearningLedger\Lrs\Http\Xapi_Error;
-use LearningLedger\Lrs\Http\Xapi_Router;
+use LearningLedger\Lrs\Http\Xapi_Request;
+use LearningLedger\Lrs\Http\Xapi_Response;
 use LearningLedger\Lrs\Statements\Ref_Indexer;
 use LearningLedger\Lrs\Statements\Statement_Guard;
 use LearningLedger\Lrs\Statements\Statement_Repository;
@@ -109,37 +110,31 @@ final class Cmi5_Guard implements Statement_Guard, Module {
 	public function register(): void {
 		add_filter( 'learning_ledger/statement_guards', array( $this, 'add_guard' ), 10, 2 );
 		add_action( 'learning_ledger/statements_committed', array( $this, 'on_committed' ) );
-		add_filter( 'rest_request_after_callbacks', array( $this, 'on_xapi_response' ), 10, 3 );
+		add_action( 'learning_ledger/xapi_answered', array( $this, 'on_xapi_answered' ), 10, 2 );
 	}
 
 	/**
-	 * Note a child token's read of its learner preferences, which must come before its
-	 * `initialized` [cmi5 11.0.0.0-3]. A 404 counts: the AU asked.
+	 * Note a child token's read of its own learner preferences, which must come before its
+	 * `initialized` [cmi5 11.0.0.0-3]. A 404 counts: the AU asked. The token is the principal
+	 * the router resolved, however the host delivered the credentials.
 	 *
-	 * @param mixed            $response Response.
-	 * @param mixed            $handler  Matched handler.
-	 * @param \WP_REST_Request $request  Request.
+	 * @param mixed $xapi Request.
+	 * @param mixed $res  Response.
 	 *
-	 * @return mixed The response, unchanged.
+	 * @return void
 	 */
-	public function on_xapi_response( mixed $response, mixed $handler, \WP_REST_Request $request ): mixed {
-		unset( $handler );
-		if ( ! $response instanceof \WP_REST_Response || ! in_array( $response->get_status(), array( 200, 404 ), true )
-			|| 'GET' !== $request->get_method() || self::PREFERENCES !== $request->get_param( 'profileId' )
-			|| 1 !== preg_match( '#^/' . preg_quote( Xapi_Router::REST_NAMESPACE, '#' ) . '/+agents/profile/*$#', $request->get_route() ) ) {
-			return $response;
+	public function on_xapi_answered( mixed $xapi, mixed $res ): void {
+		$token = $xapi instanceof Xapi_Request ? $xapi->principal()?->token() : null;
+		if ( null === $token || ! $res instanceof Xapi_Response || ! in_array( $res->status(), array( 200, 404 ), true )
+			|| 'GET' !== $xapi->method() || self::PREFERENCES !== $xapi->param( 'profileId' )
+			|| 'agents/profile' !== trim( (string) preg_replace( '#/+#', '/', $xapi->resource() ), '/' ) ) {
+			return;
 		}
-		$header = (string) $request->get_header( 'Authorization' );
-		$pair   = 1 === preg_match( '/^Basic\s+(\S+)$/i', $header, $m ) ? base64_decode( $m[1], true ) : false; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- HTTP Basic credentials.
-		if ( ! is_string( $pair ) || ! str_contains( $pair, ':' ) ) {
-			return $response;
+		$agent = json_decode( (string) $xapi->param( 'agent' ), true );
+		if ( ! is_array( $agent ) || Ref_Indexer::agent_hash( $agent ) !== Ref_Indexer::agent_hash( $token->actor ) ) {
+			return;
 		}
-		list( $key, $secret ) = explode( ':', $pair, 2 );
-		$token                = $this->tokens->find( $key );
-		if ( null !== $token && $token->is_active( Clock::now() ) && $token->secret_matches( $secret ) ) {
-			set_transient( self::PREFERENCES_READ . hash( 'sha256', $token->key ), 1, max( 60, $token->expires_at->getTimestamp() - Clock::now()->getTimestamp() ) );
-		}
-		return $response;
+		set_transient( self::PREFERENCES_READ . hash( 'sha256', $token->key ), 1, max( 60, $token->expires_at->getTimestamp() - Clock::now()->getTimestamp() ) );
 	}
 
 	/**

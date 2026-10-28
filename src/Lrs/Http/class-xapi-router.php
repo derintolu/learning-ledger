@@ -257,6 +257,15 @@ final class Xapi_Router implements Module {
 		}
 
 		$principal = null === $xapi ? null : $xapi->principal();
+		if ( null !== $principal ) {
+			/**
+			 * An authenticated xAPI request has been answered (before CORS and version headers).
+			 *
+			 * @param Xapi_Request  $xapi Request, with the principal the router resolved.
+			 * @param Xapi_Response $res  Response.
+			 */
+			do_action( 'learning_ledger/xapi_answered', $xapi, $res ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+		}
 		// A request that failed to authenticate still gets CORS headers for an origin the preflight
 		// allows, so a browser AU can read the 401 rather than see a network error [cmi5 8.1.2.0-2].
 		$allowed = null !== $principal ? $principal->cors_origins() : ( class_exists( '\LearningLedger\Lrs\Auth\Origin_Index' ) ? \LearningLedger\Lrs\Auth\Origin_Index::all() : array() );

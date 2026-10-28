@@ -94,7 +94,7 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 	 * $start is false the AU starts its session as cmi5 has it: it reads its learner preferences
 	 * and sends `initialized`.
 	 *
-	 * @return array{0:Xapi_Test_Client,1:string}
+	 * @return array{0:Xapi_Test_Client,1:string,2:string} Client, key and secret.
 	 */
 	private function child( string $mode = 'Normal', string $session = self::SESSION, ?array $minter = null, bool $guard = true, bool $start = true ): array {
 		$minter = $minter ?? $this->lms;
@@ -108,19 +108,19 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 				$this->starts[] = $initialized['id'];
 			}
 		}
-		return array( $au, $t['key'] );
+		return array( $au, $t['key'], $t['secret'] );
 	}
 
 	/**
 	 * The AU's GET of its cmi5LearnerPreferences agent profile.
 	 */
-	private static function read_preferences( Xapi_Test_Client $au ): Xapi_Response {
+	private static function read_preferences( Xapi_Test_Client $au, ?array $agent = null ): Xapi_Response {
 		return $au->request(
 			'GET',
 			'agents/profile',
 			array(
 				'profileId' => 'cmi5LearnerPreferences',
-				'agent'     => wp_json_encode( self::actor() ),
+				'agent'     => wp_json_encode( $agent ?? self::actor() ),
 			)
 		);
 	}
@@ -446,6 +446,30 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 		// Another token's read does not count for this one.
 		[ $other ] = $this->child( 'Normal', self::SESSION2, null, true, false );
 		$this->assert_status( 403, self::post( $other, array( self::defined( Vocab::INITIALIZED, self::SESSION2 ) ) ) );
+	}
+
+	/**
+	 * T64 review: a host that hands Basic credentials to PHP only as PHP_AUTH_USER/PHP_AUTH_PW (no
+	 * Authorization header) still has the preferences read noted, from the principal the router
+	 * resolved; a read of another agent's preferences does not count.
+	 */
+	public function test_preferences_read_counts_with_php_auth_credentials_and_only_for_the_tokens_actor() {
+		[ $header_client, $key, $secret ] = $this->child( 'Normal', self::SESSION, null, true, false );
+		$server                           = $_SERVER;
+		$bare                             = new Xapi_Test_Client();
+		try {
+			$_SERVER['PHP_AUTH_USER'] = $key;
+			$_SERVER['PHP_AUTH_PW']   = $secret;
+			$other                    = self::actor();
+			$other['account']['name'] = 'learner-2';
+			self::read_preferences( $bare, $other );
+			$this->assert_status( 403, self::post( $bare, array( self::defined( Vocab::INITIALIZED ) ) ), 'another agent\'s preferences do not count' );
+			$this->assertNotSame( 401, self::read_preferences( $bare )->status() );
+			$this->assert_status( 200, self::post( $bare, array( self::defined( Vocab::INITIALIZED ) ) ), 'initialized after the read' );
+		} finally {
+			$_SERVER = $server;
+		}
+		unset( $header_client );
 	}
 
 	/**
