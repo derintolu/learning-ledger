@@ -9,7 +9,8 @@ namespace LearningLedger\Player\Launch;
 
 /**
  * `GET /learning-ledger/v1/cmi5/return/{session}`: the LaunchData returnURL. Fires
- * `learning_ledger/cmi5_return` with the session id, then redirects to the lesson.
+ * `learning_ledger/cmi5_return` with the session id while the session is open, then redirects to
+ * the lesson.
  */
 final class Return_Controller {
 
@@ -62,7 +63,9 @@ final class Return_Controller {
 		if ( null === $session ) {
 			return new \WP_Error( 'lledger_not_found', __( 'Unknown session.', 'learning-ledger' ), array( 'status' => 404 ) );
 		}
-		do_action( 'learning_ledger/cmi5_return', $session['session_id'] ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+		if ( Session_Repository::OPEN === $session['status'] ) {
+			do_action( 'learning_ledger/cmi5_return', $session['session_id'] ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+		}
 		$url = get_permalink( $session['lesson_id'] );
 		$res = new \WP_REST_Response( null, 302 );
 		$res->header( 'Location', is_string( $url ) && '' !== $url ? $url : home_url( '/' ) );

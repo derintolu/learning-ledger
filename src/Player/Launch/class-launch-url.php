@@ -44,12 +44,14 @@ final class Launch_Url {
 	 * @return string `null`, an origin, or '' when the URL has none.
 	 */
 	public static function origin( string $au_url ): string {
-		if ( str_starts_with( $au_url, home_url( '/lledger-au/' ) ) ) {
-			return 'null';
-		}
 		$parts = wp_parse_url( $au_url );
 		if ( ! is_array( $parts ) || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
 			return '';
+		}
+		// The fallback is recognised by host and path, whatever the scheme the URL was stored with.
+		$home = wp_parse_url( home_url( '/lledger-au/' ) );
+		if ( is_array( $home ) && strtolower( (string) ( $home['host'] ?? '' ) ) === strtolower( $parts['host'] ) && str_starts_with( (string) ( $parts['path'] ?? '' ), (string) ( $home['path'] ?? '' ) ) ) {
+			return 'null';
 		}
 		$scheme  = strtolower( $parts['scheme'] );
 		$origin  = $scheme . '://' . strtolower( $parts['host'] );

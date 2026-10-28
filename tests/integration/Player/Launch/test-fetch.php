@@ -11,6 +11,7 @@ use LearningLedger\Cmi5\Au;
 use LearningLedger\Cmi5\Vocab;
 use LearningLedger\Db\Tables;
 use LearningLedger\Lrs\Auth\Token_Repository;
+use LearningLedger\Player\Launch\Launch_Url;
 use LearningLedger\Player\Launch\Session_Repository;
 use LearningLedger\Tests\Xapi_Test_Client;
 use LearningLedger\Util\Clock;
@@ -72,8 +73,23 @@ class Fetch_Test extends Lledger_Launch_Test_Case {
 		$this->assertArrayHasKey( 'auth-token', $this->fetch( $fresh )->get_data(), 'still valid just before 5 minutes' );
 	}
 
-	public function test_unknown_token_answers_error_code_1() {
-		$this->assertSame( self::USED, $this->fetch( str_repeat( 'A', 43 ) )->get_data() );
+	public function test_unknown_token_answers_error_code_2() {
+		$this->assertSame(
+			array(
+				'error-code' => '2',
+				'error-text' => 'Unknown fetch URL',
+			),
+			$this->fetch( str_repeat( 'A', 43 ) )->get_data()
+		);
+	}
+
+	public function test_sandbox_detection_ignores_the_scheme() {
+		$https = set_url_scheme( home_url( '/lledger-au/7/index.html' ), 'https' );
+		$http  = set_url_scheme( home_url( '/lledger-au/7/index.html' ), 'http' );
+		$this->assertSame( 'null', Launch_Url::origin( $https ) );
+		$this->assertSame( 'null', Launch_Url::origin( $http ) );
+		$this->assertSame( 'https://au.example.net', Launch_Url::origin( 'https://au.example.net/lledger-au/7/index.html' ) );
+		$this->assertSame( 'https://au.example.net:8443', Launch_Url::origin( 'https://AU.example.net:8443/x' ) );
 	}
 
 	public function test_minted_token_cannot_write_launch_data_or_void() {
@@ -124,18 +140,21 @@ class Fetch_Test extends Lledger_Launch_Test_Case {
 		$this->assertArrayHasKey( 'auth-token', $this->fetch( $token )->get_data(), 'the token is still unused' );
 	}
 
-	public function test_lrs_failure_answers_error_code_2() {
+	public function test_lrs_failure_answers_error_code_3() {
 		$token      = self::fetch_token( $this->launch_ok()['launch_url'] );
 		$this->fail = 'v1/tokens';
 		$res        = $this->fetch( $token );
-		$this->assertSame( '2', $res->get_data()['error-code'] );
+		$this->assertSame( '3', $res->get_data()['error-code'] );
 		$this->assertNotSame( '', $res->get_data()['error-text'] );
 	}
 
 	public function test_au_origin_is_allowed_by_cors_and_other_origins_are_not() {
-		$token = self::fetch_token( $this->launch_ok()['launch_url'] );
-		$other = $this->fetch( str_repeat( 'B', 43 ), 'POST', array( 'Origin' => 'https://au.example.net' ) );
-		$this->assertArrayNotHasKey( 'Access-Control-Allow-Origin', $other->get_headers(), 'unknown token' );
+		$token   = self::fetch_token( $this->launch_ok()['launch_url'] );
+		$unknown = $this->fetch( str_repeat( 'B', 43 ), 'POST', array( 'Origin' => 'https://au.example.net' ) );
+		$this->assertSame( '2', $unknown->get_data()['error-code'] );
+		$this->assertSame( 'https://au.example.net', $unknown->get_headers()['Access-Control-Allow-Origin'], 'an unknown token still answers a player AU origin' );
+		$stranger = $this->fetch( str_repeat( 'B', 43 ), 'POST', array( 'Origin' => 'https://evil.example' ) );
+		$this->assertArrayNotHasKey( 'Access-Control-Allow-Origin', $stranger->get_headers() );
 
 		$evil = $this->fetch( $token, 'OPTIONS', array( 'Origin' => 'https://evil.example' ) );
 		$this->assertArrayNotHasKey( 'Access-Control-Allow-Origin', $evil->get_headers() );

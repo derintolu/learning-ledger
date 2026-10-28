@@ -8,6 +8,8 @@
 namespace LearningLedger\Player\Launch;
 
 use LearningLedger\Cmi5\Au;
+use LearningLedger\Cmi5\Vocab;
+use LearningLedger\Connector\Inbox\More_Link;
 use LearningLedger\Connector\Identity\Identity_Map;
 use LearningLedger\Connector\Ledger\Registration_Map;
 use LearningLedger\Connector\Lms\Integration_Loader;
@@ -36,6 +38,12 @@ final class Launch_Controller {
 	const ROUTE     = '/cmi5/launch';
 	const MODES     = array( 'Normal', 'Browse', 'Review' );
 	const FETCH_TTL = 300;
+
+	/**
+	 * Page size and page cap when looking for a session's `terminated`.
+	 */
+	const TERMINATED_PAGE  = 500;
+	const TERMINATED_PAGES = 10;
 
 	/**
 	 * Agent profile document id of the learner preferences [cmi5 11].
@@ -343,7 +351,10 @@ final class Launch_Controller {
 	}
 
 	/**
-	 * Abandon the user's open session for the AU: `abandoned` with its duration, its token revoked.
+	 * Close the user's open session for the AU before a new launch. A session whose `terminated`
+	 * is already in the LRS is marked terminated; any other is abandoned: `abandoned` with the
+	 * duration up to the abandon time stamped on the session (kept on retries, so a resend is
+	 * identical). Either way its token is revoked.
 	 *
 	 * @param integer      $user     User id.
 	 * @param Au           $au       AU.
@@ -357,13 +368,87 @@ final class Launch_Controller {
 		if ( null === $open ) {
 			return;
 		}
-		$now      = Clock::now();
-		$duration = (float) $now->format( 'U.u' ) - (float) Timestamp::from_db( $open['launched_at'] )->format( 'U.u' );
-		$this->post_statement( ( new Lms_Statements() )->abandoned( $au, $identity->actor_for_user( $user ), $open['registration'], $open['session_id'], $duration ) );
-		if ( null !== $open['token_key'] ) {
-			$this->expect( $this->lrs->api( 'DELETE', 'tokens/' . rawurlencode( $open['token_key'] ) ), array( 204, 404 ) );
+		$terminated = $this->terminated_at( $open['registration'], $open['session_id'] );
+		if ( null !== $terminated ) {
+			$this->revoke( $open['token_key'] );
+			$this->sessions->mark( $open['session_id'], Session_Repository::TERMINATED, $terminated );
+			return;
 		}
-		$this->sessions->mark( $open['session_id'], Session_Repository::ABANDONED, Timestamp::to_db( $now ) );
+
+		$at = $this->sessions->abandon_at( $open['session_id'] );
+		if ( null === $at ) {
+			return; // Closed meanwhile.
+		}
+		$duration = (float) Timestamp::from_db( $at )->format( 'U.u' ) - (float) Timestamp::from_db( $open['launched_at'] )->format( 'U.u' );
+		$this->post_statement( ( new Lms_Statements() )->abandoned( $au, $identity->actor_for_user( $user ), $open['registration'], $open['session_id'], $duration ) );
+		$this->revoke( $open['token_key'] );
+		$this->sessions->mark( $open['session_id'], Session_Repository::ABANDONED, $at );
+	}
+
+	/**
+	 * When the session's `terminated` statement was recorded, if the LRS holds one.
+	 *
+	 * @param string $registration Registration UUID.
+	 * @param string $session      Session id.
+	 *
+	 * @return string|null Its timestamp (or stored time), database format, or null when there is none.
+	 * @throws \RuntimeException When the LRS cannot be read.
+	 */
+	private function terminated_at( string $registration, string $session ): ?string {
+		$resource = 'statements';
+		$query    = array(
+			'registration' => $registration,
+			'verb'         => Vocab::TERMINATED,
+			'limit'        => self::TERMINATED_PAGE,
+		);
+		for ( $page = 0; $page < self::TERMINATED_PAGES; $page++ ) {
+			$res  = $this->lrs->xapi( 'GET', $resource, $query );
+			$data = 200 === $res->status ? $res->json() : null;
+			if ( ! is_array( $data ) || ! is_array( $data['statements'] ?? null ) ) {
+				throw new \RuntimeException( 'LRS answered ' . (int) $res->status ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- never echoed.
+			}
+			foreach ( $data['statements'] as $statement ) {
+				$id = is_array( $statement ) ? ( $statement['context']['extensions'][ Vocab::EXT_SESSIONID ] ?? null ) : null;
+				if ( is_string( $id ) && strtolower( $id ) === strtolower( $session ) ) {
+					return self::db_time( $statement['timestamp'] ?? $statement['stored'] ?? null );
+				}
+			}
+			$next = More_Link::resolve( is_string( $data['more'] ?? null ) ? $data['more'] : '', Connector_Settings::get() );
+			if ( null === $next ) {
+				break;
+			}
+			list( $resource, $query ) = $next;
+		}
+		return null;
+	}
+
+	/**
+	 * A statement time in database format; now when it is missing or unreadable.
+	 *
+	 * @param mixed $value Timestamp.
+	 *
+	 * @return string
+	 */
+	private static function db_time( mixed $value ): string {
+		try {
+			return Timestamp::to_db( is_string( $value ) ? new \DateTimeImmutable( $value, new \DateTimeZone( 'UTC' ) ) : Clock::now() );
+		} catch ( \Exception $e ) {
+			return Timestamp::to_db( Clock::now() );
+		}
+	}
+
+	/**
+	 * Revoke a session's child token, if one was minted (an unknown token is fine).
+	 *
+	 * @param string|null $token_key Token key.
+	 *
+	 * @return void
+	 * @throws \RuntimeException When the LRS refuses.
+	 */
+	private function revoke( ?string $token_key ): void {
+		if ( null !== $token_key ) {
+			$this->expect( $this->lrs->api( 'DELETE', 'tokens/' . rawurlencode( $token_key ) ), array( 204, 404 ) );
+		}
 	}
 
 	/**
@@ -375,7 +460,8 @@ final class Launch_Controller {
 	 * @throws \RuntimeException When the LRS refuses.
 	 */
 	private function post_statement( array $statement ): void {
-		$this->expect( $this->lrs->xapi( 'POST', 'statements', array(), self::json( $statement ), array( 'Content-Type' => 'application/json' ) ), array( 200 ) );
+		// An identical resend of a stored statement is a success too (same id, same content).
+		$this->expect( $this->lrs->xapi( 'POST', 'statements', array(), self::json( $statement ), array( 'Content-Type' => 'application/json' ) ), array( 200, 204 ) );
 	}
 
 	/**

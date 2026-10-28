@@ -178,6 +178,30 @@ final class Session_Repository {
 	}
 
 	/**
+	 * The time an open session is being abandoned at: stamped now on the first call and kept
+	 * on later ones, so a retried `abandoned` statement carries the same duration.
+	 *
+	 * @param string $session Session id.
+	 *
+	 * @return string|null Database format (UTC), or null when the session is not open.
+	 */
+	public function abandon_at( string $session ): ?string {
+		global $wpdb;
+		$table = Tables::name( 'cmi5_sessions' );
+		$wpdb->query(
+			$wpdb->prepare(
+				'UPDATE %i SET abandoned_at = %s WHERE session_id = %s AND status = %s AND abandoned_at IS NULL',
+				$table,
+				Timestamp::to_db( Clock::now() ),
+				strtolower( $session ),
+				self::OPEN
+			)
+		);
+		$at = $wpdb->get_var( $wpdb->prepare( 'SELECT abandoned_at FROM %i WHERE session_id = %s AND status = %s', $table, strtolower( $session ), self::OPEN ) );
+		return is_string( $at ) ? $at : null;
+	}
+
+	/**
 	 * Close an open session.
 	 *
 	 * @param string      $session Session id.

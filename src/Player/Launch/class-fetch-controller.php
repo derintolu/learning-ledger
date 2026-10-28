@@ -10,6 +10,7 @@ namespace LearningLedger\Player\Launch;
 use LearningLedger\Cmi5\Au;
 use LearningLedger\Connector\Identity\Identity_Map;
 use LearningLedger\Connector\Pairing\Lrs_Client;
+use LearningLedger\Connector\Programs\Program_Repository;
 use LearningLedger\Crypto\Tokens;
 
 /**
@@ -17,9 +18,10 @@ use LearningLedger\Crypto\Tokens;
  *
  * The first use within 5 minutes of the launch mints a child token on the LRS for the session (one
  * registration and actor, the AU activity, 8 hours, the cmi5 guard, CORS for the AU's origin, which
- * is `null` for the sandboxed fallback) and answers `{"auth-token": base64(key:secret)}`. A reused,
- * expired or unknown token answers error-code 1; any other failure error-code 2. Other methods are
- * 405. CORS on this route allows only the session's AU origin, without credentials.
+ * is `null` for the sandboxed fallback) and answers `{"auth-token": base64(key:secret)}`. Error codes
+ * follow cmi5 8.2.3.2: a used or expired token is 1, an unknown token 2, a failure to mint 3. Other
+ * methods are 405. CORS on this route allows only the session's AU origin (for an unknown token, the
+ * origin of any player AU), without credentials.
  */
 final class Fetch_Controller {
 
@@ -98,13 +100,24 @@ final class Fetch_Controller {
 		$hash    = Tokens::hash( (string) $request->get_param( 'token' ) );
 		$session = $this->sessions->use_fetch( $hash );
 		if ( null === $session ) {
+			$known = $this->sessions->find_by_fetch( $hash );
+			if ( null !== $known ) {
+				return $this->respond(
+					array(
+						'error-code' => '1',
+						'error-text' => 'Already in use or expired',
+					),
+					$request,
+					array( self::origin_of( $known ) )
+				);
+			}
 			return $this->respond(
 				array(
-					'error-code' => '1',
-					'error-text' => 'Already in use or expired',
+					'error-code' => '2',
+					'error-text' => 'Unknown fetch URL',
 				),
 				$request,
-				self::origin_of( $this->sessions->find_by_fetch( $hash ) )
+				self::player_origins()
 			);
 		}
 
@@ -139,16 +152,16 @@ final class Fetch_Controller {
 		if ( null === $auth || null === $key ) {
 			return $this->respond(
 				array(
-					'error-code' => '2',
+					'error-code' => '3',
 					'error-text' => 'The LMS could not issue a token for this session',
 				),
 				$request,
-				$origin
+				array( $origin )
 			);
 		}
 
 		$this->sessions->set_token( $session['session_id'], $key );
-		return $this->respond( array( 'auth-token' => $auth ), $request, $origin );
+		return $this->respond( array( 'auth-token' => $auth ), $request, array( $origin ) );
 	}
 
 	/**
@@ -181,9 +194,11 @@ final class Fetch_Controller {
 		if ( null !== $result || 'OPTIONS' !== $request->get_method() || null === $token ) {
 			return $result;
 		}
-		$res    = new \WP_REST_Response( null, 204, array( 'Allow' => 'POST' ) );
-		$origin = $request->get_header( 'Origin' );
-		if ( null !== $origin && '' !== $origin && self::origin_of( $this->sessions->find_by_fetch( Tokens::hash( $token ) ) ) === $origin ) {
+		$res     = new \WP_REST_Response( null, 204, array( 'Allow' => 'POST' ) );
+		$origin  = $request->get_header( 'Origin' );
+		$session = $this->sessions->find_by_fetch( Tokens::hash( $token ) );
+		$allowed = null === $session ? self::player_origins() : array( self::origin_of( $session ) );
+		if ( null !== $origin && '' !== $origin && in_array( $origin, $allowed, true ) ) {
 			$res->header( 'Access-Control-Allow-Origin', $origin );
 			$res->header( 'Access-Control-Allow-Methods', 'POST, OPTIONS' );
 			$res->header( 'Access-Control-Allow-Headers', 'Content-Type' );
@@ -214,15 +229,15 @@ final class Fetch_Controller {
 	 *
 	 * @param array            $data    Body.
 	 * @param \WP_REST_Request $request Request.
-	 * @param string           $allowed The session's AU origin, '' when unknown.
+	 * @param string[]         $allowed Origins allowed to read the answer.
 	 *
 	 * @return \WP_REST_Response
 	 */
-	private function respond( array $data, \WP_REST_Request $request, string $allowed ): \WP_REST_Response {
+	private function respond( array $data, \WP_REST_Request $request, array $allowed ): \WP_REST_Response {
 		$res = new \WP_REST_Response( $data, 200 );
 		$res->header( 'Cache-Control', 'no-store' );
 		$origin = $request->get_header( 'Origin' );
-		if ( null !== $origin && '' !== $allowed && $origin === $allowed ) {
+		if ( null !== $origin && '' !== $origin && in_array( $origin, $allowed, true ) ) {
 			$res->header( 'Access-Control-Allow-Origin', $origin );
 			$res->header( 'Vary', 'Origin' );
 		}
@@ -239,6 +254,26 @@ final class Fetch_Controller {
 	private static function origin_of( ?array $session ): string {
 		$found = null === $session ? null : Launch_Controller::find_au( $session['au_id'] );
 		return null === $found ? '' : Launch_Url::origin( $found['au']->url() );
+	}
+
+	/**
+	 * Origins of every AU of every player program (`null` for sandboxed ones).
+	 *
+	 * @return string[]
+	 */
+	private static function player_origins(): array {
+		$repo    = new Program_Repository();
+		$origins = array();
+		foreach ( $repo->all_ids() as $id ) {
+			$structure = (int) get_post_meta( $id, '_lledger_player', true ) ? $repo->structure( $id ) : null;
+			foreach ( null === $structure ? array() : $structure->aus() as $au ) {
+				$origin = Launch_Url::origin( $au->url() );
+				if ( '' !== $origin ) {
+					$origins[ $origin ] = true;
+				}
+			}
+		}
+		return array_keys( $origins );
 	}
 
 	/**

@@ -123,7 +123,7 @@ abstract class Lledger_Launch_Test_Case extends WP_UnitTestCase {
 				self::CONNECTOR,
 				'Connector',
 				Tokens::hash( (string) Connector_Secret::get() ),
-				array( Scopes::TOKENS_MINT, Scopes::VOID, Scopes::STATE, Scopes::PROFILE, Scopes::STATEMENTS_WRITE ),
+				array( Scopes::TOKENS_MINT, Scopes::VOID, Scopes::STATE, Scopes::PROFILE, Scopes::STATEMENTS_WRITE, Scopes::STATEMENTS_READ ),
 				array(),
 				array(),
 				false,
@@ -539,6 +539,15 @@ class Launch_Test extends Lledger_Launch_Test_Case {
 		Clock::freeze( new DateTimeImmutable( '2026-10-27 10:01:30.500000', new DateTimeZone( 'UTC' ) ) );
 		$this->launch_ok();
 
+		$lookups = array_filter(
+			$this->http,
+			static fn( array $r ): bool => 'GET' === $r['args']['method'] && str_contains( $r['url'], '/statements?' )
+		);
+		$this->assertCount( 1, $lookups, 'the LRS was asked for the session\'s terminated first' );
+		$query = self::query_of( (string) reset( $lookups )['url'] );
+		$this->assertSame( $old['registration'], $query['registration'] );
+		$this->assertSame( Vocab::TERMINATED, $query['verb'] );
+
 		$abandoned = $this->statements( Vocab::ABANDONED );
 		$this->assertCount( 1, $abandoned );
 		$this->assertSame( 'PT1M30.5S', $abandoned[0]['result']['duration'] );
@@ -593,6 +602,15 @@ class Launch_Test extends Lledger_Launch_Test_Case {
 	public function test_unknown_lesson_or_mode_is_refused() {
 		$plain = self::factory()->post->create();
 		$this->assertSame( 404, $this->launch( array( 'lesson' => $plain ) )->get_status() );
+
+		wp_update_post(
+			array(
+				'ID'          => $this->lesson,
+				'post_status' => 'draft',
+			)
+		);
+		$this->assertSame( 404, $this->launch( array( 'lesson' => $this->lesson ) )->get_status(), 'an unpublished lesson cannot be launched in Normal mode' );
+		$this->assertNull( ( new Session_Repository() )->open_for( $this->learner, self::AU_ID ) );
 		$this->assertSame(
 			400,
 			$this->launch(
@@ -657,6 +675,77 @@ class Launch_Test extends Lledger_Launch_Test_Case {
 		$res        = $this->launch( array( 'lesson' => $this->lesson ) );
 		$this->assertSame( 502, $res->get_status() );
 		$this->assertArrayNotHasKey( 'launch_url', (array) $res->get_data() );
+
+		$this->assertNull( ( new Session_Repository() )->open_for( $this->learner, self::AU_ID ), 'no open session' );
+		global $wpdb;
+		$rows = $wpdb->get_results( 'SELECT status, fetch_hash FROM ' . Tables::name( 'cmi5_sessions' ), ARRAY_A );
+		$this->assertCount( 1, $rows );
+		$this->assertSame( Session_Repository::ABANDONED, $rows[0]['status'], 'closed at once' );
+		$this->assertNull( $rows[0]['fetch_hash'], 'no fetch URL was issued' );
+		$this->assertSame( array(), $this->statements(), 'neither launched nor abandoned' );
+
+		$this->fail = null;
+		$this->launch_ok();
+		$this->assertSame( array(), $this->statements( Vocab::ABANDONED ), 'the closed attempt is not abandoned later' );
+	}
+
+	public function test_abandon_retry_after_a_failed_token_revoke_resends_the_same_statement() {
+		$first = $this->launch_ok();
+		$old   = $this->session_for( $this->learner );
+		$this->assertArrayHasKey( 'auth-token', $this->fetch( self::fetch_token( $first['launch_url'] ) )->get_data() );
+
+		Clock::freeze( new DateTimeImmutable( '2026-10-27 10:01:00.000000', new DateTimeZone( 'UTC' ) ) );
+		$this->fail = 'v1/tokens/';
+		$this->assertSame( 502, $this->launch( array( 'lesson' => $this->lesson ) )->get_status() );
+		$this->assertSame( Session_Repository::OPEN, ( new Session_Repository() )->find( $old['session_id'] )['status'] );
+
+		Clock::freeze( new DateTimeImmutable( '2026-10-27 10:02:00.000000', new DateTimeZone( 'UTC' ) ) );
+		$this->fail = null;
+		$this->launch_ok();
+
+		$abandoned = $this->statements( Vocab::ABANDONED );
+		$this->assertCount( 1, $abandoned );
+		$this->assertSame( 'PT1M', $abandoned[0]['result']['duration'], 'the duration of the first attempt' );
+		$closed = ( new Session_Repository() )->find( $old['session_id'] );
+		$this->assertSame( Session_Repository::ABANDONED, $closed['status'] );
+		$this->assertSame( '2026-10-27 10:01:00.000000', $closed['abandoned_at'] );
+		global $wpdb;
+		$this->assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT revoked_at FROM ' . Tables::name( 'tokens' ) . ' WHERE token_key = %s', $closed['token_key'] ) ) );
+	}
+
+	public function test_relaunch_after_terminated_marks_the_session_terminated() {
+		$first                = $this->launch_ok();
+		$old                  = $this->session_for( $this->learner );
+		list( $key, $secret ) = explode( ':', (string) base64_decode( $this->fetch( self::fetch_token( $first['launch_url'] ) )->get_data()['auth-token'], true ), 2 ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- the returned credential.
+		$terminated           = array(
+			'actor'     => $this->actor( $this->learner ),
+			'verb'      => array( 'id' => Vocab::TERMINATED ),
+			'object'    => array(
+				'objectType' => 'Activity',
+				'id'         => Au::activity_id( self::AU_ID ),
+			),
+			'context'   => array(
+				'registration'      => $old['registration'],
+				'contextActivities' => array(
+					'category' => array( array( 'id' => Vocab::CAT_CMI5 ) ),
+					'grouping' => array( array( 'id' => self::AU_ID ) ),
+				),
+				'extensions'        => array( Vocab::EXT_SESSIONID => $old['session_id'] ),
+			),
+			'timestamp' => '2026-10-27T10:00:40.000Z',
+		);
+		$posted               = Xapi_Test_Client::as( $key, $secret )->request( 'POST', 'statements', array(), (string) wp_json_encode( $terminated ), array( 'Content-Type' => 'application/json' ) );
+		$this->assertSame( 200, $posted->status(), $posted->body() );
+
+		Clock::freeze( new DateTimeImmutable( '2026-10-27 10:03:00.000000', new DateTimeZone( 'UTC' ) ) );
+		$this->launch_ok();
+
+		$this->assertSame( array(), $this->statements( Vocab::ABANDONED ), 'never abandoned after terminated' );
+		$closed = ( new Session_Repository() )->find( $old['session_id'] );
+		$this->assertSame( Session_Repository::TERMINATED, $closed['status'] );
+		$this->assertSame( '2026-10-27 10:00:40.000000', $closed['terminated_at'] );
+		global $wpdb;
+		$this->assertNotNull( $wpdb->get_var( $wpdb->prepare( 'SELECT revoked_at FROM ' . Tables::name( 'tokens' ) . ' WHERE token_key = %s', $key ) ) );
 	}
 
 	public function test_return_fires_the_hook_then_redirects_to_the_lesson() {
@@ -677,5 +766,12 @@ class Launch_Test extends Lledger_Launch_Test_Case {
 
 		$this->assertSame( 404, rest_get_server()->dispatch( new WP_REST_Request( 'GET', '/learning-ledger/v1/cmi5/return/' . wp_generate_uuid4() ) )->get_status() );
 		$this->assertCount( 1, $seen );
+
+		wp_set_current_user( $this->learner );
+		$this->launch_ok();
+		$this->assertSame( Session_Repository::ABANDONED, ( new Session_Repository() )->find( $session )['status'] );
+		$closed = rest_get_server()->dispatch( new WP_REST_Request( 'GET', '/learning-ledger/v1/cmi5/return/' . $session ) );
+		$this->assertSame( 302, $closed->get_status(), 'a closed session still redirects' );
+		$this->assertCount( 1, $seen, 'but the hook fires only for an open session' );
 	}
 }
