@@ -76,6 +76,8 @@ if [ -n "$test_secret_file" ]; then
 fi
 
 console_log="$root/.cache/catapult-last-run.txt"
+# --runInBand: one test file at a time, so the slow 1000-AU import in package.js does not
+# share the site with runtime.js's timed AU runs.
 status=0
 (
 	cd "$lts_dir"
@@ -85,7 +87,7 @@ status=0
 	LLEDGER_LRS_KEY="$key" \
 	LLEDGER_LRS_SECRET="$lrs_secret" \
 	LLEDGER_CATAPULT_TEST_SECRET="$test_secret" \
-	npx jest --json --outputFile="$out_file"
+	npx jest --runInBand --json --outputFile="$out_file"
 ) > "$console_log" 2>&1 || status=$?
 
 lledger_redact "$console_log" "$key" "$lrs_secret" "$test_secret"
