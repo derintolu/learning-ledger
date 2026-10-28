@@ -117,14 +117,14 @@ final class Activity_Repository {
 	/**
 	 * Replace top-level fields; merge language maps key by key.
 	 *
-	 * @param array $old Stored definition.
-	 * @param array $new Incoming definition.
+	 * @param array $old      Stored definition.
+	 * @param array $incoming Incoming definition.
 	 *
 	 * @return array
 	 */
-	private static function merge_definitions( array $old, array $new ): array {
+	private static function merge_definitions( array $old, array $incoming ): array {
 		$out = $old;
-		foreach ( $new as $field => $value ) {
+		foreach ( $incoming as $field => $value ) {
 			if ( in_array( $field, self::LANGUAGE_MAPS, true ) && is_array( $value ) && isset( $old[ $field ] ) && is_array( $old[ $field ] ) ) {
 				$out[ $field ] = array_merge( $old[ $field ], $value );
 			} else {

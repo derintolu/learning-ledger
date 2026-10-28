@@ -29,8 +29,8 @@ final class About_Handler implements Resource_Handler {
 	 * @return Xapi_Response
 	 */
 	public function handle( Xapi_Request $r ): Xapi_Response {
-		$ext = apply_filters( // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
-			'learning_ledger/about_extension',
+		$ext = apply_filters(
+			'learning_ledger/about_extension', // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
 			array(
 				'api_base'       => rest_url( 'learning-ledger/v1/' ),
 				'plugin_version' => LEARNING_LEDGER_VERSION,

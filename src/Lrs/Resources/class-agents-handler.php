@@ -40,7 +40,7 @@ final class Agents_Handler implements Resource_Handler {
 			}
 			$agent = Agent_Identity::from_array( $decoded );
 		} catch ( Invalid_Input $e ) {
-			throw new Xapi_Error( 400, 'agent is not a valid Agent: ' . $e->getMessage() );
+			throw new Xapi_Error( 400, 'agent is not a valid Agent: ' . $e->getMessage() ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages become a JSON error body, never raw HTML.
 		}
 
 		$principal = $r->principal();
