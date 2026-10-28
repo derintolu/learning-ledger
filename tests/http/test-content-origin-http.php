@@ -3,7 +3,7 @@
  * AU files are served from the content host without cookies, and from the sandboxed fallback.
  *
  * Runs against the wp-env development site at LLEDGER_TEST_BASE_URL; setup goes through
- * `npx wp-env run cli` from the plugin folder. The content host is 127.0.0.1 on the same port.
+ * `npx @wordpress/env run cli` from the plugin folder. The content host is 127.0.0.1 on the same port.
  *
  * @package LearningLedger
  */
@@ -49,7 +49,7 @@ class Content_Origin_Http_Test extends \PHPUnit\Framework\TestCase {
 	 * @return array{0:int,1:string} Exit code and combined output.
 	 */
 	private static function wp( array $args ): array {
-		$cmd  = 'cd ' . escapeshellarg( dirname( __DIR__, 2 ) ) . ' && npx wp-env run cli --env-cwd=wp-content/plugins/learning-ledger wp ' . implode( ' ', array_map( 'escapeshellarg', $args ) ) . ' 2>&1';
+		$cmd  = 'cd ' . escapeshellarg( dirname( __DIR__, 2 ) ) . ' && npx @wordpress/env run cli --env-cwd=wp-content/plugins/learning-ledger wp ' . implode( ' ', array_map( 'escapeshellarg', $args ) ) . ' 2>&1';
 		$out  = array();
 		$code = 0;
 		exec( $cmd, $out, $code ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_exec
