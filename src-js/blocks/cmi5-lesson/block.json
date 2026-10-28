@@ -1,0 +1,17 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "learning-ledger/cmi5-lesson",
+	"title": "cmi5 lesson",
+	"category": "widgets",
+	"description": "Shows a learner's status for a cmi5 assignable unit and the buttons to launch it, review it or browse it.",
+	"textdomain": "learning-ledger",
+	"attributes": {
+		"auId": { "type": "string", "default": "" }
+	},
+	"usesContext": [ "postId" ],
+	"supports": { "html": false, "multiple": false },
+	"editorScript": "file:./index.js",
+	"viewScript": "file:./view.js",
+	"render": "file:./render.php"
+}
