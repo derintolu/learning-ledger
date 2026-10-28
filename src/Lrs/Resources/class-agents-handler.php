@@ -71,16 +71,16 @@ final class Agents_Handler implements Resource_Handler {
 	 * (MySQL 8 JSON columns return the keys in their own order).
 	 *
 	 * @param mixed $value IFI value.
-	 * @param array $list  Listed IFI values.
+	 * @param array $items Listed IFI values.
 	 *
 	 * @return boolean
 	 */
-	private static function listed( mixed $value, array $list ): bool {
+	private static function listed( mixed $value, array $items ): bool {
 		if ( ! is_array( $value ) ) {
-			return in_array( $value, $list, true );
+			return in_array( $value, $items, true );
 		}
 		ksort( $value );
-		foreach ( $list as $item ) {
+		foreach ( $items as $item ) {
 			if ( is_array( $item ) ) {
 				ksort( $item );
 			}
