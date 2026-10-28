@@ -359,6 +359,27 @@ class Admin_Screens_Test extends WP_UnitTestCase {
 		$this->assertFalse( $done() );
 	}
 
+	public function test_erase_reports_failure_and_keeps_everything_when_a_delete_fails() {
+		[ $action, $fields, $nonce, , $done ] = $this->fixture_erase_actor();
+		global $wpdb;
+		$failing  = 'DELETE FROM ' . Tables::name( 'agents' );
+		$failer   = static fn( string $q ): string => str_starts_with( $q, $failing ) ? 'DELETE FROM lledger_no_such_table_fx9' : $q;
+		$suppress = $wpdb->suppress_errors( true );
+		add_filter( 'query', $failer );
+		$this->boot_module();
+		try {
+			$this->post( $action, $fields, $nonce, $this->admin );
+			$this->fail( 'Expected a redirect.' );
+		} catch ( RuntimeException $e ) {
+			$this->assertStringContainsString( 'lledger_error=failed', $e->getMessage() );
+			$this->assertStringNotContainsString( 'lledger_done=', $e->getMessage() );
+		} finally {
+			remove_filter( 'query', $failer );
+			$wpdb->suppress_errors( $suppress );
+		}
+		$this->assertFalse( $done(), 'the statements are rolled back, not erased' );
+	}
+
 	public function test_erase_nonce_is_bound_to_the_actor() {
 		[ $action, $fields ] = $this->fixture_erase_actor();
 		$other               = Erase_Screen::nonce_action( Agent_Identity::from_array( self::actor( 'someone-else' ) )->hash() );
