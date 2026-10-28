@@ -155,6 +155,7 @@ final class Statement_Validator {
 		}
 		if ( array_key_exists( 'authority', $st ) ) {
 			Actor_Validator::validate( $st['authority'], $version, self::join( $path, 'authority' ) );
+			self::authority_group( $st['authority'], self::join( $path, 'authority' ) );
 		}
 		if ( array_key_exists( 'version', $st ) ) {
 			self::statement_version( $st['version'], $version, self::join( $path, 'version' ) );
@@ -635,6 +636,29 @@ final class Statement_Validator {
 		}
 		if ( ! $valid ) {
 			throw new Invalid_Input( 'Invalid timestamp for this xAPI version.', 'timestamp', $path );
+		}
+	}
+
+	/**
+	 * An authority that is a Group is an anonymous Group of exactly two Agents
+	 * (Data 2.4.9, XAPI-00024, XAPI-00098, XAPI-00100). Call after Actor_Validator.
+	 *
+	 * @param array  $authority Authority, already a valid Agent or Group.
+	 * @param string $path      Path.
+	 *
+	 * @throws Invalid_Input Code `authority`.
+	 *
+	 * @return void
+	 */
+	private static function authority_group( array $authority, string $path ): void {
+		if ( 'Group' !== ( $authority['objectType'] ?? 'Agent' ) ) {
+			return;
+		}
+		if ( array() !== array_intersect( Agent_Identity::IFI_KEYS, array_keys( $authority ) ) ) {
+			throw new Invalid_Input( 'An authority Group must be anonymous.', 'authority', $path );
+		}
+		if ( 2 !== count( $authority['member'] ) ) {
+			throw new Invalid_Input( 'An authority Group must have exactly two members.', 'authority', $path . '.member' );
 		}
 	}
 

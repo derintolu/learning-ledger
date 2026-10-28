@@ -116,4 +116,53 @@ class Statement_Validator_Test extends \PHPUnit\Framework\TestCase {
 		$this->expectException( Invalid_Input::class );
 		Statement_Validator::validate( self::load( self::FIXTURES . 'valid/minimal.both.json' ), '1.0.2' );
 	}
+
+	private static function rejects( array $st, string $version, string $path, string $message ): void {
+		try {
+			Statement_Validator::validate( $st, $version );
+		} catch ( Invalid_Input $e ) {
+			self::assertSame( $path, $e->path(), $message );
+			return;
+		}
+		self::fail( 'Expected Invalid_Input at "' . $path . '": ' . $message );
+	}
+
+	/**
+	 * XAPI-00024 / XAPI-00098 / XAPI-00100 (Data 2.4.9): an authority that is a Group is an
+	 * anonymous Group of exactly two Agents.
+	 */
+	public function test_xapi_00098_authority_group_is_anonymous_with_two_members() {
+		$st    = self::load( self::FIXTURES . 'valid/minimal.both.json' );
+		$oauth = array(
+			'account' => array(
+				'homePage' => 'http://example.com/xAPI/OAuth/Token',
+				'name'     => 'oauth_consumer_x75db',
+			),
+		);
+		$bob   = array( 'mbox' => 'mailto:bob@example.com' );
+		$two   = array(
+			'objectType' => 'Group',
+			'member'     => array( $oauth, $bob ),
+		);
+		foreach ( array( '1.0.3', '2.0.0' ) as $version ) {
+			Statement_Validator::validate( array_merge( $st, array( 'authority' => $two ) ), $version );
+			Statement_Validator::validate( array_merge( $st, array( 'authority' => $bob ) ), $version );
+
+			foreach ( array(
+				'mbox'         => 'mailto:group@example.com',
+				'mbox_sha1sum' => 'cd9b00a5611f94eaa7b1661edab976068e364975',
+				'openid'       => 'http://openid.example.org/12345',
+				'account'      => array(
+					'homePage' => 'http://www.example.com',
+					'name'     => 'xAPI account name',
+				),
+			) as $ifi => $value ) {
+				self::rejects( array_merge( $st, array( 'authority' => array_merge( $two, array( $ifi => $value ) ) ) ), $version, 'authority', 'identified group (' . $ifi . ') ' . $version );
+			}
+			$one   = array_merge( $two, array( 'member' => array( $bob ) ) );
+			$three = array_merge( $two, array( 'member' => array( $oauth, $bob, array( 'mbox' => 'mailto:james@example.com' ) ) ) );
+			self::rejects( array_merge( $st, array( 'authority' => $one ) ), $version, 'authority.member', 'one member ' . $version );
+			self::rejects( array_merge( $st, array( 'authority' => $three ) ), $version, 'authority.member', 'three members ' . $version );
+		}
+	}
 }
