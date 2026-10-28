@@ -77,6 +77,7 @@ class Abandoner_Test extends Lledger_Session_Test_Case {
 	}
 
 	public function test_session_with_terminated_in_the_lrs_is_marked_terminated() {
+		$this->lrs_elsewhere();
 		$a1 = $this->launch_au( self::A1 );
 		$this->tick( '10:20:00' );
 		$this->post_as( $a1['client'], $this->au_statement( $this->learner, Vocab::TERMINATED, self::A1, $a1['session']['session_id'], $a1['session']['registration'] ) );

@@ -23,6 +23,7 @@ use LearningLedger\Connector\Pairing\Connector_Settings;
 use LearningLedger\Connector\Pairing\Lrs_Client;
 use LearningLedger\Connector\Programs\Program;
 use LearningLedger\Connector\Programs\Program_Repository;
+use LearningLedger\Lrs\Statements\Stored_Statement;
 use LearningLedger\Player\Launch\Launch_Controller;
 use LearningLedger\Player\Launch\Lms_Statements;
 use LearningLedger\Player\Launch\Session_Repository;
@@ -40,8 +41,9 @@ use LearningLedger\Xapi\Agent_Identity;
  * its session.
  *
  * Runs on `learning_ledger/connector_evaluated` (the inbox), on the return route (pulling the
- * registration's statements and processing them first), and when a registration is created
- * (so `NotApplicable` AUs are satisfied at once). Only a user's `cmi5:<program>` registration
+ * registration's statements and processing them first), when a registration is created
+ * (so `NotApplicable` AUs are satisfied at once), and, when the LRS role runs on this site, on
+ * each statement it commits in a player registration. Only a user's `cmi5:<program>` registration
  * gets LMS statements; preview registrations never do. Sensei completion stays with the inbox.
  *
  * The LRS has the LMS's own `satisfied` statements in the inbox once they come back, by
@@ -233,9 +235,79 @@ final class Player_Evaluator {
 	 * @throws \RuntimeException When the LRS cannot be reached.
 	 */
 	public function sync( int $program_id, int $user, string $registration ): void {
+		$this->pull( $registration );
+		$this->settle( $program_id, $user, $registration );
+	}
+
+	/**
+	 * Statements the LRS on this site has just committed: a player registration's statements
+	 * (not the connector's own) go straight into the inbox and the registration is processed at
+	 * once. So `satisfied` follows the statement that met moveOn before the AU's request returns,
+	 * ahead of its `terminated` [cmi5 9.3.9], and a `terminated` closes its session before a
+	 * relaunch looks for it. A failure queues a sync, which retries.
+	 *
+	 * @param mixed $rows Stored_Statement[] just committed.
+	 *
+	 * @return void
+	 */
+	public function on_committed( mixed $rows ): void {
+		$client = Connector_Settings::get()['client_id'];
+		$map    = new Registration_Map();
+		$todo   = array();
+		foreach ( (array) $rows as $row ) {
+			if ( ! $row instanceof Stored_Statement || null === $row->registration || '' === $client || $client === $row->authority_client ) {
+				continue;
+			}
+			$key = strtolower( $row->registration );
+			if ( ! isset( $todo[ $key ] ) ) {
+				$scope        = (string) $map->scope_for( $key );
+				$todo[ $key ] = 1 === preg_match( '/^(?:cmi5|preview):(\d+)(?::|$)/', $scope, $m ) ? array( (int) $m[1], (int) $map->user_for( $key ) ) : false;
+			}
+			if ( false !== $todo[ $key ] ) {
+				$this->inbox->store( $row->statement(), 'webhook' );
+			}
+		}
+		foreach ( $todo as $registration => $target ) {
+			if ( false === $target ) {
+				continue;
+			}
+			try {
+				$this->settle( $target[0], $target[1], (string) $registration );
+			} catch ( \RuntimeException $e ) {
+				self::queue_sync( $target[0], $target[1], (string) $registration, 60 );
+			}
+		}
+	}
+
+	/**
+	 * Whether the connector's LRS is the LRS role of this site (same origin as the home URL).
+	 *
+	 * @return boolean
+	 */
+	public static function lrs_is_local(): bool {
+		$lrs  = wp_parse_url( Connector_Settings::get()['lrs_url'] );
+		$home = wp_parse_url( home_url( '/' ) );
+		if ( ! is_array( $lrs ) || ! is_array( $home ) ) {
+			return false;
+		}
+		$origin = static fn( array $u ): string => strtolower( ( $u['scheme'] ?? '' ) . '://' . ( $u['host'] ?? '' ) . ':' . ( $u['port'] ?? ( 'https' === ( $u['scheme'] ?? '' ) ? 443 : 80 ) ) );
+		return '' !== ( $lrs['host'] ?? '' ) && $origin( $lrs ) === $origin( $home );
+	}
+
+	/**
+	 * Process a registration's pending inbox rows (only this registration's), and write the
+	 * LMS statements unless the inbox evaluation already did.
+	 *
+	 * @param integer $program_id   Program id.
+	 * @param integer $user         User id.
+	 * @param string  $registration Registration UUID.
+	 *
+	 * @return void
+	 * @throws \RuntimeException When the LRS cannot be reached.
+	 */
+	private function settle( int $program_id, int $user, string $registration ): void {
 		$key = strtolower( $registration );
 		unset( $this->evaluated[ $key ] );
-		$this->pull( $registration );
 		( new Inbox_Processor( $this->inbox ) )->process_registration( $registration );
 		if ( empty( $this->evaluated[ $key ] ) && $this->write( $program_id, $user, $registration, null ) ) {
 			self::queue_sync( $program_id, $user, $registration );

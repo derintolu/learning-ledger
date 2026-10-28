@@ -268,6 +268,13 @@ abstract class Lledger_Session_Test_Case extends Lledger_Launch_Test_Case {
 		return Program_Iris::au_iri( ( new Program_Repository() )->get( $program ), $key );
 	}
 
+	/**
+	 * Model an LRS on another site: the connector hears of AU statements only by pulling them.
+	 */
+	protected function lrs_elsewhere(): void {
+		remove_all_actions( 'learning_ledger/statements_committed' ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+	}
+
 	protected function connector_post( array $statement ): void {
 		$this->post_as( $this->as_connector(), $statement );
 	}
@@ -345,7 +352,39 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_B, 'block' ) ) );
 	}
 
+	/**
+	 * CATAPULT 001-essentials and 004-*, cmi5 9.3.9.0-1/-5, 9.3.3.0-3, 9.3.4.0-4: with the LRS on
+	 * this site, `satisfied` follows the AU statement that met moveOn before the AU's request
+	 * returns (so before its `terminated`), with no return, poll or job; `terminated` closes the
+	 * session at once.
+	 */
+	public function test_lrs_on_this_site_writes_satisfied_before_the_au_request_returns() {
+		$this->assertNotFalse( has_action( 'learning_ledger/statements_committed' ) ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+		$a1           = $this->launch_au( self::A1 );
+		$registration = $a1['session']['registration'];
+		$this->tick( '10:00:10' );
+		$this->post_as( $a1['client'], $this->au_statement( $this->learner, Vocab::COMPLETED, self::A1, $a1['session']['session_id'], $registration, array( 'completion' => true ) ) );
+		$this->assertSame( array(), $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) ), 'A2 is still to do' );
+
+		$this->tick( '10:00:20' );
+		$a2 = $this->launch_au( self::A2 );
+		$this->tick( '10:00:30' );
+		$this->post_as( $a2['client'], $this->au_statement( $this->learner, Vocab::COMPLETED, self::A2, $a2['session']['session_id'], $registration, array( 'completion' => true ) ) );
+		$block  = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) );
+		$course = $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::T59_COURSE, 'course' ) );
+		$this->assertCount( 1, $block );
+		$this->assertCount( 1, $course );
+		$this->assertSame( $a2['session']['session_id'], $block[0]['context']['extensions'][ Vocab::EXT_SESSIONID ] );
+		$this->assertSame( $a2['session']['session_id'], $course[0]['context']['extensions'][ Vocab::EXT_SESSIONID ] );
+
+		$this->tick( '10:00:40' );
+		$this->post_as( $a2['client'], $this->au_statement( $this->learner, Vocab::TERMINATED, self::A2, $a2['session']['session_id'], $registration, array( 'duration' => 'PT5S' ) ) );
+		$this->assertSame( Session_Repository::TERMINATED, ( new Session_Repository() )->find( $a2['session']['session_id'] )['status'] );
+		$this->assertCount( 1, $this->about( Vocab::SATISFIED, Lms_Statements::satisfied_id( self::BLOCK_A, 'block' ) ), 'written once' );
+	}
+
 	public function test_return_route_processes_statements_before_redirecting() {
+		$this->lrs_elsewhere();
 		$a1           = $this->launch_au( self::A1 );
 		$session      = $a1['session'];
 		$registration = $session['registration'];
@@ -396,6 +435,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 	}
 
 	public function test_return_waits_for_a_held_inbox_lock_then_leaves_the_rows_pending() {
+		$this->lrs_elsewhere();
 		$a1      = $this->launch_au( self::A1 );
 		$session = $a1['session'];
 		$this->tick( '10:00:10' );
@@ -538,6 +578,7 @@ class Player_Evaluator_Test extends Lledger_Session_Test_Case {
 	}
 
 	public function test_preview_registration_gets_no_lms_statements_and_is_not_pulled_on_return() {
+		$this->lrs_elsewhere();
 		$editor = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		foreach ( ( new Program_Repository() )->get( $this->t59 )->course_ids as $course ) {
 			$this->assertTrue( ( new Sensei_Adapter() )->enrol( $editor, $course ) );
