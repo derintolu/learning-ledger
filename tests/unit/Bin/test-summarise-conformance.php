@@ -87,4 +87,26 @@ class Summarise_Conformance_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertStringContainsString( 'client_secret=[REDACTED]&b=1', $text );
 		$this->assertStringContainsString( 'keep me', $text );
 	}
+
+	public function test_redaction_makes_repo_root_paths_relative() {
+		$root                = dirname( __DIR__, 3 );
+		$esc                 = str_replace( '/', '\\/', $root );
+		$body                = implode(
+			"\n",
+			array(
+				'expected 200 got 400\nat (' . $root . '/.cache/lrs-conformance/test/v1_0_3/a.js:12:5)',
+				'json escaped ' . $esc . '\\/.cache\\/lrs-conformance\\/b.js',
+				'elsewhere /opt/other/.cache/c.js stays',
+				'keep me',
+			)
+		);
+		list( $code, $text ) = $this->redact( $body, 'unused-secret' );
+		$this->assertSame( 0, $code );
+		$this->assertStringNotContainsString( $root, $text );
+		$this->assertStringNotContainsString( $esc, $text );
+		$this->assertStringContainsString( 'at (.cache/lrs-conformance/test/v1_0_3/a.js:12:5)', $text );
+		$this->assertStringContainsString( 'json escaped .cache\\/lrs-conformance\\/b.js', $text );
+		$this->assertStringContainsString( '/opt/other/.cache/c.js stays', $text );
+		$this->assertStringContainsString( 'keep me', $text );
+	}
 }

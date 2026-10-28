@@ -9,7 +9,9 @@
 # form body (Authorization=Basic%20<base64>, with %3D padding) is caught. The value of an
 # Authorization=Basic|Bearer field ends at whitespace, a quote, "&", "," or "}". Needles
 # travel in the environment, never in argv. Fails if any needle form, or an unredacted
-# Authorization Basic/Bearer value, is still present afterwards.
+# Authorization Basic/Bearer value, is still present afterwards. The repository root
+# (the parent of this script's directory) is stripped from absolute paths, plain or
+# JSON-escaped, so saved run records hold repo-relative paths such as ".cache/...".
 
 # Perl shared by both passes. Builds $needle_re (every needle, every encoding) and $auth_re.
 _lledger_redact_perl_common='
@@ -38,6 +40,8 @@ _lledger_redact_perl_common='
 	}
 '
 
+_lledger_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 lledger_redact() {
 	local file="$1" key="$2" needles="" secret b64
 	shift 2
@@ -46,7 +50,13 @@ lledger_redact() {
 		b64="$(printf '%s:%s' "$key" "$secret" | base64 | tr -d '\n')"
 		needles+="${secret}"$'\n'"${b64}"$'\n'
 	done
-	LLEDGER_REDACT_NEEDLES="$needles" perl -i -pe "${_lledger_redact_perl_common}"'
+	LLEDGER_REDACT_NEEDLES="$needles" LLEDGER_REPO_ROOT="$_lledger_repo_root" perl -i -pe "${_lledger_redact_perl_common}"'
+		BEGIN {
+			$root = $ENV{LLEDGER_REPO_ROOT};
+			($root_json = $root) =~ s{/}{\\/}g;
+		}
+		s{\Q$root_json\E\\/}{}g if length $root;
+		s{\Q$root\E/}{}g if length $root;
 		s/$needle_re/[REDACTED]/g;
 		s/$auth_re(?!\[REDACTED\])$val+/$1\[REDACTED]/g;
 	' "$file" || return 1
