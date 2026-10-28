@@ -264,7 +264,12 @@ final class Xapi_Router implements Module {
 			 * @param Xapi_Request  $xapi Request, with the principal the router resolved.
 			 * @param Xapi_Response $res  Response.
 			 */
-			do_action( 'learning_ledger/xapi_answered', $xapi, $res ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+			try {
+				do_action( 'learning_ledger/xapi_answered', $xapi, $res ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+			} catch ( \Throwable $e ) {
+				// The request is answered; a failing listener must not turn it into an error.
+				error_log( 'Learning Ledger: xapi_answered listener failed: ' . get_class( $e ) . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Operators need the cause.
+			}
 		}
 		// A request that failed to authenticate still gets CORS headers for an origin the preflight
 		// allows, so a browser AU can read the 401 rather than see a network error [cmi5 8.1.2.0-2].

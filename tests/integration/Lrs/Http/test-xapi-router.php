@@ -123,6 +123,29 @@ class Xapi_Router_Test extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'secret-db-detail', $logged );
 	}
 
+	public function test_a_throwing_xapi_answered_listener_does_not_break_the_response() {
+		$c        = Client_Factory::create( array( Scopes::STATEMENTS_READ ) );
+		$listener = static function () {
+			throw new RuntimeException( 'listener-boom' );
+		};
+		add_action( 'learning_ledger/xapi_answered', $listener );
+		$log      = tempnam( sys_get_temp_dir(), 'llerr' );
+		$previous = ini_set( 'error_log', $log ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		try {
+			$res = Xapi_Test_Client::as( $c['id'], $c['secret'] )->request( 'GET', 'activities', array( 'activityId' => 'http://x/a' ) );
+		} finally {
+			ini_set( 'error_log', (string) $previous ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+			remove_action( 'learning_ledger/xapi_answered', $listener );
+		}
+		$logged = (string) file_get_contents( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		unlink( $log ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+		$this->assertSame( 200, $res->status() );
+		$this->assertSame( '{"ok":true}', $res->body() );
+		$this->assertArrayHasKey( 'X-Experience-API-Version', $res->headers() );
+		$this->assertStringContainsString( 'listener-boom', $logged );
+	}
+
 	public function test_unknown_resource_404_and_unsupported_method_405() {
 		$res = ( new Xapi_Test_Client() )->request( 'GET', 'nothing/here' );
 		$this->assertSame( 404, $res->status() );
