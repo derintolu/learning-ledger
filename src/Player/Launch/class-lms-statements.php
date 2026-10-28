@@ -94,13 +94,13 @@ final class Lms_Statements {
 		if ( $carried_over ) {
 			$extensions[ Vocab::CXM_EXT_CARRIED_OVER ] = true;
 		}
-		$st           = self::statement( $actor, Vocab::WAIVED, 'Waived', Au::activity_id( $au->id() ), $registration, $session, $au->id() );
+		$st = self::statement( $actor, Vocab::WAIVED, 'Waived', Au::activity_id( $au->id() ), $registration, $session, $au->id() );
 		// A waiver satisfies the AU's moveOn, so it is a moveOn statement [cmi5 9.6.2.2].
 		$st['context']['contextActivities']['category'][] = array(
 			'objectType' => 'Activity',
 			'id'         => Vocab::CAT_MOVEON,
 		);
-		$st['result'] = array(
+		$st['result']                                     = array(
 			'success'    => true,
 			'completion' => true,
 			'extensions' => $extensions,
@@ -114,7 +114,7 @@ final class Lms_Statements {
 	 * publisher id [cmi5 9.6.2.3].
 	 *
 	 * @param string $publisher_id Block or course publisher id.
-	 * @param string $kind         `block` or `course`.
+	 * @param string $kind         Either `block` or `course`.
 	 * @param array  $actor        Learner actor.
 	 * @param string $registration Registration UUID.
 	 * @param string $session      Session id.
@@ -132,7 +132,7 @@ final class Lms_Statements {
 	 * and never the publisher id [cmi5 9.3.9], as AUs are `{au@id}/au`.
 	 *
 	 * @param string $publisher_id Block or course publisher id.
-	 * @param string $kind         `block` or `course`.
+	 * @param string $kind         Either `block` or `course`.
 	 *
 	 * @return string
 	 */

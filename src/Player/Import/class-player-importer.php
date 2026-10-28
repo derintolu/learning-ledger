@@ -374,7 +374,7 @@ final class Player_Importer {
 	 * Errors for objective ids defined more than once (cmi5 13.1.3). The structure does not keep
 	 * objectives, so they are read from the (already validated) cmi5.xml.
 	 *
-	 * @param string $xml cmi5.xml.
+	 * @param string $xml The cmi5.xml.
 	 *
 	 * @return array<array{code:string,path:string,message:string}>
 	 */
@@ -388,7 +388,7 @@ final class Player_Importer {
 		$seen   = array();
 		$errors = array();
 		foreach ( $xpath->query( '/c:courseStructure/c:objectives/c:objective/@id' ) as $attr ) {
-			$id = trim( $attr->nodeValue );
+			$id = trim( $attr->nodeValue ); // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- DOM API.
 			if ( isset( $seen[ $id ] ) ) {
 				$errors[] = Import_Writer::error( 'duplicate_id', '/objective', 'The objective id "' . $id . '" is used more than once.' );
 			}
