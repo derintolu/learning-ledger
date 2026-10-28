@@ -77,7 +77,15 @@ final class Authenticator {
 	 * @throws Xapi_Error 401 (with WWW-Authenticate) or 429 (with Retry-After).
 	 */
 	public function authenticate( Xapi_Request $r, array $server ): Principal {
-		$ip      = $r->ip();
+		/**
+		 * The client address the failed-authentication limiter counts against. Defaults to
+		 * REMOTE_ADDR; behind a trusted reverse proxy or CDN, return the client address the proxy
+		 * reports (for example from X-Forwarded-For) so one client cannot lock out every other.
+		 *
+		 * @param string $ip     REMOTE_ADDR (validated as an IP, or empty).
+		 * @param array  $server Server variables of the request.
+		 */
+		$ip      = (string) apply_filters( 'learning_ledger/client_ip', $r->ip(), $server ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Slash-namespaced hook name is the plugin convention.
 		$blocked = $this->failures->blocked_for( $ip );
 		if ( $blocked > 0 ) {
 			throw new Xapi_Error( 429, 'Too many failed authentication attempts.', array( 'Retry-After' => (string) $blocked ) );

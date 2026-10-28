@@ -304,6 +304,32 @@ class Authenticator_Test extends WP_UnitTestCase {
 		$this->assertSame( $c['id'], $this->auth( self::request( $good, '198.51.100.9' ) )->client_id() );
 	}
 
+	public function test_client_ip_filter_keys_the_failure_limiter() {
+		$c     = Client_Factory::create( array( Scopes::STATEMENTS_READ ) );
+		$proxy = '10.0.0.1';
+		$seen  = array();
+		$key   = static function ( string $ip, array $server ) use ( $proxy, &$seen ): string {
+			$seen = array( $ip, $server['HTTP_X_FORWARDED_FOR'] ?? null );
+			return $proxy === $ip && isset( $server['HTTP_X_FORWARDED_FOR'] ) ? $server['HTTP_X_FORWARDED_FOR'] : $ip;
+		};
+		add_filter( 'learning_ledger/client_ip', $key, 10, 2 );
+		$bad  = self::request( array( 'Authorization' => self::basic( $c['id'], 'guess' ) ), $proxy );
+		$good = self::request( array( 'Authorization' => self::basic( $c['id'], $c['secret'] ) ), $proxy );
+		$one  = array( 'HTTP_X_FORWARDED_FOR' => '198.51.100.30' );
+		$two  = array( 'HTTP_X_FORWARDED_FOR' => '198.51.100.31' );
+
+		for ( $i = 1; $i <= 10; $i++ ) {
+			$this->assertSame( 401, $this->expect_error( $bad, $one )->status(), "attempt $i" );
+		}
+		$this->assertSame( array( $proxy, '198.51.100.30' ), $seen, 'the filter gets REMOTE_ADDR and the server variables' );
+		$this->assertSame( 429, $this->expect_error( $bad, $one )->status() );
+		$this->assertSame( 429, $this->expect_error( $good, $one )->status(), 'valid credentials do not lift the block' );
+		$this->assertSame( $c['id'], $this->auth( $good, $two )->client_id(), 'another client behind the same proxy is not locked out' );
+
+		remove_filter( 'learning_ledger/client_ip', $key, 10 );
+		$this->assertSame( $c['id'], $this->auth( $good, $one )->client_id(), 'without the filter the key is REMOTE_ADDR' );
+	}
+
 	public function test_missing_header_does_not_count_as_failure() {
 		for ( $i = 0; $i < 12; $i++ ) {
 			$this->assertSame( 401, $this->expect_error( self::request( array(), '198.51.100.20' ) )->status() );
