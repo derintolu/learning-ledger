@@ -5,10 +5,13 @@
  * @package LearningLedger
  */
 
+use LearningLedger\Lrs\Auth\Origin_Index;
+use LearningLedger\Lrs\Auth\Scopes;
 use LearningLedger\Lrs\Http\Resource_Handler;
 use LearningLedger\Lrs\Http\Xapi_Request;
 use LearningLedger\Lrs\Http\Xapi_Response;
 use LearningLedger\Lrs\Http\Xapi_Router;
+use LearningLedger\Tests\Client_Factory;
 use LearningLedger\Tests\Xapi_Test_Client;
 
 // phpcs:disable Generic.Files.OneObjectStructurePerFile.MultipleFound -- the fake handler belongs to this test only.
@@ -267,6 +270,26 @@ class Xapi_Router_Test extends WP_UnitTestCase {
 		$this->assertSame( 204, $res->status() );
 		$this->assertArrayNotHasKey( 'Access-Control-Allow-Origin', $res->headers() );
 		$this->assertSame( '2.0.0', $res->headers()['X-Experience-API-Version'] );
+		$this->assertSame( array(), Xapi_Router_Test_Handler::$seen );
+	}
+
+	/**
+	 * CATAPULT 005-1 and 008-1, cmi5 8.1.2.0-2 and 9.3.6.0-2: a browser AU must be able to read the
+	 * 401 for bad or revoked credentials, so an origin the preflight allows gets CORS headers on it.
+	 */
+	public function test_unauthenticated_401_carries_cors_for_an_allowed_origin_only() {
+		Client_Factory::create( array( Scopes::STATEMENTS_READ ), array( 'cors_origins' => array( 'https://au.example.org' ) ) );
+		Origin_Index::flush();
+		$bad = Xapi_Test_Client::as( 'no-such-client', 'wrong-secret' );
+
+		$allowed = $bad->request( 'GET', 'statements', array(), null, array( 'Origin' => 'https://au.example.org' ) );
+		$this->assertSame( 401, $allowed->status() );
+		$this->assertSame( 'https://au.example.org', $allowed->headers()['Access-Control-Allow-Origin'] ?? null );
+		$this->assertSame( 'Origin', $allowed->headers()['Vary'] ?? null );
+
+		$other = $bad->request( 'GET', 'statements', array(), null, array( 'Origin' => 'https://evil.example' ) );
+		$this->assertSame( 401, $other->status() );
+		$this->assertArrayNotHasKey( 'Access-Control-Allow-Origin', $other->headers() );
 		$this->assertSame( array(), Xapi_Router_Test_Handler::$seen );
 	}
 

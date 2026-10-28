@@ -257,8 +257,11 @@ final class Xapi_Router implements Module {
 		}
 
 		$principal = null === $xapi ? null : $xapi->principal();
-		$res       = Cors::decorate( $res, $request->get_header( 'Origin' ), null === $principal ? array() : $principal->cors_origins() );
-		$res       = self::with_version( $res, $is_about ? self::LATEST_VERSION : $version );
+		// A request that failed to authenticate still gets CORS headers for an origin the preflight
+		// allows, so a browser AU can read the 401 rather than see a network error [cmi5 8.1.2.0-2].
+		$allowed = null !== $principal ? $principal->cors_origins() : ( class_exists( '\LearningLedger\Lrs\Auth\Origin_Index' ) ? \LearningLedger\Lrs\Auth\Origin_Index::all() : array() );
+		$res     = Cors::decorate( $res, $request->get_header( 'Origin' ), $allowed );
+		$res     = self::with_version( $res, $is_about ? self::LATEST_VERSION : $version );
 		if ( $is_head ) {
 			$res = new Xapi_Response( $res->status(), '', $res->content_type(), $res->headers() );
 		}
