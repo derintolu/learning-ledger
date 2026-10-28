@@ -27,8 +27,11 @@ class Statements_Read_Handler_Test extends WP_UnitTestCase {
 
 	private Principal $reader;
 
+	private ?string $request_uri;
+
 	public function set_up() {
 		parent::set_up();
+		$this->request_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		Installer::install();
 		global $wpdb;
 		foreach ( array( 'statements', 'statement_refs', 'pending_voids', 'activities', 'agents' ) as $t ) {
@@ -40,6 +43,11 @@ class Statements_Read_Handler_Test extends WP_UnitTestCase {
 
 	public function tear_down() {
 		Clock::freeze( null );
+		if ( null === $this->request_uri ) {
+			unset( $_SERVER['REQUEST_URI'] );
+		} else {
+			$_SERVER['REQUEST_URI'] = $this->request_uri;
+		}
 		parent::tear_down();
 	}
 
@@ -140,7 +148,8 @@ class Statements_Read_Handler_Test extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '#\A/index\.php\?rest_route=%2Flearning-ledger%2Fxapi%2Fstatements&more=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\z#', $plain, 'plain permalinks: the REST route' );
 
 		$this->set_permalink_structure( '/%postname%/' );
-		$first = json_decode( $this->get( array( 'limit' => '2' ) )->body(), true );
+		$_SERVER['REQUEST_URI'] = '/xapi/statements?limit=2';
+		$first                  = json_decode( $this->get( array( 'limit' => '2' ) )->body(), true );
 		$this->assertCount( 2, $first['statements'] );
 		$this->assertMatchesRegularExpression( '#\A/xapi/statements\?more=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\z#', $first['more'], 'a relative IRL on the public base' );
 
@@ -231,6 +240,7 @@ class Statements_Read_Handler_Test extends WP_UnitTestCase {
 		foreach ( array(
 			array( 'agent' => '{"name":"no ifi"}' ),
 			array( 'agent' => 'not json' ),
+			array( 'agent' => '{"objectType":"Group","member":[{"mbox":"mailto:a@example.test"}]}' ),
 			array( 'verb' => 'not an iri' ),
 			array( 'activity' => 'not an iri' ),
 			array( 'registration' => 'nope' ),
@@ -312,5 +322,20 @@ class Statements_Read_Handler_Test extends WP_UnitTestCase {
 		$this->assertSame( 404, $this->get( array( 'statementId' => $t ), array(), $bound )->status() );
 
 		$this->assertSame( 403, $this->get( array(), array(), self::principal( array( 'statements/write' ) ) )->status() );
+	}
+	public function test_more_link_keeps_the_arrival_base() {
+		$this->store_at( '2026-10-27T08:00:00Z', array( self::statement( 'u1' ), self::statement( 'u2' ) ) );
+		$this->set_permalink_structure( '/%postname%/' );
+		$token = '[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+';
+
+		$_SERVER['REQUEST_URI'] = '/xapi/statements?limit=1';
+		$this->assertMatchesRegularExpression( '#\A/xapi/statements\?more=' . $token . '\z#', json_decode( $this->get( array( 'limit' => '1' ) )->body(), true )['more'] );
+
+		$_SERVER['REQUEST_URI'] = '/wp-json/learning-ledger/xapi/statements?limit=1';
+		$this->assertMatchesRegularExpression( '#\A/wp-json/learning-ledger/xapi/statements\?more=' . $token . '\z#', json_decode( $this->get( array( 'limit' => '1' ) )->body(), true )['more'] );
+
+		$this->set_permalink_structure( '' );
+		$_SERVER['REQUEST_URI'] = '/?rest_route=/learning-ledger/xapi/statements&limit=1';
+		$this->assertMatchesRegularExpression( '#\A/index\.php\?rest_route=%2Flearning-ledger%2Fxapi%2Fstatements&more=' . $token . '\z#', json_decode( $this->get( array( 'limit' => '1' ) )->body(), true )['more'] );
 	}
 }

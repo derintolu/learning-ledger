@@ -8,11 +8,13 @@
 use LearningLedger\Crypto\Hmac;
 use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Statements\More_Cursor;
+use LearningLedger\Util\Clock;
 
 class More_Cursor_Test extends WP_UnitTestCase {
 
 	public function tear_down() {
 		Hmac::set_key_for_tests( null );
+		Clock::freeze( null );
 		parent::tear_down();
 	}
 
@@ -66,5 +68,13 @@ class More_Cursor_Test extends WP_UnitTestCase {
 		$body = rtrim( strtr( base64_encode( '{"params":[],"last_seq":"x","upper_bound":1}' ), '+/', '-_' ), '=' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
 		$mac  = rtrim( strtr( base64_encode( Hmac::sign( $body, 'more' ) ), '+/', '-_' ), '=' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
 		$this->assertSame( 400, self::status_of( $body . '.' . $mac ) );
+	}
+	public function test_token_expires_after_24_hours() {
+		Clock::freeze( new DateTimeImmutable( '2026-10-27T08:00:00Z' ) );
+		$token = More_Cursor::encode( array(), 10, '2026-10-27T07:59:59.000000Z' );
+		Clock::freeze( new DateTimeImmutable( '2026-10-28T07:59:59Z' ) );
+		$this->assertSame( 0, self::status_of( $token ) );
+		Clock::freeze( new DateTimeImmutable( '2026-10-28T08:00:01Z' ) );
+		$this->assertSame( 400, self::status_of( $token ) );
 	}
 }

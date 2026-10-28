@@ -9,6 +9,8 @@ use LearningLedger\Db\Installer;
 use LearningLedger\Db\Tables;
 use LearningLedger\Lrs\Auth\Client_Repository;
 use LearningLedger\Lrs\Auth\Principal;
+use LearningLedger\Lrs\Auth\Token_Repository;
+use LearningLedger\Lrs\Auth\Token_Spec;
 use LearningLedger\Lrs\Http\Xapi_Error;
 use LearningLedger\Lrs\Http\Xapi_Request;
 use LearningLedger\Lrs\Statements\More_Cursor;
@@ -32,6 +34,13 @@ class Statement_Query_Test extends WP_UnitTestCase {
 
 	private Principal $reader;
 
+	/**
+	 * Child tokens minted; the store's COMMIT keeps them past the test's rollback, so they are removed and committed by hand.
+	 *
+	 * @var string[]
+	 */
+	private array $minted = array();
+
 	public function set_up() {
 		parent::set_up();
 		Installer::install();
@@ -44,6 +53,12 @@ class Statement_Query_Test extends WP_UnitTestCase {
 	}
 
 	public function tear_down() {
+		if ( array() !== $this->minted ) {
+			foreach ( $this->minted as $key ) {
+				$GLOBALS['wpdb']->delete( Tables::name( 'tokens' ), array( 'token_key' => $key ) );
+			}
+			$GLOBALS['wpdb']->query( 'COMMIT' );
+		}
 		Clock::freeze( null );
 		parent::tear_down();
 	}
@@ -328,5 +343,103 @@ class Statement_Query_Test extends WP_UnitTestCase {
 		}
 		$this->assertCount( 1, $this->query( array(), null, More_Cursor::decode( $res['more'] ) )['rows'] );
 		$this->assertTrue( Uuid::is_valid( $this->query( array(), null, More_Cursor::decode( $res['more'] ) )['rows'][0]->id ) );
+	}
+	private static function ref_to( string $target, string $actor = 'admin', string $verb = 'voided' ): array {
+		$st           = self::statement( $actor, 'unused', $verb );
+		$st['object'] = array(
+			'objectType' => 'StatementRef',
+			'id'         => $target,
+		);
+		return $st;
+	}
+
+	public function test_statement_ref_matches_when_its_target_matches() {
+		[ $target ] = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement( 'u1', 'https://site.example/act/1', 'completed', self::REG_1 ) ) );
+		[ $voider ] = $this->store_at( '2026-10-27T08:00:01Z', array( self::ref_to( $target ) ) );
+
+		// The voided target is never listed, but the voiding statement matches through it.
+		$this->assertSame( array( $voider ), self::ids( $this->query( array( 'verb' => 'http://adlnet.gov/expapi/verbs/completed' ) ) ) );
+		$this->assertSame( array( $voider ), self::ids( $this->query( array( 'agent' => Json::encode_exact( self::agent( 'u1' ) ) ) ) ) );
+		$this->assertSame( array( $voider ), self::ids( $this->query( array( 'activity' => 'https://site.example/act/1' ) ) ) );
+		$this->assertSame( array( $voider ), self::ids( $this->query( array( 'registration' => self::REG_1 ) ) ) );
+		$this->assertSame( array( $voider ), self::ids( $this->query( array( 'verb' => 'http://adlnet.gov/expapi/verbs/voided' ) ) ), 'and on its own properties' );
+		$this->assertSame( array(), self::ids( $this->query( array( 'verb' => 'http://adlnet.gov/expapi/verbs/attempted' ) ) ) );
+	}
+
+	public function test_statement_ref_matching_is_recursive_and_time_filters_apply_to_the_referrer() {
+		[ $base ]  = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement( 'u2', 'https://site.example/act/2', 'attempted' ) ) );
+		[ $ref_1 ] = $this->store_at( '2026-10-27T08:00:01Z', array( self::ref_to( $base, 'u3', 'commented' ) ) );
+		[ $ref_2 ] = $this->store_at( '2026-10-27T08:00:02Z', array( self::ref_to( $ref_1, 'u4', 'liked' ) ) );
+		[ $other ] = $this->store_at( '2026-10-27T08:00:03Z', array( self::statement( 'u5' ) ) );
+		$attempted = 'http://adlnet.gov/expapi/verbs/attempted';
+
+		$this->assertSame( array( $ref_2, $ref_1, $base ), self::ids( $this->query( array( 'verb' => $attempted ) ) ) );
+		$this->assertSame(
+			array( $ref_2, $ref_1 ),
+			self::ids(
+				$this->query(
+					array(
+						'verb'  => $attempted,
+						'since' => '2026-10-27T08:00:00Z',
+					)
+				)
+			)
+		);
+		$this->assertSame(
+			array( $ref_1 ),
+			self::ids(
+				$this->query(
+					array(
+						'verb'  => $attempted,
+						'since' => '2026-10-27T08:00:00Z',
+						'until' => '2026-10-27T08:00:01Z',
+					)
+				)
+			)
+		);
+		$this->assertSame(
+			array( $base, $ref_1, $ref_2 ),
+			self::ids(
+				$this->query(
+					array(
+						'verb'      => $attempted,
+						'ascending' => 'true',
+					)
+				)
+			)
+		);
+
+		// Paging merges direct and referring matches in seq order.
+		$page = $this->query(
+			array(
+				'verb'  => $attempted,
+				'limit' => '2',
+			)
+		);
+		$this->assertSame( array( $ref_2, $ref_1 ), self::ids( $page ) );
+		$this->assertSame( array( $base ), self::ids( $this->query( array(), null, More_Cursor::decode( $page['more'] ) ) ) );
+
+		// The referring statement itself must pass the caller's read filter.
+		$bound = self::principal( array( 'statements/read' ), array( 'bindings' => array( 'actor_ifi' => 'account:https://site.example|u3' ) ) );
+		$this->assertSame( array( $ref_1 ), self::ids( $this->query( array( 'verb' => $attempted ), $bound ) ) );
+		unset( $other );
+	}
+
+	public function test_child_token_reads_only_its_own_in_its_registration() {
+		$c      = Client_Factory::create( array( 'tokens/mint', 'statements/write', 'statements/read/mine' ) );
+		$parent = ( new Client_Repository() )->find( $c['id'] );
+		Clock::freeze( new DateTimeImmutable( '2026-10-27T07:00:00Z' ) );
+		$tokens = new Token_Repository();
+		$key    = $tokens->mint( $parent, new Token_Spec( self::REG_1, self::agent( 'u1' ), 'https://site.example/act/1', Uuid::v4(), 'Normal', 28800, array(), false ) )['key'];
+		$child  = Principal::for_token( $parent, $tokens->find( $key ) );
+
+		$this->minted[] = $key;
+
+		[ $own ] = $this->store_at( '2026-10-27T08:00:00Z', array( self::statement( 'u1', 'https://site.example/act/1', 'completed', self::REG_1 ) ), $child );
+		$this->store_at( '2026-10-27T08:00:01Z', array( self::statement( 'u1', 'https://site.example/act/1', 'completed', self::REG_1 ) ), Principal::for_client( $parent ) );
+		$this->store_at( '2026-10-27T08:00:02Z', array( self::statement( 'u1', 'https://site.example/act/1', 'completed', self::REG_2 ) ) );
+
+		$this->assertSame( array( $own ), self::ids( $this->query( array(), $child ) ) );
+		$this->assertSame( array(), self::ids( $this->query( array( 'registration' => self::REG_2 ), $child ) ) );
 	}
 }

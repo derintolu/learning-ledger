@@ -14,6 +14,7 @@ use LearningLedger\Util\Json;
 use LearningLedger\Util\Timestamp;
 use LearningLedger\Util\Uuid;
 use LearningLedger\Xapi\Actor_Validator;
+use LearningLedger\Xapi\Agent_Identity;
 use LearningLedger\Xapi\Primitives;
 
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Xapi_Error messages are served as JSON, never echoed into HTML.
@@ -126,13 +127,11 @@ final class Query_Params {
 			try {
 				$agent = Json::decode_strict( $p['agent'], 65536, 8 );
 				Actor_Validator::validate( $agent, $version, 'agent' );
+				Agent_Identity::from_array( $agent );
 			} catch ( Invalid_Input $e ) {
-				throw new Xapi_Error( 400, 'The agent parameter must be an Agent or Group as JSON: ' . $e->getMessage() );
+				throw new Xapi_Error( 400, 'The agent parameter must be an Agent or identified Group as JSON: ' . $e->getMessage() );
 			}
 			$agent_hash = Ref_Indexer::agent_hash( $agent );
-			if ( null === $agent_hash ) {
-				throw new Xapi_Error( 400, 'The agent parameter must identify an Agent or Group.' );
-			}
 		}
 
 		$limit = self::DEFAULT_LIMIT;

@@ -22,9 +22,9 @@ use LearningLedger\Util\Uuid;
 final class Statement_Repository {
 
 	/**
-	 * Columns read into a Stored_Statement.
+	 * Columns read into a Stored_Statement (see hydrate()).
 	 */
-	private const COLUMNS = 'seq, statement_id, `stored`, version, registration, actor_hash, authority_client, is_voiding, voids_id, voided, body';
+	public const COLUMNS = 'seq, statement_id, `stored`, version, registration, actor_hash, authority_client, is_voiding, voids_id, voided, body';
 
 	/**
 	 * A statement by id.
@@ -265,11 +265,11 @@ final class Statement_Repository {
 	/**
 	 * Row to value object.
 	 *
-	 * @param array $row Row.
+	 * @param array $row Row with the COLUMNS keys.
 	 *
 	 * @return Stored_Statement
 	 */
-	private static function hydrate( array $row ): Stored_Statement {
+	public static function hydrate( array $row ): Stored_Statement {
 		return new Stored_Statement(
 			(int) $row['seq'],
 			Uuid::from_bin( $row['statement_id'] ),

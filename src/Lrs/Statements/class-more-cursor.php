@@ -9,10 +9,11 @@ namespace LearningLedger\Lrs\Statements;
 
 use LearningLedger\Crypto\Hmac;
 use LearningLedger\Lrs\Http\Xapi_Error;
+use LearningLedger\Util\Clock;
 
 /**
- * The `more` token: base64url JSON of the query parameters, the last seq returned and the
- * fixed upper bound (consistent-through of the first page), then `.` and its HMAC.
+ * The `more` token: base64url JSON of the query parameters, the last seq returned, the
+ * fixed upper bound (consistent-through of the first page) and an expiry, then `.` and its HMAC.
  */
 final class More_Cursor {
 
@@ -20,6 +21,11 @@ final class More_Cursor {
 	 * HMAC purpose label.
 	 */
 	private const PURPOSE = 'more';
+
+	/**
+	 * How long a token stays valid, in seconds.
+	 */
+	private const TTL = 86400;
 
 	/**
 	 * Longest token accepted.
@@ -49,6 +55,7 @@ final class More_Cursor {
 			'params'      => $params,
 			'last_seq'    => $last_seq,
 			'upper_bound' => $upper_bound,
+			'exp'         => Clock::now()->getTimestamp() + self::TTL,
 		);
 		$body    = self::b64( (string) wp_json_encode( $payload, JSON_UNESCAPED_SLASHES ) );
 		return $body . '.' . self::b64( Hmac::sign( $body, self::PURPOSE ) );
@@ -60,7 +67,7 @@ final class More_Cursor {
 	 * @param string $token Token.
 	 *
 	 * @return self
-	 * @throws Xapi_Error 400 when the token is malformed or its signature does not verify.
+	 * @throws Xapi_Error 400 when the token is malformed, expired, or its signature does not verify.
 	 */
 	public static function decode( string $token ): self {
 		$invalid = new Xapi_Error( 400, 'The more token is invalid.' );
@@ -73,7 +80,8 @@ final class More_Cursor {
 		}
 		$json    = self::unb64( $m[1] );
 		$payload = null === $json ? null : json_decode( $json, true );
-		if ( ! is_array( $payload ) || ! is_array( $payload['params'] ?? null ) || ! is_int( $payload['last_seq'] ?? null ) || ! is_string( $payload['upper_bound'] ?? null ) ) {
+		if ( ! is_array( $payload ) || ! is_array( $payload['params'] ?? null ) || ! is_int( $payload['last_seq'] ?? null ) || ! is_string( $payload['upper_bound'] ?? null )
+			|| ! is_int( $payload['exp'] ?? null ) || $payload['exp'] < Clock::now()->getTimestamp() ) {
 			throw $invalid;
 		}
 		return new self( $payload['params'], $payload['last_seq'], $payload['upper_bound'] );

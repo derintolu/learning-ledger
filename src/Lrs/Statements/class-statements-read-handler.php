@@ -136,20 +136,39 @@ final class Statements_Read_Handler implements Resource_Handler {
 	}
 
 	/**
-	 * The `more` IRL: path and query on the public xAPI base, without scheme, host or port.
+	 * The `more` IRL: path and query without scheme, host or port, on the base the request
+	 * arrived at (the `/xapi/` alias, or the REST route).
 	 *
 	 * @param string $token Cursor token.
 	 *
 	 * @return string
 	 */
 	private static function more_url( string $token ): string {
-		if ( '' !== (string) get_option( 'permalink_structure' ) ) {
+		if ( self::arrived_via_alias() ) {
 			$url = home_url( '/xapi/statements' ) . '?more=' . $token;
 		} else {
 			$url = add_query_arg( 'more', $token, rest_url( Xapi_Router::REST_NAMESPACE . '/statements' ) );
 		}
 		$parts = wp_parse_url( $url );
 		return ( $parts['path'] ?? '/' ) . ( isset( $parts['query'] ) ? '?' . $parts['query'] : '' );
+	}
+
+	/**
+	 * Whether the request path, below the home path, starts with `/xapi` (as in Xapi_Router::is_xapi_request).
+	 *
+	 * @return boolean
+	 */
+	private static function arrived_via_alias(): bool {
+		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only matched against a path pattern.
+		$path = (string) wp_parse_url( $uri, PHP_URL_PATH );
+		$home = '/' . trim( (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH ), '/' );
+		if ( '/' !== $home ) {
+			if ( ! str_starts_with( $path, $home . '/' ) && $path !== $home ) {
+				return false;
+			}
+			$path = substr( $path, strlen( $home ) );
+		}
+		return 1 === preg_match( '#^/xapi(?:/|$)#', '/' . ltrim( $path, '/' ) );
 	}
 
 	/**
