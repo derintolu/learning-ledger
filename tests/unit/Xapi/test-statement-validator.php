@@ -182,4 +182,36 @@ class Statement_Validator_Test extends \PHPUnit\Framework\TestCase {
 		Statement_Validator::validate( array_merge( $st, array( 'version' => '2.0' ) ), '2.0.0' );
 		self::rejects( array_merge( $st, array( 'version' => '2.0' ) ), '1.0.3', 'version', '2.0 under 1.0.3' );
 	}
+
+	/**
+	 * XAPI-00123 (Data 4.5): a negative zero offset ("-00", "-0000", "-00:00") is not a valid
+	 * timestamp, in a statement or a SubStatement, under either version.
+	 */
+	public function test_xapi_00123_negative_zero_offset_timestamp_is_rejected() {
+		$st  = self::load( self::FIXTURES . 'valid/minimal.both.json' );
+		$sub = array_merge(
+			$st,
+			array(
+				'object' => array_merge(
+					array( 'objectType' => 'SubStatement' ),
+					$st
+				),
+			)
+		);
+		foreach ( array( '1.0.3', '2.0.0' ) as $version ) {
+			foreach ( array( '-00', '-0000', '-00:00' ) as $offset ) {
+				$ts = '2008-09-15T15:53:00.601' . $offset;
+				self::rejects( array_merge( $st, array( 'timestamp' => $ts ) ), $version, 'timestamp', $offset . ' ' . $version );
+				$bad                        = $sub;
+				$bad['object']['timestamp'] = $ts;
+				self::rejects( $bad, $version, 'object.timestamp', 'substatement ' . $offset . ' ' . $version );
+			}
+			foreach ( array( '+00:00', 'Z', '-05:00' ) as $offset ) {
+				Statement_Validator::validate( array_merge( $st, array( 'timestamp' => '2008-09-15T15:53:00.601' . $offset ) ), $version );
+			}
+		}
+		foreach ( array( '+00', '+0000', '-0500' ) as $offset ) {
+			Statement_Validator::validate( array_merge( $st, array( 'timestamp' => '2008-09-15T15:53:00.601' . $offset ) ), '1.0.3' );
+		}
+	}
 }

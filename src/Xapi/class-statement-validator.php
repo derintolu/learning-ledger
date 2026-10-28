@@ -626,7 +626,8 @@ final class Statement_Validator {
 	 * @return void
 	 */
 	private static function timestamp( mixed $value, string $version, string $path ): void {
-		$valid = is_string( $value );
+		// A negative zero offset means "offset unknown", which no xAPI timestamp may use (XAPI-00123).
+		$valid = is_string( $value ) && 1 !== preg_match( '/-00(?::?00)?\z/', $value );
 		if ( $valid ) {
 			try {
 				Timestamp::parse( $value, $version );
