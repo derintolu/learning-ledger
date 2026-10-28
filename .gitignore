@@ -4,6 +4,7 @@
 .superpowers/
 /vendor-prefixed/
 /build/
+/dist/
 /.cache/
 /.wp-env.override.json
 /conformance/raw/tmp/

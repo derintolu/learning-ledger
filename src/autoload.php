@@ -7,6 +7,8 @@
 
 namespace LearningLedger;
 
+defined( 'ABSPATH' ) || exit;
+
 if ( ! defined( 'LEARNING_LEDGER_DIR' ) ) {
 	define( 'LEARNING_LEDGER_DIR', dirname( __DIR__ ) . '/' );
 }

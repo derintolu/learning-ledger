@@ -5,6 +5,11 @@
  * @package LearningLedger
  */
 
+// src/autoload.php exits unless ABSPATH is defined, as WordPress defines it.
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', dirname( __DIR__ ) . '/' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound
+}
+
 define( 'LEARNING_LEDGER_DIR', dirname( __DIR__ ) . '/' );
 
 require_once dirname( __DIR__ ) . '/vendor/autoload.php';
