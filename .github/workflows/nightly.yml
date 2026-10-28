@@ -46,6 +46,8 @@ jobs:
           cache: npm
       - if: steps.present.outputs.present == 'true'
         name: Install the latest wordpress.org release into the tests environment
+        # <slug>.zip is the latest stable release. wp-env names the plugin directory
+        # after the file name, and the integration bootstrap looks for the LMS there.
         run: |
           cat > .wp-env.override.json <<'JSON'
           {
@@ -53,7 +55,7 @@ jobs:
               "tests": {
                 "plugins": [
                   ".",
-                  "https://downloads.wordpress.org/plugin/${{ matrix.lms.slug }}.latest-stable.zip"
+                  "https://downloads.wordpress.org/plugin/${{ matrix.lms.slug }}.zip"
                 ]
               }
             }
@@ -69,5 +71,8 @@ jobs:
         run: npm run build
       - if: steps.present.outputs.present == 'true'
         run: npx @wordpress/env start
+      - if: steps.present.outputs.present == 'true'
+        name: Fail unless the LMS is installed where the bootstrap loads it
+        run: npx @wordpress/env run tests-cli wp plugin is-installed ${{ matrix.lms.slug }}
       - if: steps.present.outputs.present == 'true'
         run: composer test:integration -- --group ${{ matrix.lms.dir }}-contract
