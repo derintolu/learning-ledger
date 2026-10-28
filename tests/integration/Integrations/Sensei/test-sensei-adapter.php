@@ -25,6 +25,7 @@ use LearningLedger\Util\Uuid;
  * Sensei adapter tests.
  *
  * @group sensei-contract
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Sensei_Adapter_Test extends WP_UnitTestCase {

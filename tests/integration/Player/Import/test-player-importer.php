@@ -30,6 +30,7 @@ require_once dirname( __DIR__, 3 ) . '/fixtures/packages/class-package-fixtures.
  * Player_Importer, its REST route and its job hook.
  *
  * @group sensei-contract
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Player_Importer_Test extends WP_UnitTestCase {

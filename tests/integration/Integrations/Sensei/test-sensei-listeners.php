@@ -20,6 +20,7 @@ use LearningLedger\Tests\Recording_Sink;
  * Sensei listener tests.
  *
  * @group sensei-contract
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Sensei_Listeners_Test extends WP_UnitTestCase {

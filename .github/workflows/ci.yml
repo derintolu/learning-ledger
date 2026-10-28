@@ -29,6 +29,7 @@ jobs:
           php-version: ${{ matrix.php }}
           tools: composer
       - run: composer install --no-progress --prefer-dist
+      - run: composer prefix
       - run: composer test:unit
 
   integration:
@@ -37,12 +38,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Sensei LMS needs a newer WordPress than the plugin's minimum, so the
+          # minimum-version row runs without it and the Sensei tests skip.
           - wp: '6.6'
             core: 'WordPress/WordPress#6.6'
+            sensei: false
           - wp: latest
             core: ''
+            sensei: true
     env:
       WP_ENV_CORE: ${{ matrix.core }}
+      COMPOSER_PROCESS_TIMEOUT: 0
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -57,5 +63,17 @@ jobs:
       - run: composer prefix
       - run: npm ci
       - run: npm run build
-      - run: npx wp-env start
+      - if: ${{ !matrix.sensei }}
+        name: Leave Sensei out of the tests environment
+        run: |
+          cat > .wp-env.override.json <<'JSON'
+          {
+            "env": {
+              "tests": {
+                "plugins": [ "." ]
+              }
+            }
+          }
+          JSON
+      - run: npx @wordpress/env start
       - run: composer test:integration

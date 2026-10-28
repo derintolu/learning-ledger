@@ -19,6 +19,11 @@ use LearningLedger\Util\Uuid;
 
 require_once __DIR__ . '/test-launch.php';
 
+/**
+ * cmi5 fetch route tests.
+ *
+ * @requires function Sensei
+ */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- Test class.
 class Fetch_Test extends Lledger_Launch_Test_Case {
 

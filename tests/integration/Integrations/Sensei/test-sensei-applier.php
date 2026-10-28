@@ -23,6 +23,7 @@ use LearningLedger\Util\Clock;
  * Sensei applier tests.
  *
  * @group sensei-contract
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Sensei_Applier_Test extends WP_UnitTestCase {

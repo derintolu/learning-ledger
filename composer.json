@@ -50,7 +50,7 @@
 	},
 	"scripts": {
 		"test:unit": "phpunit -c phpunit-unit.xml.dist",
-		"test:integration": "npx wp-env run tests-cli --env-cwd=wp-content/plugins/learning-ledger vendor/bin/phpunit -c phpunit.xml.dist",
+		"test:integration": "npx @wordpress/env run tests-cli --env-cwd=wp-content/plugins/learning-ledger vendor/bin/phpunit -c phpunit.xml.dist",
 		"test:http": "phpunit -c phpunit-http.xml.dist",
 		"lint": "phpcs",
 		"lint:fix": "phpcbf",

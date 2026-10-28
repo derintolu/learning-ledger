@@ -23,6 +23,7 @@ use LearningLedger\Util\Clock;
  * Certificate provider and route tests.
  *
  * @group sensei-contract
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Sensei_Certificate_Provider_Test extends WP_UnitTestCase {
@@ -46,6 +47,9 @@ class Sensei_Certificate_Provider_Test extends WP_UnitTestCase {
 	public function set_up(): void {
 		parent::set_up();
 		$this->request_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- restored verbatim in tear_down.
+		if ( ! file_exists( WP_PLUGIN_DIR . '/' . self::PLUGIN ) ) {
+			$this->markTestSkipped( 'Sensei LMS Certificates is not installed.' );
+		}
 		Installer::install();
 		require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		self::load_certificates_plugin();

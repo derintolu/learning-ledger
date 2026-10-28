@@ -364,6 +364,11 @@ abstract class Lledger_Launch_Test_Case extends WP_UnitTestCase {
 	}
 }
 
+/**
+ * cmi5 launch tests.
+ *
+ * @requires function Sensei
+ */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound -- Test class.
 class Launch_Test extends Lledger_Launch_Test_Case {
 

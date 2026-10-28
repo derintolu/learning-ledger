@@ -12,6 +12,8 @@ use LearningLedger\Util\Uuid;
 
 /**
  * Sensei_Tested_Out_Display tests.
+ *
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Sensei_Tested_Out_Display_Test extends WP_UnitTestCase {

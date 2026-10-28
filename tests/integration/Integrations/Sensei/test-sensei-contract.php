@@ -17,6 +17,7 @@ use LearningLedger\Tests\Adapter_Contract_Test_Case;
  * Sensei contract.
  *
  * @group sensei-contract
+ * @requires function Sensei
  */
 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedClassFound
 class Sensei_Contract_Test extends Adapter_Contract_Test_Case {
