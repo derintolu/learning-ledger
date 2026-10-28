@@ -9,12 +9,14 @@ use LearningLedger\Cmi5\Vocab;
 use LearningLedger\Db\Installer;
 use LearningLedger\Db\Tables;
 use LearningLedger\Lrs\Auth\Client_Repository;
+use LearningLedger\Lrs\Auth\Principal;
 use LearningLedger\Lrs\Auth\Scopes;
 use LearningLedger\Lrs\Auth\Token_Repository;
 use LearningLedger\Lrs\Auth\Token_Spec;
 use LearningLedger\Lrs\Cmi5\Cmi5_Guard;
 use LearningLedger\Lrs\Documents\Doc_Key;
 use LearningLedger\Lrs\Documents\Document_Store;
+use LearningLedger\Lrs\Http\Xapi_Request;
 use LearningLedger\Lrs\Http\Xapi_Response;
 use LearningLedger\Lrs\Http\Xapi_Router;
 use LearningLedger\Lrs\Statements\Statement_Repository;
@@ -470,6 +472,38 @@ class Cmi5_Guard_Test extends WP_UnitTestCase {
 			$_SERVER = $server;
 		}
 		unset( $header_client );
+	}
+
+	/**
+	 * T64 review: the guard's own actor check (not only the profile handler's access rule) keeps
+	 * an answered read of another agent's preferences from counting.
+	 */
+	public function test_an_answered_read_of_another_agents_preferences_does_not_count() {
+		[ $au, $key ]             = $this->child( 'Normal', self::SESSION, null, true, false );
+		$token                    = ( new Token_Repository() )->find( $key );
+		$principal                = Principal::for_token( ( new Client_Repository() )->find( $this->lms['id'] ), $token );
+		$read                     = static function ( array $agent ) use ( $principal ): Xapi_Request {
+			$r = new Xapi_Request(
+				'GET',
+				'agents/profile',
+				array(
+					'profileId' => 'cmi5LearnerPreferences',
+					'agent'     => (string) wp_json_encode( $agent ),
+				)
+			);
+			return $r->with_principal( $principal );
+		};
+		$other                    = self::actor();
+		$other['account']['name'] = 'learner-2';
+		$guard                    = new Cmi5_Guard();
+		$guard->on_xapi_answered( $read( $other ), Xapi_Response::json( 200, array() ) );
+		$this->assert_status( 403, self::post( $au, array( self::defined( Vocab::INITIALIZED ) ) ), 'another agent\'s preferences' );
+
+		$guard->on_xapi_answered( $read( self::actor() ), new Xapi_Response( 500, '', '' ) );
+		$this->assert_status( 403, self::post( $au, array( self::defined( Vocab::INITIALIZED ) ) ), 'a failed read' );
+
+		$guard->on_xapi_answered( $read( self::actor() ), Xapi_Response::json( 200, array() ) );
+		$this->assert_status( 200, self::post( $au, array( self::defined( Vocab::INITIALIZED ) ) ), 'its own preferences' );
 	}
 
 	/**
