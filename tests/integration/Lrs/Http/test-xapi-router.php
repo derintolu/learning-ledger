@@ -323,4 +323,26 @@ class Xapi_Router_Test extends WP_UnitTestCase {
 		( new Xapi_Router() )->add_rewrite();
 		$this->assertSame( 'index.php?rest_route=/learning-ledger/xapi/$matches[1]', $GLOBALS['wp_rewrite']->extra_rules_top['^xapi/?(.*)$'] );
 	}
+
+	/**
+	 * XAPI-00126 (Communication 1.1): HEAD is answered like GET, without the body.
+	 */
+	public function test_xapi_00126_head_is_answered_as_get_without_body() {
+		Xapi_Router_Test_Handler::$reply = Xapi_Response::json( 200, array( 'ok' => true ), array( 'ETag' => '"abc"' ) );
+		$res                             = ( new Xapi_Test_Client() )->request( 'HEAD', 'about', array( 'x' => '1' ), null, array( 'X-Experience-API-Version' => '1.0.3' ) );
+
+		$this->assertSame( 200, $res->status() );
+		$this->assertSame( '', $res->body() );
+		$this->assertSame( 'application/json', $res->content_type() );
+		$this->assertSame( '"abc"', $res->headers()['ETag'] );
+		$this->assertSame( '2.0.0', $res->headers()['X-Experience-API-Version'] );
+		$this->assertCount( 1, Xapi_Router_Test_Handler::$seen );
+		$this->assertSame( 'GET', Xapi_Router_Test_Handler::$seen[0]->method(), 'the handler sees a GET' );
+		$this->assertSame( array( 'x' => '1' ), Xapi_Router_Test_Handler::$seen[0]->params() );
+
+		$res = ( new Xapi_Test_Client() )->request( 'HEAD', 'statements', array(), null, array( 'X-Experience-API-Version' => '1.0.3' ) );
+		$this->assertSame( 401, $res->status(), 'HEAD is authenticated like GET' );
+		$this->assertSame( '', $res->body() );
+		$this->assertCount( 1, Xapi_Router_Test_Handler::$seen );
+	}
 }

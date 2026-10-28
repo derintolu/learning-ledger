@@ -211,6 +211,12 @@ final class Xapi_Router implements Module {
 		$is_about = 'about' === $resource;
 		$version  = self::LATEST_VERSION;
 		$xapi     = null;
+		// HEAD is answered as GET without the body (Communication 1.1, XAPI-00126).
+		$is_head = 'HEAD' === $request->get_method();
+		if ( $is_head ) {
+			$request = clone $request;
+			$request->set_method( 'GET' );
+		}
 
 		try {
 			$header = $request->get_header( 'X-Experience-API-Version' );
@@ -252,7 +258,11 @@ final class Xapi_Router implements Module {
 
 		$principal = null === $xapi ? null : $xapi->principal();
 		$res       = Cors::decorate( $res, $request->get_header( 'Origin' ), null === $principal ? array() : $principal->cors_origins() );
-		return self::to_rest( self::with_version( $res, $is_about ? self::LATEST_VERSION : $version ) );
+		$res       = self::with_version( $res, $is_about ? self::LATEST_VERSION : $version );
+		if ( $is_head ) {
+			$res = new Xapi_Response( $res->status(), '', $res->content_type(), $res->headers() );
+		}
+		return self::to_rest( $res );
 	}
 
 	/**
