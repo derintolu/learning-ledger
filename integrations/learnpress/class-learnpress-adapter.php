@@ -228,10 +228,41 @@ final class Learnpress_Adapter implements LMS_Adapter {
 		$meta = array_merge( $spec->meta, array( self::STABLE_KEY => $key ) );
 		$id   = $this->find_by_key( self::COURSE, $key );
 		if ( null === $id ) {
-			return $this->insert( self::COURSE, $spec->title, $spec->content, $spec->status, $meta );
+			$id = $this->insert( self::COURSE, $spec->title, $spec->content, $spec->status, $meta );
+		} else {
+			$this->update( $id, $spec->title, $spec->content, $spec->status, $meta );
 		}
-		$this->update( $id, $spec->title, $spec->content, $spec->status, $meta );
+		if ( $id > 0 ) {
+			$this->write_course_record( $id );
+		}
 		return $id;
+	}
+
+	/**
+	 * Write LearnPress's course record (its learnpress_courses row) from the
+	 * post. LearnPress writes it in its own save_post hook, but only when the
+	 * current user may edit the course; an import from WP-CLI or cron has no
+	 * such user, so the record is written here the same way, forced.
+	 *
+	 * @param integer $course_id Course ID.
+	 *
+	 * @return void
+	 */
+	private function write_course_record( int $course_id ): void {
+		if ( current_user_can( 'edit_' . self::COURSE, $course_id ) ) {
+			return;
+		}
+		$post  = get_post( $course_id );
+		$model = CourseModel::find( $course_id );
+		if ( ! $post || ! $model instanceof CourseModel ) {
+			return;
+		}
+		$model                 = new CourseModel( array_merge( get_object_vars( $model ), (array) $post ) );
+		$model->meta_data      = $model->get_post_model()->get_all_metadata();
+		$model->sections_items = null;
+		$model->total_items    = null;
+		$model->first_item_id  = null;
+		$model->save( true );
 	}
 
 	/**
@@ -396,7 +427,8 @@ final class Learnpress_Adapter implements LMS_Adapter {
 			return null !== $id && ( ! $courses || in_array( $id, $courses, true ) ) ? new Lms_Object( 'course', $id ) : null;
 		}
 		if ( 'lesson' === $parsed['kind'] ) {
-			$id = $this->find_by_key( self::LESSON, $parsed['key'], $courses );
+			// Lesson keys are unique per course only: a key on lessons of two of the program's courses names neither.
+			$id = $this->find_by_key( self::LESSON, $parsed['key'], $courses, true );
 			return null !== $id ? new Lms_Object( 'lesson', $id ) : null;
 		}
 		return null;
@@ -563,13 +595,14 @@ final class Learnpress_Adapter implements LMS_Adapter {
 	/**
 	 * Post with a stable key.
 	 *
-	 * @param string $post_type Post type.
-	 * @param string $key       Stable key.
-	 * @param int[]  $courses   For lessons: limit to these courses' curricula when not empty.
+	 * @param string  $post_type Post type.
+	 * @param string  $key       Stable key.
+	 * @param int[]   $courses   For lessons: limit to these courses' curricula when not empty.
+	 * @param boolean $unique    Null unless exactly one post matches.
 	 *
 	 * @return integer|null
 	 */
-	private function find_by_key( string $post_type, string $key, array $courses = array() ): ?int {
+	private function find_by_key( string $post_type, string $key, array $courses = array(), bool $unique = false ): ?int {
 		if ( '' === $key ) {
 			return null;
 		}
@@ -577,7 +610,7 @@ final class Learnpress_Adapter implements LMS_Adapter {
 			'post_type'      => $post_type,
 			'post_status'    => 'any',
 			'fields'         => 'ids',
-			'posts_per_page' => 1,
+			'posts_per_page' => $unique ? 2 : 1,
 			'orderby'        => 'ID',
 			'order'          => 'ASC',
 			'no_found_rows'  => true,
@@ -599,7 +632,10 @@ final class Learnpress_Adapter implements LMS_Adapter {
 			$args['post__in'] = $in;
 		}
 		$ids = get_posts( $args );
-		return $ids ? (int) $ids[0] : null;
+		if ( ! $ids || ( $unique && count( $ids ) > 1 ) ) {
+			return null;
+		}
+		return (int) $ids[0];
 	}
 
 	/**

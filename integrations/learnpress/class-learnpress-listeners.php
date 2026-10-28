@@ -9,6 +9,7 @@ namespace LearningLedger\Integrations\Learnpress;
 
 use LearningLedger\Connector\Lms\Event_Sink;
 use LearningLedger\Connector\Lms\Neutral_Event;
+use LearningLedger\Connector\Programs\Program_Repository;
 use LearnPress\Models\UserItems\UserQuizModel;
 
 // phpcs:disable WordPress.NamingConventions.ValidHookName.UseUnderscores -- LearnPress hook names.
@@ -70,6 +71,7 @@ final class Learnpress_Listeners {
 	 * `learn-press/user/quiz-finished( $quiz_id, $course_id, $user_id[, $user_quiz] )`.
 	 * The REST route passes the attempt; LP_User::finish_quiz() does not, so
 	 * it is looked up. The attempt's result is a percentage and a pass flag.
+	 * Not emitted for courses in a program.
 	 *
 	 * @param mixed $quiz_id   Quiz ID.
 	 * @param mixed $course_id Course ID.
@@ -83,6 +85,11 @@ final class Learnpress_Listeners {
 		$course = (int) $course_id;
 		$user   = (int) $user_id;
 		if ( $user <= 0 || $course <= 0 || $quiz <= 0 ) {
+			return;
+		}
+		// A program's activities are its lessons (AUs) and blocks. A LearnPress quiz belongs to
+		// neither, so a grade there would be reported against the whole block.
+		if ( null !== ( new Program_Repository() )->for_lms_course( $course ) ) {
 			return;
 		}
 		if ( ! $user_quiz instanceof UserQuizModel ) {

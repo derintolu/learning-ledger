@@ -119,7 +119,15 @@ final class Learnpress_Applier {
 				return true;
 
 			case Result::BLOCK_SATISFIED:
-				if ( self::enrolment( $r->user_id, $course )?->has_finished() ) {
+				$enrolment = self::enrolment( $r->user_id, $course );
+				if ( null === $enrolment || $enrolment->has_finished() ) {
+					return false;
+				}
+				// Finish only a course LearnPress's own evaluation passes; finishing a failing one would grade it failed.
+				// LearnPress keeps the completed-items count for the whole request and never clears it, so a lesson
+				// completed earlier in this request would not count; drop that one entry first.
+				\LP_Cache::cache_load_first( 'clear', "userCourseModel/count_items_completed/{$r->user_id}/{$course}" );
+				if ( empty( $enrolment->calculate_course_results( true )['pass'] ) ) {
 					return false;
 				}
 				if ( ! $user->finish_course( $course ) ) {
