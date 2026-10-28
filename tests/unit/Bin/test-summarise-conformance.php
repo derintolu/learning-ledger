@@ -92,6 +92,71 @@ class Summarise_Conformance_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertSame( 0, $code );
 	}
 
+	/**
+	 * A suite run that crashed or stopped early fails the gate even though every recorded failure
+	 * is listed: a Jest file that failed without a failing test, a Jest runtime error, an ADL
+	 * run whose state is not `finished`, and an ADL run with a cancelled test.
+	 */
+	public function test_crashed_or_aborted_runs_fail_the_check_even_with_listed_failures() {
+		require_once dirname( __DIR__, 3 ) . '/bin/summarise-conformance.php';
+		$listed = array(
+			'fullName'        => 'Package import',
+			'status'          => 'failed',
+			'failureMessages' => array( 'Exceeded timeout of 5000 ms' ),
+		);
+		$jest   = array(
+			'numRuntimeErrorTestSuites' => 0,
+			'testResults'               => array(
+				array(
+					'status'           => 'failed',
+					'assertionResults' => array( $listed ),
+				),
+			),
+		);
+		$gaps   = array( 'Package import' => 'slow' );
+		$this->assertNull( lledger_conformance_crash( $jest ) );
+		[ $code ] = $this->gate( $jest, $gaps );
+		$this->assertSame( 0, $code, 'only listed failures' );
+
+		$crashed                  = $jest;
+		$crashed['testResults'][] = array(
+			'status'           => 'failed',
+			'message'          => 'Test suite failed to run',
+			'assertionResults' => array(),
+		);
+		$this->assertNotNull( lledger_conformance_crash( $crashed ) );
+		[ $code, $out ] = $this->gate( $crashed, $gaps );
+		$this->assertSame( 1, $code );
+		$this->assertStringContainsString( 'failed without a failing test', $out );
+
+		$runtime                              = $jest;
+		$runtime['numRuntimeErrorTestSuites'] = 1;
+		$this->assertNotNull( lledger_conformance_crash( $runtime ) );
+		[ $code ] = $this->gate( $runtime, $gaps );
+		$this->assertSame( 1, $code );
+
+		$adl  = json_decode( file_get_contents( dirname( __DIR__, 2 ) . '/fixtures/conformance/sample-raw.json' ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$both = array(
+			'XAPI-00100' => 'cut',
+			'XAPI-00200' => 'cut',
+		);
+		$this->assertNull( lledger_conformance_crash( $adl ) );
+		[ $code ] = $this->gate( $adl, $both );
+		$this->assertSame( 0, $code, 'a finished ADL run with listed failures' );
+
+		$error          = $adl;
+		$error['state'] = 'error';
+		[ $code, $out ] = $this->gate( $error, $both );
+		$this->assertSame( 1, $code );
+		$this->assertStringContainsString( 'error', $out );
+
+		$cancelled = $adl;
+		$cancelled['log']['tests'][0]['tests'][0]['status'] = 'cancelled';
+		$this->assertNotNull( lledger_conformance_crash( $cancelled ) );
+		[ $code ] = $this->gate( $cancelled, $both );
+		$this->assertSame( 1, $code );
+	}
+
 	public function test_redaction_removes_secret_basic_credential_and_authorization_header() {
 		$file   = tempnam( sys_get_temp_dir(), 'lledger-redact' );
 		$secret = 'abc123secret';

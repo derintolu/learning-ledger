@@ -7,8 +7,9 @@
  * "9.3.0.0-1"). CLI: php bin/summarise-conformance.php conformance/raw/*.json > conformance/SUMMARY.md
  *
  * Gate: php bin/summarise-conformance.php --check <raw.json> [--known-gaps <file>] [--suite-status <n>]
- * exits 1 and prints the ids when a failing test is not listed in conformance/known-gaps.json
- * (or when the suite exited non-zero without recording any failure), 0 otherwise.
+ * exits 1 and prints the ids when a failing test is not listed in conformance/known-gaps.json,
+ * when the run crashed or stopped early, or when the suite exited non-zero without recording
+ * any failure; 0 otherwise.
  *
  * @package LearningLedger
  */
@@ -147,6 +148,48 @@ function lledger_conformance_unlisted( array $raw, array $known_gaps ): array {
 }
 
 /**
+ * Why a raw result shows a crashed or cut-short run, or null for a complete one. Jest: a test
+ * file that failed without a failing test (it did not run) or a runtime error. ADL: a run
+ * whose state is not `finished` (the runner sets `error` or `cancelled`) or a cancelled test.
+ *
+ * @param array<string,mixed> $raw Raw suite result.
+ *
+ * @return string|null
+ */
+function lledger_conformance_crash( array $raw ): ?string {
+	if ( isset( $raw['testResults'] ) ) {
+		if ( (int) ( $raw['numRuntimeErrorTestSuites'] ?? 0 ) > 0 ) {
+			return 'Jest reports ' . (int) $raw['numRuntimeErrorTestSuites'] . ' test file(s) with a runtime error.';
+		}
+		foreach ( (array) $raw['testResults'] as $file ) {
+			$failed = array_filter( (array) ( $file['assertionResults'] ?? array() ), static fn( $a ) => 'failed' === ( $a['status'] ?? '' ) );
+			if ( 'failed' === ( $file['status'] ?? '' ) && array() === $failed ) {
+				return 'A test file failed without a failing test (it did not run): ' . (string) ( $file['name'] ?? 'unknown' );
+			}
+		}
+		return null;
+	}
+	if ( isset( $raw['log'] ) && is_array( $raw['log'] ) ) {
+		if ( 'finished' !== ( $raw['state'] ?? '' ) ) {
+			return 'The ADL run did not finish (state: ' . (string) ( $raw['state'] ?? 'missing' ) . ').';
+		}
+		$stack = array( $raw['log'] );
+		while ( $stack ) {
+			$node = array_pop( $stack );
+			if ( 'cancelled' === ( $node['status'] ?? '' ) ) {
+				return 'The ADL run has a cancelled test: ' . (string) ( $node['title'] ?? 'unknown' );
+			}
+			foreach ( (array) ( $node['tests'] ?? array() ) as $child ) {
+				if ( is_array( $child ) ) {
+					$stack[] = $child;
+				}
+			}
+		}
+	}
+	return null;
+}
+
+/**
  * Make a string safe for a single Markdown table cell.
  *
  * @param string $text Cell text.
@@ -175,6 +218,11 @@ if ( isset( $_SERVER['SCRIPT_FILENAME'] ) && realpath( $_SERVER['SCRIPT_FILENAME
 	$lledger_gaps = is_readable( $lledger_opts['--known-gaps'] ) ? json_decode( (string) file_get_contents( $lledger_opts['--known-gaps'] ), true ) : null;
 	if ( ! is_array( $lledger_raw ) || ! is_array( $lledger_gaps ) ) {
 		fwrite( STDERR, "Cannot read the raw result or the known gaps.\n" );
+		exit( 1 );
+	}
+	$lledger_crash = lledger_conformance_crash( $lledger_raw );
+	if ( null !== $lledger_crash ) {
+		fwrite( STDERR, "The suite run is incomplete: {$lledger_crash}\n" );
 		exit( 1 );
 	}
 	$lledger_failing  = lledger_conformance_failing( lledger_conformance_requirements( $lledger_raw ) );
