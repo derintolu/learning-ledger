@@ -54,7 +54,7 @@ final class Schema {
 statement_id binary(16) NOT NULL,
 `stored` datetime(6) NOT NULL,
 timestamp datetime(6) NOT NULL,
-version varchar(8) NOT NULL,
+version varchar(20) NOT NULL,
 verb_hash binary(20) NOT NULL,
 actor_hash binary(20) NOT NULL,
 actor_home_hash binary(20) NULL,

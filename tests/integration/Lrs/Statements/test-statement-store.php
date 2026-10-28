@@ -111,6 +111,19 @@ class Statement_Store_Test extends WP_UnitTestCase {
 		$this->assertSame( '1.0.0', ( new Statement_Repository() )->find( $ids[0] )->statement()['version'] );
 	}
 
+	public function test_version_column_holds_the_longest_prerelease_the_validator_accepts() {
+		$p = self::principal();
+		foreach ( array( '1.0.0-rc.1', '1.0.0-rc.12345678901' ) as $version ) {
+			$st            = self::statement( 'v' . strlen( $version ) );
+			$st['version'] = $version;
+			$ids           = ( new Statement_Store() )->store( array( $st ), $p, '1.0.3' );
+			$row           = ( new Statement_Repository() )->find( $ids[0] );
+			$this->assertSame( $version, $row->version );
+			$this->assertSame( $version, $row->statement()['version'] );
+		}
+		$this->assertSame( 20, strlen( '1.0.0-rc.12345678901' ) );
+	}
+
 	public function test_hooks_fire_inside_and_after_the_transaction() {
 		$seen = array();
 		add_action(
