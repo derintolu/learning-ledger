@@ -83,4 +83,21 @@ class Agent_Repository_Test extends WP_UnitTestCase {
 		$this->assertSame( array(), $repo->person_for( $this->mbox() )['mbox'] );
 		$this->assertSame( array( 'mailto:b@example.com' ), $repo->person_for( $this->mbox( 'mailto:b@example.com' ) )['mbox'] );
 	}
+
+	public function test_delete_throws_when_the_query_fails() {
+		$failing = 'DELETE FROM ' . Tables::name( 'agents' );
+		$failer  = static function ( string $q ) use ( $failing ) {
+			return str_starts_with( $q, $failing ) ? 'DELETE FROM lledger_no_such_table_fx3' : $q;
+		};
+		$GLOBALS['wpdb']->suppress_errors( true );
+		add_filter( 'query', $failer );
+		$this->expectException( RuntimeException::class );
+		$this->expectExceptionMessage( 'Could not delete the agent.' );
+		try {
+			( new Agent_Repository() )->delete( $this->mbox() );
+		} finally {
+			remove_filter( 'query', $failer );
+			$GLOBALS['wpdb']->suppress_errors( false );
+		}
+	}
 }

@@ -99,6 +99,7 @@ final class Statement_Repository {
 	 * @param string $actor_hash Raw SHA-1 actor hash.
 	 *
 	 * @return integer Statements deleted.
+	 * @throws \RuntimeException When any of the deletes fails.
 	 */
 	public function delete_for_actor( string $actor_hash ): int {
 		global $wpdb;
@@ -106,9 +107,15 @@ final class Statement_Repository {
 		$refs       = Tables::name( 'statement_refs' );
 		$hex        = bin2hex( $actor_hash );
 		$pending    = Tables::name( 'pending_voids' );
-		$wpdb->query( $wpdb->prepare( "DELETE r FROM {$refs} r INNER JOIN {$statements} s ON s.seq = r.seq WHERE s.actor_hash = UNHEX(%s)", $hex ) );
-		$wpdb->query( $wpdb->prepare( "DELETE v FROM {$pending} v INNER JOIN {$statements} s ON s.seq = v.voiding_seq WHERE s.actor_hash = UNHEX(%s)", $hex ) );
-		return (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$statements} WHERE actor_hash = UNHEX(%s)", $hex ) );
+		$deleted    = false;
+		if ( false !== $wpdb->query( $wpdb->prepare( "DELETE r FROM {$refs} r INNER JOIN {$statements} s ON s.seq = r.seq WHERE s.actor_hash = UNHEX(%s)", $hex ) )
+			&& false !== $wpdb->query( $wpdb->prepare( "DELETE v FROM {$pending} v INNER JOIN {$statements} s ON s.seq = v.voiding_seq WHERE s.actor_hash = UNHEX(%s)", $hex ) ) ) {
+			$deleted = $wpdb->query( $wpdb->prepare( "DELETE FROM {$statements} WHERE actor_hash = UNHEX(%s)", $hex ) );
+		}
+		if ( false === $deleted ) {
+			throw new \RuntimeException( 'Could not delete the actor\'s statements.' );
+		}
+		return (int) $deleted;
 	}
 
 	/**

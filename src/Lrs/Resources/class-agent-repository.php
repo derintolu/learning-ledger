@@ -84,12 +84,16 @@ final class Agent_Repository {
 	 * @param Agent_Identity $a Agent.
 	 *
 	 * @return void
+	 * @throws \RuntimeException When the delete fails.
 	 */
 	public function delete( Agent_Identity $a ): void {
 		global $wpdb;
-		$table = Tables::name( 'agents' );
-		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$table   = Tables::name( 'agents' );
+		$deleted = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->prepare( "DELETE FROM {$table} WHERE ifi_hash = UNHEX(%s)", bin2hex( $a->hash() ) ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		);
+		if ( false === $deleted ) {
+			throw new \RuntimeException( 'Could not delete the agent.' );
+		}
 	}
 }
