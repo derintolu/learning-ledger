@@ -61,16 +61,20 @@ final class Identity_Map {
 
 		$account = $actor['account'] ?? null;
 		if ( is_array( $account ) && ( $account['homePage'] ?? null ) === $this->home_page() && is_string( $account['name'] ?? null ) && '' !== $account['name'] ) {
-			$ids = get_users(
-				array(
-					'meta_key'   => self::META, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
-					'meta_value' => $account['name'], // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
-					'number'     => 1,
-					'fields'     => 'ID',
+			// A direct query, not get_users(): some hosts filter user queries on anonymous requests
+			// (pre_get_users), which inbox deliveries and their shutdown job are. Same semantics as
+			// get_users( meta_key, meta_value, number 1 ): ordered by login and, on multisite, only
+			// members of this site.
+			$member = is_multisite() ? $wpdb->prepare( " AND EXISTS (SELECT 1 FROM {$wpdb->usermeta} c WHERE c.user_id = u.ID AND c.meta_key = %s)", $wpdb->get_blog_prefix() . 'capabilities' ) : '';
+			$id     = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->prepare(
+					"SELECT u.ID FROM {$wpdb->users} u INNER JOIN {$wpdb->usermeta} m ON m.user_id = u.ID WHERE m.meta_key = %s AND m.meta_value = %s{$member} ORDER BY u.user_login ASC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $member is prepared above.
+					self::META,
+					$account['name']
 				)
 			);
-			if ( $ids ) {
-				return (int) $ids[0];
+			if ( null !== $id ) {
+				return (int) $id;
 			}
 		}
 

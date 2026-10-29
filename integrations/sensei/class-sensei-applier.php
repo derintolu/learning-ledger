@@ -73,7 +73,8 @@ final class Sensei_Applier {
 		if ( self::$applying || $lesson <= 0 || $user <= 0 || in_array( $status, self::COMPLETE_STATUSES, true ) ) {
 			return $status;
 		}
-		$quiz = (int) Sensei()->lesson->lesson_quizzes( $lesson );
+		// Sensei_Adapter::quiz_of() is Sensei_Lesson::lesson_quizzes() without WP_Query (see Sensei_Adapter).
+		$quiz = Sensei_Adapter::quiz_of( $lesson );
 		if ( $quiz <= 0 || ! get_post_meta( $quiz, '_pass_required', true ) ) {
 			return $status;
 		}
@@ -113,9 +114,11 @@ final class Sensei_Applier {
 				self::$applying = true;
 				$this->mute_teacher_emails();
 				add_action( self::LESSON_END, array( $this, 'mute_teacher_emails' ), 9, 0 );
+				add_filter( 'sensei_course_get_lessons', array( self::class, 'course_lessons' ), PHP_INT_MAX, 2 );
 				try {
 					return $this->apply_to_sensei( $r, $course );
 				} finally {
+					remove_filter( 'sensei_course_get_lessons', array( self::class, 'course_lessons' ), PHP_INT_MAX );
 					remove_action( self::LESSON_END, array( $this, 'mute_teacher_emails' ), 9 );
 					$this->restore_teacher_emails();
 					self::$applying = false;
@@ -123,6 +126,26 @@ final class Sensei_Applier {
 			}
 		);
 		return new Apply_Outcome( $changed ? Apply_Outcome::APPLIED : Apply_Outcome::SKIPPED );
+	}
+
+	/**
+	 * `sensei_course_get_lessons`, only while a result is applied: when Sensei's own query found no
+	 * lessons for a course that has published ones, the published lessons, read directly.
+	 *
+	 * On a host that empties anonymous post queries (the inbox job runs as user 0), Sensei's
+	 * Sensei_Utils::user_complete_course() would otherwise count 0 of 0 lessons complete after the
+	 * first lesson and complete the whole course. That caller asks for published lessons.
+	 *
+	 * @param mixed $lessons   Lesson posts Sensei found.
+	 * @param mixed $course_id Course ID.
+	 *
+	 * @return mixed
+	 */
+	public static function course_lessons( mixed $lessons, mixed $course_id = 0 ): mixed {
+		if ( ! is_array( $lessons ) || array() !== $lessons || (int) $course_id <= 0 ) {
+			return $lessons;
+		}
+		return array_values( array_filter( array_map( 'get_post', Sensei_Adapter::course_lesson_ids( (int) $course_id, true ) ) ) );
 	}
 
 	/**
