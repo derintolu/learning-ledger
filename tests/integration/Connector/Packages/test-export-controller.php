@@ -393,8 +393,8 @@ class Export_Controller_Test extends WP_UnitTestCase {
 	 * Compared: every lesson (beats, checkpoint with rubric, planted bug, minutes, sources, starter files,
 	 * extensions), the whole course document (license, custody, rules, placement guide, paths with tagline
 	 * and placement hints, path previews, landing pages and final files) and the course structure.
-	 * A lesson's `referenceSolution` is carried too. An empty program takes its AU URL template and
-	 * course server URL from the package.
+	 * A lesson's `referenceSolution` is carried too. An empty program takes its AU URL template from the
+	 * package; the course server URL is set by the operator after an import.
 	 */
 	public function test_round_trip_export_equals_import() {
 		update_post_meta( $this->program, '_lledger_licence', 'CC-BY-4.0' );
@@ -422,9 +422,10 @@ class Export_Controller_Test extends WP_UnitTestCase {
 		$program = ( new Program_Repository() )->find_by_key( 'demo' );
 		$this->assertNotNull( $program );
 
-		// Where the course server lives is deployment setup, which an empty program takes from the package.
+		// Where the course server lives is deployment setup, not package content: an import leaves it empty.
+		$this->assertSame( '', ( new Program_Repository() )->get( $program )->course_server_url );
 		$this->assertSame( 'https://demo.example.org/cmi5/launch?au={key}', ( new Program_Repository() )->get( $program )->au_url_template );
-		$this->assertSame( 'https://demo.example.org/mcp', ( new Program_Repository() )->get( $program )->course_server_url );
+		update_post_meta( $program, '_lledger_course_server_url', 'https://demo.example.org/mcp' );
 
 		$exported = $this->get( $program );
 		$this->assertSame( 200, $exported->get_status(), wp_json_encode( $exported->get_data() ) );

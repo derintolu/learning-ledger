@@ -58,8 +58,10 @@ final class Cmi5_Xml_Builder {
 		$ext = $dom->createElementNS( self::NS_CXM, 'cxm:course' );
 		$ext->setAttribute( 'src', 'cxm/course.json' );
 		$ext->setAttribute( 'specVersion', Package_Builder::SPEC_VERSION );
-		if ( '' !== $p->course_server_url ) {
-			$ext->setAttribute( 'mcp', $p->course_server_url );
+		// The operator's course server URL wins; an imported package's own MCP URL is the fallback.
+		$mcp = '' !== $p->course_server_url ? $p->course_server_url : (string) get_post_meta( $p->id, Package_Builder::PACKAGE_MCP, true );
+		if ( '' !== $mcp ) {
+			$ext->setAttribute( 'mcp', $mcp );
 		}
 		$course->appendChild( $ext );
 		$root->appendChild( $course );

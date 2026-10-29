@@ -192,7 +192,7 @@ The blocks and editor fields in `build/` are compiled from `src-js/` in https://
 = 0.1.3 =
 * Fix: package ZIPs carry a fixed archive comment, so they no longer end in NUL bytes that some hosts strip from responses, truncating the download.
 * Fix: WP-CLI, signed course-server and unfiltered_html imports write lessons without kses, which rewrote regex patterns, code and markup.
-* Fix: an imported package exports back unchanged: specVersion 0.2, the course description, language, version, allowPractice, foreign extensions, reference solutions, placement title and description, fence languages and raw titles are kept. An empty program takes its AU URL template and MCP URL from the package.
+* Fix: an imported package exports back unchanged: specVersion 0.2, the course description, language, version, allowPractice, foreign extensions, reference solutions, placement title and description, fence languages and raw titles are kept. An empty program takes its AU URL template from the package, and the package's MCP URL is exported while no course server URL is set; an import never sets the course server URL.
 
 = 0.1.2 =
 * Fix: on hosts that filter anonymous post queries, Sensei course lessons, lesson quizzes, stable-key lookups and the program list are read directly, so course-server package exports keep their lessons and imports update existing posts.

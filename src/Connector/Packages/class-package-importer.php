@@ -245,13 +245,11 @@ final class Package_Importer {
 		self::meta_or_delete( $id, '_lledger_package_version', is_string( $course_json['version'] ?? null ) ? sanitize_text_field( $course_json['version'] ) : '' );
 		self::meta_or_delete( $id, '_lledger_allow_practice', is_bool( $course_json['allowPractice'] ?? null ) ? ( $course_json['allowPractice'] ? '1' : '0' ) : '' );
 		self::meta_or_delete( $id, '_lledger_extensions', wp_slash( self::foreign_extensions( $this->objects( Package::COURSE_JSON ), Package_Builder::EXTENSION ) ) );
-		// Where the course server lives is deployment setup: the package fills it in only when the
-		// program has none, so an operator's setting is never overwritten.
-		$mcp = self::mcp_url( $xml );
-		if ( '' !== $mcp && '' === (string) get_post_meta( $id, '_lledger_course_server_url', true ) ) {
-			update_post_meta( $id, '_lledger_course_server_url', $mcp );
-		}
-		// Likewise the AU URL template, taken from the one every AU url of the package follows.
+		// The package's MCP URL is kept apart from the course server URL, which is live configuration
+		// (content pings, link codes, direction 2) that only an operator sets. The exporter falls back
+		// to it when no course server URL is set.
+		self::meta_or_delete( $id, Package_Builder::PACKAGE_MCP, self::mcp_url( $xml ) );
+		// A program without an AU URL template takes the one every AU url of the package follows.
 		$template = self::url_template( $structure );
 		if ( '' !== $template && '' === (string) get_post_meta( $id, '_lledger_au_url_template', true ) ) {
 			update_post_meta( $id, '_lledger_au_url_template', $template );

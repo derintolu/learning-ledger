@@ -43,6 +43,11 @@ final class Package_Builder {
 	 */
 	public const BLOCK_DESCRIPTION = '_lledger_block_description';
 
+	/**
+	 * Program meta: the imported package's `<cxm:course mcp>`, exported when no course server URL is set.
+	 */
+	public const PACKAGE_MCP = '_lledger_package_mcp';
+
 	private const MAX_META_BYTES = 1048576;
 
 	/**

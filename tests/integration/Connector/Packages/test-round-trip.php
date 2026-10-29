@@ -69,8 +69,11 @@ class Package_Round_Trip_Test extends WP_UnitTestCase {
 	/**
 	 * Every difference between the fixture and an export: JSON compared semantically (object keys
 	 * unordered, {} and [] told apart), cmi5.xml by ids, titles, descriptions, langstring languages,
-	 * moveOn, launchMethod and cxm attributes. The AU urls are left out: they come from the
-	 * program's AU URL template.
+	 * moveOn, launchMethod and cxm attributes.
+	 *
+	 * Left out of the cmi5.xml comparison, on purpose: each AU's `<url>`, which comes from the
+	 * program's AU URL template, and the lesson AUs' `activityType`, an optional cmi5 attribute
+	 * the exporter always sets to the xAPI lesson type (the fixture has none).
 	 *
 	 * @param Package $export Exported package.
 	 *
@@ -179,6 +182,29 @@ class Package_Round_Trip_Test extends WP_UnitTestCase {
 	public function test_the_round_trip_holds_under_a_host_that_empties_post_queries() {
 		add_action( 'pre_get_posts', static fn( $q ) => $q->set( 'post__in', array( 0 ) ) );
 		$this->assertSame( array(), self::differences( $this->round_trip( true ) ) );
+	}
+
+	public function test_an_import_leaves_the_course_server_url_to_the_operator() {
+		$report  = ( new Package_Importer() )->import( Package::from_zip( self::FIXTURE, new Limits() ), 'sensei', true );
+		$program = $report->program_id;
+		$this->assertSame( '', (string) get_post_meta( $program, '_lledger_course_server_url', true ) );
+		$this->assertSame( 'https://learnwp.sqwrlz.com/api/mcp', (string) get_post_meta( $program, Package_Builder::PACKAGE_MCP, true ) );
+
+		$exported = function () use ( $program ): string {
+			$path         = (string) wp_tempnam( 'llrt' );
+			$this->temp[] = $path;
+			file_put_contents( $path, ( new Package_Builder() )->build( $program, 'full' )->zip ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- temp file.
+			$xml = new DOMDocument();
+			$xml->loadXML( Package::from_zip( $path, new Limits() )->cmi5_xml() );
+			return $xml->getElementsByTagNameNS( Cmi5_Xml_Builder::NS_CXM, 'course' )->item( 0 )->getAttribute( 'mcp' );
+		};
+		$this->assertSame( 'https://learnwp.sqwrlz.com/api/mcp', $exported(), 'no operator value: the package mcp' );
+
+		update_post_meta( $program, '_lledger_course_server_url', 'https://operator.example.org/mcp' );
+		$this->assertSame( 'https://operator.example.org/mcp', $exported(), 'the operator value wins' );
+
+		( new Package_Importer() )->import( Package::from_zip( self::FIXTURE, new Limits() ), 'sensei', true );
+		$this->assertSame( 'https://operator.example.org/mcp', (string) get_post_meta( $program, '_lledger_course_server_url', true ), 'a re-import never writes it' );
 	}
 
 	public function test_an_untrusted_import_still_runs_kses() {
