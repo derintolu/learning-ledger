@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Learning Ledger
  * Description: An xAPI LRS and Open Badges issuer for WordPress, with LMS connectors
- * Version: 0.1.6
+ * Version: 0.1.7
  * Requires at least: 6.6
  * Tested up to: 7.1
  * Requires PHP: 8.2
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'LEARNING_LEDGER_VERSION', '0.1.6' );
+define( 'LEARNING_LEDGER_VERSION', '0.1.7' );
 define( 'LEARNING_LEDGER_FILE', __FILE__ );
 define( 'LEARNING_LEDGER_DIR', plugin_dir_path( __FILE__ ) );
 define( 'LEARNING_LEDGER_URL', plugin_dir_url( __FILE__ ) );

@@ -4,7 +4,7 @@ Tags: xapi, lrs, cmi5, open badges, elearning
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.1.6
+Stable tag: 0.1.7
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -132,7 +132,7 @@ The plugin reads the header from `HTTP_AUTHORIZATION` and from `REDIRECT_HTTP_AU
 
 = Sensei progress never shows on my host, although the LRS delivers it =
 
-Some hosts empty WordPress's comment queries, and Sensei LMS keeps lesson progress in comments. The signed course-server status shows this in `host_queries` and `sensei_progress_storage`. Sensei 4.26 can read progress from its own tables instead (High-Performance Progress Storage). On the connector site, run `wp learning-ledger sensei storage status`, then `wp learning-ledger sensei storage tables`. If Sensei already holds progress in comments, the command refuses; `--force` starts Sensei's own migration of that progress, and you run `tables` again once `status` shows `migration: complete`. The way back is `wp learning-ledger sensei storage comments`: Sensei reads comments again and keeps writing both.
+Some hosts empty WordPress's comment queries, and Sensei LMS keeps lesson progress in comments. The signed course-server status shows this in `host_queries` and `sensei_progress_storage`. Sensei 4.26 can read progress from its own tables instead (High-Performance Progress Storage). On the connector site, run `wp learning-ledger sensei storage status`, then `wp learning-ledger sensei storage tables`. If Sensei already holds progress in comments, the command refuses; `--force` starts Sensei's own migration of that progress, and you run `tables` again once `status` shows `migration: complete`. If Sensei's tables already hold progress that the switch would drop or empty, it refuses unless you add `--drop-tables`, which destroys those rows. The way back is `wp learning-ledger sensei storage comments`: Sensei reads comments again and keeps writing both.
 
 = Does the plugin phone home or track anything? =
 
@@ -192,6 +192,15 @@ Bundled data files, unmodified:
 The blocks and editor fields in `build/` are compiled from `src-js/` in https://github.com/derintolu/learning-ledger. To build them yourself, run `npm ci && npm run build` in a checkout.
 
 == Changelog ==
+
+= 0.1.7 =
+* Security: never page-cache private responses. Every REST response of the plugin (signed course-server routes, the inbox, xAPI, links, tokens, erasure, exports and imports, the player routes), success or error, and the record, claim and badge pages cancel page caching (DONOTCACHEPAGE, batcache_cancel()) and carry no-store headers. Page caches such as Batcache ignore request headers, so they replayed signed and authenticated answers to anyone. No route under `/wp-json/learning-ledger/` is page-cached any more, the namespace indexes, unknown routes and errors WordPress returns before the plugin's code included, as the request arrives. The public status, the issuer profile, achievement definitions, did.json and badge status lists skip the page cache too but keep a short public Cache-Control for browsers and verifiers (60 seconds for did.json and status lists).
+* New: `DELETE course-server/learners/{id}?revokeBadges=false` erases the learner at the LRS without revoking their claimed badges (default true).
+* Fix: deleting a learner also removes their Sensei progress (activity comments and progress table rows) by direct query, which a host that empties comment queries left behind.
+* Fix: posts imported while the service user is current get no author, so deleting that user cannot delete them.
+* Fix: `wp learning-ledger sensei storage tables` refuses to drop or empty Sensei's progress tables while they hold progress unless `--drop-tables` is given.
+* Fix: distribution packages keep the checkpoint rubric and checks; course-xapi-mcp 0.2 counts only the planted bug's explanation and fix checks and the reference solution as secret.
+* Fix: an imported package's course version moves with WordPress edits (its patch rises with each content change) and returns to the package's own version on the next import.
 
 = 0.1.6 =
 * New: `wp learning-ledger sensei storage tables` makes Sensei read progress from its own tables (High-Performance Progress Storage) for hosts that empty comment queries, taking the steps Sensei's settings screen takes (with `--force`, Sensei migrates existing comment progress first); `... storage comments` is the way back and `... storage status` shows the storage and migration.
