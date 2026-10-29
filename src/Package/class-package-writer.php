@@ -13,7 +13,8 @@ use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Json;
 
 /**
- * The same input gives the same bytes: sorted entries, fixed modification time, no extra fields.
+ * The same input gives the same bytes: sorted entries, fixed modification time, no extra fields,
+ * and a fixed archive comment.
  */
 final class Package_Writer {
 
@@ -21,6 +22,12 @@ final class Package_Writer {
 	 * DOS date of 1980-01-01 (year 0, month 1, day 1). The DOS time is 00:00:00.
 	 */
 	private const DOS_DATE = 0x0021;
+
+	/**
+	 * Archive comment. Without one a ZIP ends in NUL bytes (the end record's high offset bytes
+	 * and an empty comment length), which some hosts strip from PHP output, truncating it.
+	 */
+	public const COMMENT = 'Learning Ledger package';
 
 	/**
 	 * Builds the ZIP.
@@ -81,7 +88,7 @@ final class Package_Writer {
 			$local   .= pack( 'VvvvvvVVVvv', 0x04034b50, 20, $flags, $method, 0, self::DOS_DATE, $crc, $csize, $size, $nlen, 0 ) . $name . $body;
 			$central .= pack( 'VvvvvvvVVVvvvvvVV', 0x02014b50, ( 3 << 8 ) | 20, 20, $flags, $method, 0, self::DOS_DATE, $crc, $csize, $size, $nlen, 0, 0, 0, 0, 0100644 << 16, $offset ) . $name;
 		}
-		$end = pack( 'VvvvvVVv', 0x06054b50, 0, 0, count( $entries ), count( $entries ), strlen( $central ), strlen( $local ), 0 );
+		$end = pack( 'VvvvvVVv', 0x06054b50, 0, 0, count( $entries ), count( $entries ), strlen( $central ), strlen( $local ), strlen( self::COMMENT ) ) . self::COMMENT;
 
 		return $local . $central . $end;
 	}

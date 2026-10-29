@@ -302,6 +302,17 @@ class Package_Builder_Test extends WP_UnitTestCase {
 		$this->assertNotNull( ( new Program_Repository() )->structure( $this->program ) );
 	}
 
+	public function test_built_packages_do_not_end_in_bytes_a_host_strips() {
+		foreach ( array( 'full', 'public' ) as $flavour ) {
+			$built = $this->build( $flavour );
+			$this->assertSame( $built->zip, rtrim( $built->zip ), $flavour . ': no trailing NUL or whitespace' );
+			$this->assertStringEndsWith( Package_Writer::COMMENT, $built->zip );
+			$pkg = $this->package( $built->zip );
+			$this->assertSame( array(), Package_Validator::validate( $pkg, $flavour )->errors() );
+			$this->assertSame( $built->etag, $this->build( $flavour )->etag, $flavour . ': same content, same ETag' );
+		}
+	}
+
 	public function test_public_package_validates_without_secrets() {
 		$built = $this->build( 'public' );
 		$this->assertSame( 'public', $built->flavour );

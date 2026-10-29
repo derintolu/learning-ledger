@@ -5,6 +5,8 @@
  * @package LearningLedger
  */
 
+use LearningLedger\Package\Limits;
+use LearningLedger\Package\Package;
 use LearningLedger\Package\Package_Writer;
 use LearningLedger\Util\Invalid_Input;
 
@@ -37,6 +39,28 @@ class Package_Writer_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertSame( $a, $b );
 		$this->assertSame( Package_Writer::etag( $a ), Package_Writer::etag( $b ) );
 		$this->assertSame( '"' . hash( 'sha256', $a ) . '"', Package_Writer::etag( $a ) );
+	}
+
+	public function test_zip_ends_in_its_comment_not_in_nul_or_whitespace_and_still_opens() {
+		$in  = Package_Fixtures::inputs( 'good-full' );
+		$zip = Package_Writer::write( $in[0], $in[1], $in[2], array( 'x/a.txt' => 'a' ) );
+
+		$this->assertStringEndsWith( "\x00\x00" . pack( 'v', strlen( Package_Writer::COMMENT ) ) . Package_Writer::COMMENT, $zip );
+		$this->assertSame( $zip, rtrim( $zip ), 'no trailing NUL or whitespace for a host to strip' );
+
+		$path = (string) tempnam( sys_get_temp_dir(), 'llz' );
+		file_put_contents( $path, $zip ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- temp file.
+		try {
+			$archive = new ZipArchive();
+			$this->assertTrue( $archive->open( $path, ZipArchive::RDONLY ) );
+			$this->assertSame( Package_Writer::COMMENT, $archive->getArchiveComment() );
+			$this->assertSame( 'a', $archive->getFromName( 'cxm/files/x/a.txt' ) );
+			$archive->close();
+			$package = Package::from_zip( $path, new Limits() );
+			$this->assertSame( $in[0], $package->file( 'cmi5.xml' ) );
+		} finally {
+			unlink( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- temp file.
+		}
 	}
 
 	public function test_etag_changes_with_content() {
