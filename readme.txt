@@ -4,7 +4,7 @@ Tags: xapi, lrs, cmi5, open badges, elearning
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -188,6 +188,11 @@ Bundled data files, unmodified:
 The blocks and editor fields in `build/` are compiled from `src-js/` in https://github.com/derintolu/learning-ledger. To build them yourself, run `npm ci && npm run build` in a checkout.
 
 == Changelog ==
+
+= 0.1.1 =
+* Fix: package export, import and the LRS course import no longer fail with a critical error on REST requests (wp_tempnam() is loaded before use).
+* Fix: course-server package lookups by stable key work on hosts that filter anonymous post queries.
+* New: `POST actors/erase` accepts `revokeBadges`; false leaves the actor's claimed badges valid and still revokes unclaimed ones.
 
 = 0.1.0 =
 * First release.
