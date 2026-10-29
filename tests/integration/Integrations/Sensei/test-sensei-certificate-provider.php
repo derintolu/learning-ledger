@@ -313,5 +313,12 @@ class Sensei_Certificate_Provider_Test extends WP_UnitTestCase {
 		Sensei_Utils::update_course_status( $user, $this->course, 'complete' );
 		$this->assertSame( 1, $count(), 'Certificates is skipped when the certificate exists' );
 		$this->assertSame( 9, has_action( 'sensei_course_status_updated', array( WooThemes_Sensei_Certificates::instance(), 'handle_course_completed' ) ), 'and is hooked again for the next event' );
+
+		// A trashed certificate does not count, as in Certificates' own check (post_status any).
+		$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_status = 'trash' WHERE post_type = 'certificate' AND post_author = %d", $user ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		clean_post_cache( 0 );
+		remove_all_actions( 'pre_get_posts' );
+		Sensei_Utils::update_course_status( $user, $this->course, 'complete' );
+		$this->assertSame( 2, $count(), 'a new certificate replaces the trashed one' );
 	}
 }

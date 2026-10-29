@@ -284,4 +284,26 @@ class Sensei_Applier_Test extends WP_UnitTestCase {
 		$this->assertSame( $satisfied, get_user_meta( $user, '_lledger_program_satisfied_7', true ) );
 		$this->assertTrue( Sensei_Utils::user_completed_course( $made['course'], $user ) );
 	}
+
+	public function test_the_status_lookup_fallback_reads_only_lookups_it_can_mirror() {
+		$c      = $this->course( 1 );
+		$lesson = $c['lessons'][0];
+		$user   = $this->enrolled_user( $c['course'] );
+		\Sensei_Utils::sensei_start_lesson( $lesson, $user, true );
+		$args = array(
+			'post_id' => $lesson,
+			'user_id' => $user,
+			'type'    => 'sensei_lesson_status',
+		);
+
+		$found = Sensei_Applier::activity( array(), $args + array( 'status' => 'any' ) );
+		$this->assertCount( 1, $found );
+		$this->assertSame( (string) $user, (string) $found[0]->user_id );
+		$this->assertSame( 1, Sensei_Applier::activity( 0, $args + array( 'count' => true ) ) );
+		$this->assertSame( array(), Sensei_Applier::activity( array(), $args + array( 'status' => 'in-progress' ) ), 'a status is matched exactly' );
+
+		$this->assertSame( array(), Sensei_Applier::activity( array(), $args + array( 'status' => array( 'complete' ) ) ), 'a list of statuses is left to Sensei' );
+		$this->assertSame( array(), Sensei_Applier::activity( array(), $args + array( 'meta_key' => 'x' ) ), 'other arguments are left to Sensei' );
+		$this->assertSame( array(), Sensei_Applier::activity( array(), array( 'type' => 'comment' ) + $args ), 'other comment types are left to Sensei' );
+	}
 }

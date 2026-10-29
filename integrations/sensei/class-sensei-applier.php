@@ -175,7 +175,10 @@ final class Sensei_Applier {
 		if ( $post <= 0 || $user <= 0 || ! in_array( $type, Sensei_Storage::COMMENT_TYPES, true ) ) {
 			return $comments;
 		}
-		$status = is_string( $args['status'] ?? null ) ? $args['status'] : 'any';
+		if ( isset( $args['status'] ) && ! is_string( $args['status'] ) ) {
+			return $comments;
+		}
+		$status = $args['status'] ?? 'any';
 		$ids    = array_map(
 			'intval',
 			$wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching

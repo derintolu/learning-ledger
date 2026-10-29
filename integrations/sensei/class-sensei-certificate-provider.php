@@ -52,7 +52,7 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 		}
 		$existing = (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->prepare(
-				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = 'course_id' AND m.meta_value = %d WHERE p.post_type = 'certificate' AND p.post_author = %d LIMIT 1",
+				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = 'course_id' AND m.meta_value = %d WHERE p.post_type = 'certificate' AND p.post_status NOT IN ('trash', 'auto-draft') AND p.post_author = %d LIMIT 1",
 				(int) $course_id,
 				(int) $user_id
 			)

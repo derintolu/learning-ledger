@@ -156,4 +156,35 @@ class Sensei_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 'comments', Sensei_Storage::status()['storage'] );
 		$this->assertTrue( Sensei()->progress_storage_configuration->is_dual_write_enabled(), 'both stores keep being written' );
 	}
+
+	public function test_tables_left_behind_when_hpps_was_turned_off_are_not_switched_to() {
+		$this->assertSame( 'tables', Sensei_Storage::switch_to_tables() );
+		$this->assertSame( 'complete', get_option( Sensei_Storage::MIGRATION_STATUS ) );
+
+		// An admin turns HPPS off on Sensei's screen: sync and the repository go, the status stays complete.
+		$settings                                  = get_option( Sensei_Storage::SETTINGS );
+		$settings['experimental_progress_storage'] = false;
+		unset( $settings['experimental_progress_storage_synchronization'], $settings['experimental_progress_storage_repository'] );
+		update_option( Sensei_Storage::SETTINGS, $settings );
+		self::reload();
+		$this->assertSame( 'comments', Sensei_Storage::status()['storage'] );
+
+		// Learners progress in comments only; the tables go stale.
+		$run = $this->comment_progress();
+		$this->assertGreaterThan( 0, Sensei_Storage::comment_progress_rows() );
+
+		$refused = Sensei_Storage::switch_to_tables();
+		$this->assertInstanceOf( WP_Error::class, $refused, 'no switch to stale tables' );
+		$this->assertSame( 'comment_progress_exists', $refused->get_error_code() );
+		$this->assertFalse( self::settings()[0], 'nothing changed' );
+
+		$this->assertSame( 'migrating', Sensei_Storage::switch_to_tables( true ), '--force migrates first' );
+		Sensei()->init_migration_scheduler();
+		self::reload();
+		Sensei()->migration_scheduler->run_job( 'student_progress_migration' );
+		Sensei()->migration_scheduler->run_job( 'quiz_migration' );
+		$this->assertSame( 'tables', Sensei_Storage::switch_to_tables() );
+		self::reload();
+		$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $run['lesson'], $run['user'] ), 'the comment progress made meanwhile is in the tables' );
+	}
 }

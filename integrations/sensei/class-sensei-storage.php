@@ -105,7 +105,7 @@ final class Sensei_Storage {
 	 * Move Sensei to reading progress from its tables, in the steps its admin screen takes. Takes
 	 * effect from the next request, when Sensei reads its settings.
 	 *
-	 * - Migration complete: switch the repository to the tables.
+	 * - Migration complete, with HPPS and synchronisation still on: switch the repository to the tables.
 	 * - No comment progress: create the tables, record the (empty) migration as complete the way
 	 *   Sensei records it, and switch.
 	 * - Comment progress and $force: synchronisation on, the tables dropped and recreated and
@@ -122,7 +122,12 @@ final class Sensei_Storage {
 			return new \WP_Error( 'sensei_unavailable', 'Sensei LMS is not active.' );
 		}
 		$migration = (string) get_option( self::MIGRATION_STATUS, 'not_started' );
-		if ( self::MIGRATION_COMPLETE === $migration && self::tables_exist() ) {
+		// The tables are current only while Sensei has kept writing them: HPPS and synchronisation
+		// on since the migration. Turning HPPS off on Sensei's screen leaves the status complete but
+		// stops the writes, so that case is handled like a fresh switch below.
+		$settings = get_option( self::SETTINGS, array() );
+		$writing  = is_array( $settings ) && true === ( $settings['experimental_progress_storage'] ?? null ) && true === ( $settings['experimental_progress_storage_synchronization'] ?? null );
+		if ( self::MIGRATION_COMPLETE === $migration && $writing && self::tables_exist() ) {
 			self::settings( 'custom_tables' );
 			return 'tables';
 		}
