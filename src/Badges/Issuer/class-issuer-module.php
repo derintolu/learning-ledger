@@ -8,6 +8,7 @@
 namespace LearningLedger\Badges\Issuer;
 
 use LearningLedger\Kernel\Module;
+use LearningLedger\Kernel\No_Page_Cache;
 use LearningLedger\Kernel\Page_Route;
 
 /**
@@ -26,7 +27,7 @@ class Issuer_Module implements Module {
 	 */
 	const DID_HEADERS = array(
 		'Content-Type'                => 'application/json',
-		'Cache-Control'               => 'public, max-age=300',
+		'Cache-Control'               => No_Page_Cache::SHORT_CACHE_CONTROL,
 		'Access-Control-Allow-Origin' => '*',
 	);
 
@@ -98,6 +99,8 @@ class Issuer_Module implements Module {
 	 * @return void
 	 */
 	public function serve_did(): void {
+		// It changes when a key is rotated or removed: never kept by a page cache, and briefly by others.
+		No_Page_Cache::apply( false );
 		try {
 			$body = wp_json_encode( Did_Document::document(), JSON_UNESCAPED_SLASHES );
 		} catch ( \RuntimeException $e ) {

@@ -164,7 +164,7 @@ class Did_Document_Test extends WP_UnitTestCase {
 			$this->assertSame(
 				array(
 					'Content-Type'                => 'application/json',
-					'Cache-Control'               => 'public, max-age=300',
+					'Cache-Control'               => 'public, max-age=60',
 					'Access-Control-Allow-Origin' => '*',
 				),
 				$module->sent

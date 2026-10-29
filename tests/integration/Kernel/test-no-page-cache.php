@@ -9,6 +9,8 @@
 
 use LearningLedger\Badges\Claim\Claim_Page;
 use LearningLedger\Badges\Delivery\Badge_Page;
+use LearningLedger\Badges\Issuer\Key_Store;
+use LearningLedger\Badges\Status\Status_List_Repository;
 use LearningLedger\Connector\CourseServer\Trusted_Keys;
 use LearningLedger\Crypto\Ed25519;
 use LearningLedger\Crypto\Signed_Request;
@@ -125,6 +127,11 @@ class No_Page_Cache_Test extends WP_UnitTestCase {
 			array( 'GET', '/learning-ledger/xapi/statements', false, 400 ),
 			array( 'GET', '/learning-ledger/xapi/about', false, 200 ),
 			array( 'GET', '/learning-ledger/v1/no-such-route', false, 404 ),
+			array( 'GET', '/learning-ledger/xapi/no-such-route', false, 400 ),
+			array( 'GET', '/learning-ledger', false, 404 ),
+			// The namespace indexes.
+			array( 'GET', '/learning-ledger/v1', false, 200 ),
+			array( 'GET', '/learning-ledger/xapi', false, 200 ),
 			array( 'GET', '/learning-ledger/v1/cmi5/fetch/' . $token, false, 0 ),
 			array( 'GET', '/learning-ledger/v1/cmi5/return/' . $uuid, false, 0 ),
 		);
@@ -138,23 +145,30 @@ class No_Page_Cache_Test extends WP_UnitTestCase {
 		}
 	}
 
-	public function test_public_identical_for_everyone_routes_may_be_cached() {
+	public function test_public_routes_are_never_page_cached_but_keep_a_public_cache_control() {
+		Key_Store::generate();
+		$list = ( new Status_List_Repository() )->allocate()['list_id'];
 		foreach ( array(
-			'/learning-ledger/v1/status',
-			'/learning-ledger/v1/issuer',
-			'/learning-ledger/v1/status-lists/1',
-			'/learning-ledger/v1/achievements/' . str_repeat( 'a', 40 ),
-		) as $route ) {
+			'/learning-ledger/v1/status'                => null,
+			'/learning-ledger/v1/issuer'                => 'public, max-age=300',
+			// An unknown achievement: a 404, which no page cache may keep either.
+			'/learning-ledger/v1/achievements/' . str_repeat( 'a', 40 ) => null,
+			'/learning-ledger/v1/status-lists/' . $list => No_Page_Cache::SHORT_CACHE_CONTROL,
+		) as $route => $cache_control ) {
 			$r = $this->request( 'GET', $route );
-			$this->assertFalse( $r['applied'], $route );
-			$this->assertSame( 0, $r['cancels'], $route );
-			$this->assertStringNotContainsString( 'no-store', (string) ( $r['headers']['Cache-Control'] ?? '' ), $route );
+			$this->assertTrue( defined( 'DONOTCACHEPAGE' ) && DONOTCACHEPAGE, $route );
+			$this->assertSame( 1, $r['cancels'], $route . ': batcache_cancel() once, whatever the answer (' . $r['status'] . ')' );
+			$this->assertFalse( $r['applied'], $route . ': no no-store headers' );
+			$this->assertSame( $cache_control, $r['headers']['Cache-Control'] ?? null, $route );
 		}
-		$this->assertFalse( No_Page_Cache::is_private_route( '/learning-ledger/v1/page/did' ) );
+		$this->assertTrue( No_Page_Cache::covers( '/learning-ledger/v1/page/did' ) );
+		$this->assertTrue( No_Page_Cache::is_public_route( '/learning-ledger/v1/page/did' ) );
 		$this->assertTrue( No_Page_Cache::is_private_route( '/learning-ledger/v1/page/record/' . str_repeat( 'A', 43 ) ) );
 		$this->assertTrue( No_Page_Cache::is_private_route( '/learning-ledger/v1/page/claim/' . str_repeat( 'A', 43 ) ) );
 		$this->assertTrue( No_Page_Cache::is_private_route( '/learning-ledger/v1/page/badge/' . Uuid::v4() . '.json' ) );
-		$this->assertFalse( No_Page_Cache::is_private_route( '/wp/v2/posts' ), 'other plugins and core are left alone' );
+		$this->assertFalse( No_Page_Cache::covers( '/wp/v2/posts' ), 'other plugins and core are left alone' );
+		$this->assertFalse( No_Page_Cache::covers( '/learning-ledgerx/v1' ) );
+		$this->assertFalse( No_Page_Cache::covers( '/' ) );
 	}
 
 	/**
@@ -205,5 +219,37 @@ class No_Page_Cache_Test extends WP_UnitTestCase {
 		No_Page_Cache::apply();
 		$this->assertSame( 1, $GLOBALS['lledger_batcache_cancels'] );
 		$this->assertTrue( DONOTCACHEPAGE );
+	}
+
+	public function test_a_request_is_covered_as_it_arrives_before_the_rest_server_runs() {
+		No_Page_Cache::reset();
+		$GLOBALS['lledger_batcache_cancels'] = 0;
+		$wp                                  = new WP();
+		$wp->query_vars                      = array( 'rest_route' => '/learning-ledger/v1/course-server/packages/course' );
+		$this->assertSame( 0, has_action( 'parse_request', array( No_Page_Cache::class, 'on_request' ) ), 'before the REST server (rest_api_loaded, priority 10)' );
+		No_Page_Cache::on_request( $wp );
+		$this->assertTrue( No_Page_Cache::applied() );
+		$this->assertSame( 1, $GLOBALS['lledger_batcache_cancels'] );
+
+		No_Page_Cache::reset();
+		$wp->query_vars = array( 'rest_route' => '/learning-ledger/v1/page/did' );
+		No_Page_Cache::on_request( $wp );
+		$this->assertTrue( No_Page_Cache::cancelled() );
+		$this->assertFalse( No_Page_Cache::applied() );
+
+		foreach ( array( '/learning-ledger/v1/status', 'learning-ledger/v1', '/learning-ledger/xapi', '/learning-ledger/v1/no-such-route' ) as $route ) {
+			No_Page_Cache::reset();
+			$wp->query_vars = array( 'rest_route' => $route );
+			No_Page_Cache::on_request( $wp );
+			$this->assertTrue( No_Page_Cache::cancelled(), $route );
+		}
+
+		No_Page_Cache::reset();
+		$wp->query_vars = array( 'rest_route' => '/wp/v2/posts' );
+		No_Page_Cache::on_request( $wp );
+		$this->assertFalse( No_Page_Cache::cancelled(), 'not ours' );
+		$wp->query_vars = array();
+		No_Page_Cache::on_request( $wp );
+		$this->assertFalse( No_Page_Cache::cancelled(), 'not a REST request' );
 	}
 }

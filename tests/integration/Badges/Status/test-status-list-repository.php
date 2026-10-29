@@ -236,7 +236,7 @@ class Status_List_Repository_Test extends WP_UnitTestCase {
 		$response = rest_do_request( new WP_REST_Request( 'GET', '/learning-ledger/v1/status-lists/' . $a['list_id'] ) );
 		$this->assertSame( 200, $response->get_status() );
 		$headers = $response->get_headers();
-		$this->assertSame( 'public, max-age=300', $headers['Cache-Control'] );
+		$this->assertSame( 'public, max-age=60', $headers['Cache-Control'] );
 		$this->assertSame( '*', $headers['Access-Control-Allow-Origin'] );
 		$this->assertSame( $repo->credential( $a['list_id'] ), $response->get_data() );
 		$this->assertTrue( self::verifies( $response->get_data() ) );

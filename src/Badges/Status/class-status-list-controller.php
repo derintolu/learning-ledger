@@ -8,6 +8,7 @@
 namespace LearningLedger\Badges\Status;
 
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Kernel\No_Page_Cache;
 
 /**
  * Serves `GET /learning-ledger/v1/status-lists/{id}`: a list's signed
@@ -19,7 +20,7 @@ final class Status_List_Controller {
 	 * Headers sent with a list credential.
 	 */
 	const HEADERS = array(
-		'Cache-Control'               => 'public, max-age=300',
+		'Cache-Control'               => No_Page_Cache::SHORT_CACHE_CONTROL,
 		'Access-Control-Allow-Origin' => '*',
 	);
 

@@ -90,6 +90,12 @@ final class Page_Route {
 			|| ! str_starts_with( $request->get_route(), '/' . self::NAMESPACE . '/page/' ) ) {
 			return $served;
 		}
+		// The REST server's Allow and CORS headers belong to REST responses, not to this page.
+		if ( ! headers_sent() ) {
+			foreach ( array( 'Allow', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Methods', 'Access-Control-Allow-Credentials', 'Vary' ) as $name ) {
+				header_remove( $name );
+			}
+		}
 		echo $result->get_data(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the page built by not_found(), escaped there.
 		return true;
 	}
