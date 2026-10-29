@@ -191,7 +191,7 @@ The blocks and editor fields in `build/` are compiled from `src-js/` in https://
 
 = 0.1.5 =
 * New: the signed course-server status reports whether this host's post, user and comment queries work without a logged-in user, and Sensei's progress storage.
-* Fix: on a host that filters anonymous queries, inbox processing, signed course-server requests, content pings and package exports run as a dedicated service user (learning-ledger-service: no role, no capabilities, cannot log in), so Sensei progress kept in comments is written and read.
+* Fix: on a host that filters anonymous post or comment queries, inbox processing, authorised course-server requests, content pings and package exports run as a dedicated service user (no role, capabilities, email or usable password; checked before every use), so Sensei progress kept in comments is written and read.
 
 = 0.1.4 =
 * Fix: on hosts that filter anonymous post and user queries, LRS deliveries reach Sensei again: the inbox maps the actor to its learner, resolves the activity and checks quizzes with direct queries, and a Sensei course is completed when all its lessons are.

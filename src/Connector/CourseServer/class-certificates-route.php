@@ -67,7 +67,7 @@ final class Certificates_Route {
 			self::ROUTE,
 			array(
 				'methods'             => 'GET',
-				'callback'            => Service_Context::wrap( array( $this, 'certificate' ) ),
+				'callback'            => array( $this, 'certificate' ),
 				// Authenticated in the callback: signed requests only.
 				'permission_callback' => '__return_true',
 				'args'                => array(
@@ -100,6 +100,18 @@ final class Certificates_Route {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->certificate_authorized( $r ) );
+	}
+
+	/**
+	 * The authorised part of certificate().
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function certificate_authorized( \WP_REST_Request $r ): \WP_REST_Response {
 		$user   = (int) $r['id'];
 		$course = (int) $r['course'];
 		if ( $user <= 0 || ! get_userdata( $user ) ) {

@@ -328,9 +328,34 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		$this->progress_route_reports( 'anonymous' );
 	}
 
+	public function test_an_unauthenticated_request_never_probes_or_creates_the_service_user() {
+		delete_option( Service_Context::OPTION );
+		wp_set_current_user( 0 );
+		self::host_filter( 'anonymous' );
+		$queries = 0;
+		add_action(
+			'pre_get_posts',
+			static function () use ( &$queries ) {
+				++$queries;
+			}
+		);
+		$user = ( new Identity_Map() )->create_anonymous_learner();
+		foreach ( array( 'GET' => 'learners/' . $user . '/progress', 'POST' => 'learners' ) as $method => $route ) { // phpcs:ignore WordPress.Arrays.ArrayDeclarationSpacing.AssociativeArrayFound
+			$req = new WP_REST_Request( $method, '/learning-ledger/v1/course-server/' . $route );
+			$req->set_query_params( array( 'course' => '1' ) );
+			$this->assertSame( 401, rest_get_server()->dispatch( $req )->get_status(), $route );
+		}
+		$this->assertSame( 0, $queries, 'no probe ran' );
+		$this->assertFalse( get_option( Service_Context::OPTION ), 'no service user was made' );
+	}
+
 	public function test_signed_status_reports_what_the_host_filters() {
 		self::factory()->comment->create( array( 'comment_post_ID' => $this->program ) );
 		wp_set_current_user( 0 );
+		delete_option( Service_Context::OPTION );
+		$this->assertNull( $this->signed( 'GET', 'status' )->get_data()['host_queries']['posts']['service_user'], 'the status never creates the service user' );
+		$this->assertFalse( get_option( Service_Context::OPTION ) );
+		Service_Context::service_user();
 		$plain = $this->signed( 'GET', 'status' )->get_data();
 		$this->assertSame(
 			array(

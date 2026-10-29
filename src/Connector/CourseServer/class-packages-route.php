@@ -49,7 +49,7 @@ final class Packages_Route {
 			'/course-server/packages/(?P<program>[^/]+)',
 			array(
 				'methods'             => 'GET',
-				'callback'            => Service_Context::wrap( array( $this, 'get' ) ),
+				'callback'            => array( $this, 'get' ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -58,7 +58,7 @@ final class Packages_Route {
 			'/course-server/packages',
 			array(
 				'methods'             => 'POST',
-				'callback'            => Service_Context::wrap( array( $this, 'import' ) ),
+				'callback'            => array( $this, 'import' ),
 				'permission_callback' => '__return_true',
 				'args'                => array(
 					'url'     => array(
@@ -87,6 +87,18 @@ final class Packages_Route {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->get_authorized( $r ) );
+	}
+
+	/**
+	 * The authorised part of get().
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function get_authorized( \WP_REST_Request $r ): \WP_REST_Response {
 		$id = Export_Controller::program_id( (string) $r['program'] );
 		if ( null === $id ) {
 			return Export_Controller::error_response( new Invalid_Input( 'No such program.', 'not_found' ) );
@@ -111,6 +123,18 @@ final class Packages_Route {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->import_authorized( $r ) );
+	}
+
+	/**
+	 * The authorised part of import().
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function import_authorized( \WP_REST_Request $r ): \WP_REST_Response {
 		// A signed course server holding import_packages is a trusted import path.
 		return ( new Import_Controller() )->handle( $r, true );
 	}

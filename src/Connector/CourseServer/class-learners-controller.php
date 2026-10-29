@@ -91,7 +91,7 @@ final class Learners_Controller {
 			'/course-server/learners',
 			array(
 				'methods'             => 'POST',
-				'callback'            => Service_Context::wrap( array( $this, 'create' ) ),
+				'callback'            => array( $this, 'create' ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -100,7 +100,7 @@ final class Learners_Controller {
 			'/course-server/learners/(?P<id>\d+)',
 			array(
 				'methods'             => 'DELETE',
-				'callback'            => Service_Context::wrap( array( $this, 'delete' ) ),
+				'callback'            => array( $this, 'delete' ),
 				'permission_callback' => '__return_true',
 				'args'                => $id,
 			)
@@ -110,7 +110,7 @@ final class Learners_Controller {
 			'/course-server/learners/(?P<id>\d+)/enrolments',
 			array(
 				'methods'             => 'POST',
-				'callback'            => Service_Context::wrap( array( $this, 'enrol' ) ),
+				'callback'            => array( $this, 'enrol' ),
 				'permission_callback' => '__return_true',
 				'args'                => $id,
 			)
@@ -120,7 +120,7 @@ final class Learners_Controller {
 			'/course-server/learners/(?P<id>\d+)/progress',
 			array(
 				'methods'             => 'GET',
-				'callback'            => Service_Context::wrap( array( $this, 'progress' ) ),
+				'callback'            => array( $this, 'progress' ),
 				'permission_callback' => '__return_true',
 				'args'                => $id,
 			)
@@ -139,6 +139,16 @@ final class Learners_Controller {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->create_authorized() );
+	}
+
+	/**
+	 * The authorised part of create().
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function create_authorized(): \WP_REST_Response {
 		try {
 			$user = $this->identity->create_anonymous_learner();
 		} catch ( \RuntimeException $e ) {
@@ -165,6 +175,18 @@ final class Learners_Controller {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->enrol_authorized( $r ) );
+	}
+
+	/**
+	 * The authorised part of enrol().
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function enrol_authorized( \WP_REST_Request $r ): \WP_REST_Response {
 		$user = (int) $r['id'];
 		if ( ! get_userdata( $user ) ) {
 			return self::error( 'lledger_unknown_learner', 'No such learner.', 404 );
@@ -203,6 +225,18 @@ final class Learners_Controller {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->progress_authorized( $r ) );
+	}
+
+	/**
+	 * The authorised part of progress().
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function progress_authorized( \WP_REST_Request $r ): \WP_REST_Response {
 		$user = (int) $r['id'];
 		if ( ! get_userdata( $user ) ) {
 			return self::error( 'lledger_unknown_learner', 'No such learner.', 404 );
@@ -265,6 +299,18 @@ final class Learners_Controller {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
+		// Authorised: the rest runs in the service context, never before the signature is checked.
+		return Service_Context::run( fn(): \WP_REST_Response => $this->delete_authorized( $r ) );
+	}
+
+	/**
+	 * The authorised part of delete().
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	private function delete_authorized( \WP_REST_Request $r ): \WP_REST_Response {
 		$id   = (int) $r['id'];
 		$user = get_userdata( $id );
 		if ( ! $user ) {
