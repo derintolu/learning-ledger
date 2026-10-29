@@ -4,7 +4,7 @@ Tags: xapi, lrs, cmi5, open badges, elearning
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.1.2
+Stable tag: 0.1.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -188,6 +188,11 @@ Bundled data files, unmodified:
 The blocks and editor fields in `build/` are compiled from `src-js/` in https://github.com/derintolu/learning-ledger. To build them yourself, run `npm ci && npm run build` in a checkout.
 
 == Changelog ==
+
+= 0.1.3 =
+* Fix: package ZIPs carry a fixed archive comment, so they no longer end in NUL bytes that some hosts strip from responses, truncating the download.
+* Fix: WP-CLI, signed course-server and unfiltered_html imports write lessons without kses, which rewrote regex patterns, code and markup.
+* Fix: an imported package exports back unchanged: specVersion 0.2, the course description, language, version, allowPractice, foreign extensions, reference solutions, placement title and description, fence languages and raw titles are kept. An empty program takes its AU URL template and MCP URL from the package.
 
 = 0.1.2 =
 * Fix: on hosts that filter anonymous post queries, Sensei course lessons, lesson quizzes, stable-key lookups and the program list are read directly, so course-server package exports keep their lessons and imports update existing posts.
