@@ -15,6 +15,7 @@ use LearningLedger\Kernel\Page_Route;
 use LearningLedger\Lrs\Links\Link_Repository;
 use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Kernel\No_Page_Cache;
 
 /**
  * `/badges/claim/<token>`: a public page gated only by the claim link's token.
@@ -231,6 +232,8 @@ class Claim_Page {
 	 * @return void
 	 */
 	public function serve( string $token, string $method, array $fields ): void {
+		// Private, or revocable: never kept by a page cache (see No_Page_Cache).
+		No_Page_Cache::apply();
 		$link  = 1 === preg_match( '/\A[A-Za-z0-9_-]{43}\z/', $token ) ? $this->links->resolve( $token, 'claim' ) : null;
 		$badge = null === $link ? null : $this->badges->get( $link['subject'] );
 		if ( null === $link || null === $badge || ! hash_equals( $badge['actor_hash'], $link['actor_hash'] ) ) {

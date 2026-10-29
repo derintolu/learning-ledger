@@ -61,7 +61,8 @@ class Plugin_Test extends WP_UnitTestCase {
 		$this->assertSame( 'core', Plugin::MODULES['LearningLedger\Lrs\Admin\Admin_Module'] );
 		$this->assertSame( 'lrs', Plugin::MODULES['LearningLedger\Badges\Jwt\Jwt_Module'] );
 		$this->assertSame( 'connector', Plugin::MODULES['LearningLedger\Connector\Lms\Integration_Loader'] );
-		$this->assertCount( 40, Plugin::MODULES );
+		$this->assertSame( 'core', Plugin::MODULES['LearningLedger\Kernel\No_Page_Cache'] );
+		$this->assertCount( 41, Plugin::MODULES );
 		foreach ( Plugin::MODULES as $role ) {
 			$this->assertContains( $role, array( 'core', 'lrs', 'connector' ) );
 		}

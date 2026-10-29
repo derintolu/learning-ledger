@@ -18,6 +18,7 @@ final class Plugin {
 	 * Module class => role (`core`, `lrs`, `connector`). Each class is created by its own task.
 	 */
 	public const MODULES = array(
+		'LearningLedger\Kernel\No_Page_Cache'              => 'core',
 		'LearningLedger\Kernel\Status_Route'               => 'core',
 		'LearningLedger\Kernel\Site_Health'                => 'core',
 		'LearningLedger\Queue\Queue_Module'                => 'core',

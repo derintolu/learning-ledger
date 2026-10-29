@@ -26,6 +26,7 @@ use LearningLedger\Util\Json;
 use LearningLedger\Util\Timestamp;
 use LearningLedger\Xapi\Agent_Identity;
 use LearningLedger\Xapi\Formatter;
+use LearningLedger\Kernel\No_Page_Cache;
 
 /**
  * `/records/<token>`: the statements of the view link's actor, newest first, 100 per page, each
@@ -179,6 +180,8 @@ class Record_Page {
 	 * @return void
 	 */
 	public function serve( string $token, string $download, string $more ): void {
+		// Private, or revocable: never kept by a page cache (see No_Page_Cache).
+		No_Page_Cache::apply();
 		$link = 1 === preg_match( '/\A[A-Za-z0-9_-]{43}\z/', $token ) ? $this->links->resolve( $token, 'view' ) : null;
 		if ( null === $link ) {
 			$this->send_headers( 410, self::PRIVATE_HEADERS + self::HTML_HEADERS );

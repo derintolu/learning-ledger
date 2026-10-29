@@ -16,6 +16,7 @@ use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Json;
 use LearningLedger\Util\Uuid;
+use LearningLedger\Kernel\No_Page_Cache;
 
 /**
  * `/badges/<uuid>`, `/badges/<uuid>.json` and `/badges/<uuid>.png`.
@@ -162,6 +163,8 @@ class Badge_Page {
 	 * @return void
 	 */
 	public function serve( string $id, string $format, string $exp, string $sig ): void {
+		// Private, or revocable: never kept by a page cache (see No_Page_Cache).
+		No_Page_Cache::apply();
 		$id    = strtolower( $id );
 		$badge = Uuid::is_valid( $id ) ? $this->badges->get( $id ) : null;
 		if ( null === $badge || Badge_Repository::ISSUED !== $badge['status'] || ( ! is_array( $badge['credential'] ) && ! is_string( $badge['credential'] ) ) ) {
@@ -307,8 +310,9 @@ class Badge_Page {
 	 */
 	private static function file_headers( bool $shared ): array {
 		if ( $shared ) {
+			// Not public caching: unsharing or revoking the badge must take effect at once.
 			return array(
-				'Cache-Control'          => 'public, max-age=300',
+				'Cache-Control'          => No_Page_Cache::HEADERS['Cache-Control'],
 				'X-Content-Type-Options' => 'nosniff',
 			);
 		}
@@ -344,7 +348,7 @@ class Badge_Page {
 		$this->send_headers(
 			200,
 			array(
-				'Cache-Control'           => 'public, max-age=300',
+				'Cache-Control'           => No_Page_Cache::HEADERS['Cache-Control'],
 				'X-Content-Type-Options'  => 'nosniff',
 				'Referrer-Policy'         => 'no-referrer',
 				'X-Robots-Tag'            => 'noindex',
