@@ -57,7 +57,6 @@ class Package_Validator_Test extends \PHPUnit\Framework\TestCase {
 			array(
 				'/lessons/what-is-json/bug/explanation',
 				'/lessons/what-is-json/bug/fixChecks',
-				'/lessons/what-is-json/checkpoint/rubric',
 				'/lessons/what-is-json/referenceSolution',
 			),
 			$paths

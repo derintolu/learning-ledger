@@ -289,8 +289,57 @@ class Learners_Controller_Test extends WP_UnitTestCase {
 		$this->assertCount( 2, $erase );
 		$this->assertSame( 'https://lrs.example.test/wp-json/learning-ledger/v1/actors/erase', $erase[0]['url'] );
 		$this->assertSame( 'POST', $erase[0]['args']['method'] );
-		$this->assertSame( array( 'actor' => $actor ), json_decode( $erase[0]['args']['body'], true ) );
-		$this->assertSame( array( 'actor' => $linked ), json_decode( $erase[1]['args']['body'], true ) );
+		$this->assertSame(
+			array(
+				'actor'        => $actor,
+				'revokeBadges' => true,
+			),
+			json_decode( $erase[0]['args']['body'], true )
+		);
+		$this->assertSame(
+			array(
+				'actor'        => $linked,
+				'revokeBadges' => true,
+			),
+			json_decode( $erase[1]['args']['body'], true )
+		);
+	}
+
+	public function test_delete_with_revoke_badges_false_asks_the_lrs_to_keep_claimed_badges() {
+		$data = $this->create_learner();
+		$res  = $this->send( 'DELETE', 'learners/' . $data['user_id'], array( 'revokeBadges' => 'false' ) );
+		$this->assertSame( 200, $res->get_status() );
+		$erase = array_values( array_filter( $this->requests, static fn( $r ) => str_ends_with( $r['url'], '/actors/erase' ) ) );
+		$this->assertSame(
+			array(
+				'actor'        => $data['actor'],
+				'revokeBadges' => false,
+			),
+			json_decode( $erase[0]['args']['body'], true )
+		);
+
+		// A queued retry keeps the choice.
+		$queued           = $this->create_learner();
+		$this->lrs_status = 503;
+		$this->assertSame( 'queued', $this->send( 'DELETE', 'learners/' . $queued['user_id'], array( 'revokeBadges' => 'false' ) )->get_data()['lrs_erase'] );
+		global $wpdb;
+		$job = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . Tables::name( 'jobs' ) . ' WHERE type = %s', Learners_Controller::ERASE_JOB ) );
+		$this->assertFalse( json_decode( $job->payload, true )['revokeBadges'] );
+		$this->lrs_status = 200;
+		$this->requests   = array();
+		do_action( 'learning_ledger/jobs/' . Learners_Controller::ERASE_JOB, json_decode( $job->payload, true ) ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+		$this->assertFalse( json_decode( $this->requests[0]['args']['body'], true )['revokeBadges'] );
+	}
+
+	public function test_delete_with_any_other_revoke_badges_value_is_400_and_deletes_nothing() {
+		$data = $this->create_learner();
+		foreach ( array( 'no', '0', 'FALSE', '' ) as $value ) {
+			$res = $this->send( 'DELETE', 'learners/' . $data['user_id'], array( 'revokeBadges' => $value ) );
+			$this->assertSame( 400, $res->get_status(), $value );
+			$this->assertSame( 'revokeBadges', $res->get_data()['data']['field'] );
+		}
+		$this->assertInstanceOf( WP_User::class, get_userdata( $data['user_id'] ) );
+		$this->assertSame( 'erased', $this->send( 'DELETE', 'learners/' . $data['user_id'], array( 'revokeBadges' => 'true' ) )->get_data()['lrs_erase'] );
 	}
 
 	public function test_failed_lrs_erase_is_queued_and_reported() {
@@ -305,7 +354,13 @@ class Learners_Controller_Test extends WP_UnitTestCase {
 		global $wpdb;
 		$job = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . Tables::name( 'jobs' ) . ' WHERE type = %s', Learners_Controller::ERASE_JOB ) );
 		$this->assertNotNull( $job );
-		$this->assertSame( array( 'actor' => $data['actor'] ), json_decode( $job->payload, true ) );
+		$this->assertSame(
+			array(
+				'actor'        => $data['actor'],
+				'revokeBadges' => true,
+			),
+			json_decode( $job->payload, true )
+		);
 
 		$this->lrs_status = 200;
 		$this->requests   = array();

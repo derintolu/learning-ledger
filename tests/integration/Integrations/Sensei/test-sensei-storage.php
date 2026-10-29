@@ -30,6 +30,21 @@ class Sensei_Storage_Test extends WP_UnitTestCase {
 		foreach ( self::OPTIONS as $option ) {
 			$this->saved[ $option ] = get_option( $option, null );
 		}
+		self::empty_tables();
+		// Sensei as the next request sees it: the settings an earlier test left in memory are not this test's.
+		self::reload();
+	}
+
+	/**
+	 * Start from empty progress tables: rows another test committed (table DDL commits) are not this test's.
+	 */
+	private static function empty_tables(): void {
+		global $wpdb;
+		if ( Sensei_Storage::tables_exist() ) {
+			foreach ( Sensei_Storage::TABLES as $table ) {
+				$wpdb->query( $wpdb->prepare( 'DELETE FROM %i', $wpdb->prefix . $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			}
+		}
 	}
 
 	public function tear_down(): void {
@@ -129,7 +144,8 @@ class Sensei_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 'comment_progress_exists', $refused->get_error_code() );
 
 		// --force: synchronisation on, the tables recreated and Sensei's migration scheduled; reads stay on comments.
-		$this->assertSame( 'migrating', Sensei_Storage::switch_to_tables( true ) );
+		$forced = Sensei_Storage::switch_to_tables( true );
+		$this->assertSame( 'migrating', $forced, is_wp_error( $forced ) ? $forced->get_error_message() . ' rows=' . Sensei_Storage::table_progress_rows() . ' settings=' . wp_json_encode( get_option( Sensei_Storage::SETTINGS ) ) : '' );
 		$this->assertSame( array( true, true, 'comments' ), self::settings() );
 		self::reload();
 		$this->assertSame( 'comments', Sensei_Storage::status()['storage'] );
@@ -186,5 +202,55 @@ class Sensei_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 'tables', Sensei_Storage::switch_to_tables() );
 		self::reload();
 		$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $run['lesson'], $run['user'] ), 'the comment progress made meanwhile is in the tables' );
+	}
+
+	public function test_tables_holding_progress_are_never_dropped_or_emptied_without_drop_tables() {
+		global $wpdb;
+		$this->assertSame( 'tables', Sensei_Storage::switch_to_tables() );
+		self::reload();
+		$run = $this->comment_progress();
+		$this->assertGreaterThan( 0, Sensei_Storage::table_progress_rows(), 'progress written to the tables' );
+
+		// HPPS turned off on Sensei's screen; Sensei now reads comments, the tables still hold the rows.
+		$settings                                  = get_option( Sensei_Storage::SETTINGS );
+		$settings['experimental_progress_storage'] = false;
+		unset( $settings['experimental_progress_storage_synchronization'] );
+		update_option( Sensei_Storage::SETTINGS, $settings );
+		self::reload();
+
+		$refused = Sensei_Storage::switch_to_tables( true );
+		$this->assertInstanceOf( WP_Error::class, $refused );
+		$this->assertSame( 'tables_hold_progress', $refused->get_error_code() );
+		$this->assertStringContainsString( '--drop-tables', $refused->get_error_message() );
+		$this->assertGreaterThan( 0, Sensei_Storage::table_progress_rows(), 'nothing dropped' );
+
+		$this->assertSame( 'migrating', Sensei_Storage::switch_to_tables( true, true ) );
+		unset( $run );
+	}
+
+	public function test_stale_table_rows_without_comment_progress_need_drop_tables_to_be_emptied() {
+		global $wpdb;
+		$this->assertSame( 'tables', Sensei_Storage::switch_to_tables() );
+		$wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prefix . 'sensei_lms_progress',
+			array(
+				'post_id'    => 999999,
+				'user_id'    => 999999,
+				'type'       => 'lesson',
+				'status'     => 'complete',
+				'created_at' => gmdate( 'Y-m-d H:i:s' ),
+				'updated_at' => gmdate( 'Y-m-d H:i:s' ),
+			)
+		);
+		// Sensei no longer writes the tables (HPPS off), so the switch is a fresh one.
+		$settings                                  = get_option( Sensei_Storage::SETTINGS );
+		$settings['experimental_progress_storage'] = false;
+		update_option( Sensei_Storage::SETTINGS, $settings );
+		$this->assertSame( 0, Sensei_Storage::comment_progress_rows() );
+
+		$refused = Sensei_Storage::switch_to_tables();
+		$this->assertSame( 'tables_hold_progress', $refused->get_error_code() );
+		$this->assertSame( 'tables', Sensei_Storage::switch_to_tables( false, true ) );
+		$this->assertSame( 0, Sensei_Storage::table_progress_rows(), 'the stale rows are gone' );
 	}
 }

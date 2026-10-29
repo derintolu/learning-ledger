@@ -311,8 +311,26 @@ final class Learners_Controller {
 	 * @return \WP_REST_Response
 	 */
 	private function delete_authorized( \WP_REST_Request $r ): \WP_REST_Response {
-		$id   = (int) $r['id'];
-		$user = get_userdata( $id );
+		// `?revokeBadges=false` keeps the learner's claimed badges valid (the course server's retention
+		// erase); absent or `true` revokes them. Checked before anything is deleted.
+		$query  = $r->get_query_params();
+		$revoke = $query['revokeBadges'] ?? 'true';
+		if ( 'true' !== $revoke && 'false' !== $revoke ) {
+			return new \WP_REST_Response(
+				array(
+					'code'    => 'lledger_invalid',
+					'message' => 'revokeBadges must be true or false.',
+					'data'    => array(
+						'status' => 400,
+						'field'  => 'revokeBadges',
+					),
+				),
+				400
+			);
+		}
+		$revoke = 'true' === $revoke;
+		$id     = (int) $r['id'];
+		$user   = get_userdata( $id );
 		if ( ! $user ) {
 			return self::error( 'lledger_unknown_learner', 'No such learner.', 404 );
 		}
@@ -337,15 +355,22 @@ final class Learners_Controller {
 		if ( ! wp_delete_user( $id ) ) {
 			// The connector rows are already gone, so the LRS erase still happens, from the queue.
 			foreach ( $actors as $actor ) {
-				self::queue_erase( $actor );
+				self::queue_erase( $actor, $revoke );
 			}
 			return self::error( 'lledger_learner_not_deleted', 'WordPress did not delete the user; the LRS erase is queued.', 500 );
 		}
 
+		/**
+		 * A learner was deleted: LMS integrations remove what their LMS still holds about the user.
+		 *
+		 * @param int $id The deleted user's id.
+		 */
+		do_action( 'learning_ledger/learner_deleted', $id ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
+
 		$erase = 'erased';
 		foreach ( $actors as $actor ) {
-			if ( ! self::erase( $actor ) ) {
-				self::queue_erase( $actor );
+			if ( ! self::erase( $actor, $revoke ) ) {
+				self::queue_erase( $actor, $revoke );
 				$erase = 'queued';
 			}
 		}
@@ -363,7 +388,7 @@ final class Learners_Controller {
 	/**
 	 * Job handler: retry an LRS erase. Throws so the queue backs off and tries again.
 	 *
-	 * @param array $payload Job payload `{actor}`.
+	 * @param array $payload Job payload `{actor, revokeBadges?}` (revokeBadges absent: true, as before 0.1.7).
 	 *
 	 * @return void
 	 *
@@ -374,7 +399,8 @@ final class Learners_Controller {
 		if ( ! is_array( $actor ) ) {
 			return;
 		}
-		if ( ! self::erase( $actor ) ) {
+		$revoke = $payload['revokeBadges'] ?? true;
+		if ( ! self::erase( $actor, false !== $revoke ) ) {
 			throw new \RuntimeException( 'The LRS did not erase the actor.' );
 		}
 	}
@@ -382,24 +408,41 @@ final class Learners_Controller {
 	/**
 	 * Queue a retried LRS erase for one actor (one undone job per actor).
 	 *
-	 * @param array $actor Agent object.
+	 * @param array   $actor  Agent object.
+	 * @param boolean $revoke Whether the LRS revokes the actor's claimed badges.
 	 *
 	 * @return void
 	 */
-	private static function queue_erase( array $actor ): void {
-		Job_Queue::push( self::ERASE_JOB, array( 'actor' => $actor ), self::ERASE_JOB . ':' . bin2hex( Agent_Identity::from_array( $actor )->hash() ), Job_Queue::retry_delay( 1 ) );
+	private static function queue_erase( array $actor, bool $revoke = true ): void {
+		Job_Queue::push(
+			self::ERASE_JOB,
+			array(
+				'actor'        => $actor,
+				'revokeBadges' => $revoke,
+			),
+			self::ERASE_JOB . ':' . bin2hex( Agent_Identity::from_array( $actor )->hash() ),
+			Job_Queue::retry_delay( 1 )
+		);
 	}
 
 	/**
 	 * Ask the LRS to erase one actor.
 	 *
-	 * @param array $actor Agent object.
+	 * @param array   $actor  Agent object.
+	 * @param boolean $revoke Whether the LRS revokes the actor's claimed badges.
 	 *
 	 * @return boolean Whether the LRS answered 2xx.
 	 */
-	private static function erase( array $actor ): bool {
+	private static function erase( array $actor, bool $revoke = true ): bool {
 		try {
-			$res = ( new Lrs_Client() )->api( 'POST', 'actors/erase', array( 'actor' => $actor ) );
+			$res = ( new Lrs_Client() )->api(
+				'POST',
+				'actors/erase',
+				array(
+					'actor'        => $actor,
+					'revokeBadges' => $revoke,
+				)
+			);
 		} catch ( \RuntimeException $e ) {
 			return false;
 		}

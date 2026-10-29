@@ -102,6 +102,45 @@ final class Sensei_Storage {
 	}
 
 	/**
+	 * `learning_ledger/learner_deleted`: delete what Sensei holds about a deleted learner, by
+	 * direct SQL. Sensei's own cleanup on delete_user finds the learner's activity comments with a
+	 * comment query, which a host emptying comment queries turns into nothing.
+	 *
+	 * Removes the learner's `sensei_*` activity comments (lesson and course status, answers,
+	 * certificates' hash) with their meta, and the learner's rows in Sensei's progress tables:
+	 * progress and quiz submissions by user, answers by submission, grades by answer.
+	 *
+	 * @param mixed $user_id Deleted user id.
+	 *
+	 * @return void
+	 */
+	public static function delete_user_progress( mixed $user_id ): void {
+		global $wpdb;
+		$user = (int) $user_id;
+		if ( $user <= 0 ) {
+			return;
+		}
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names only; values are placeholders.
+		$comments = array_map( 'intval', $wpdb->get_col( $wpdb->prepare( "SELECT comment_ID FROM {$wpdb->comments} WHERE user_id = %d AND comment_type LIKE %s", $user, $wpdb->esc_like( 'sensei_' ) . '%' ) ) );
+		foreach ( array_chunk( $comments, 500 ) as $chunk ) {
+			$in = implode( ',', array_fill( 0, count( $chunk ), '%d' ) );
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->commentmeta} WHERE comment_id IN ({$in})", $chunk ) ); // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds the placeholders.
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->comments} WHERE comment_ID IN ({$in})", $chunk ) ); // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds the placeholders.
+			foreach ( $chunk as $id ) {
+				clean_comment_cache( $id );
+			}
+		}
+		if ( self::tables_exist() ) {
+			$p = $wpdb->prefix;
+			$wpdb->query( $wpdb->prepare( "DELETE g FROM {$p}sensei_lms_quiz_grades g JOIN {$p}sensei_lms_quiz_answers a ON a.id = g.answer_id JOIN {$p}sensei_lms_quiz_submissions s ON s.id = a.submission_id WHERE s.user_id = %d", $user ) );
+			$wpdb->query( $wpdb->prepare( "DELETE a FROM {$p}sensei_lms_quiz_answers a JOIN {$p}sensei_lms_quiz_submissions s ON s.id = a.submission_id WHERE s.user_id = %d", $user ) );
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$p}sensei_lms_quiz_submissions WHERE user_id = %d", $user ) );
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$p}sensei_lms_progress WHERE user_id = %d", $user ) );
+		}
+		// phpcs:enable
+	}
+
+	/**
 	 * Move Sensei to reading progress from its tables, in the steps its admin screen takes. Takes
 	 * effect from the next request, when Sensei reads its settings.
 	 *
@@ -113,11 +152,15 @@ final class Sensei_Storage {
 	 *   the migration is complete, then a second call switches it.
 	 * - Comment progress without $force, or a migration still running: refused.
 	 *
+	 * Anything that would drop or empty Sensei's tables while they hold progress, or while Sensei is
+	 * set to read them, needs $drop as well: those rows may be the only copy.
+	 *
 	 * @param boolean $force Start Sensei's migration of existing comment progress.
+	 * @param boolean $drop  Allow dropping or emptying tables that hold progress.
 	 *
 	 * @return string|\WP_Error `tables` (Sensei reads its tables) or `migrating`.
 	 */
-	public static function switch_to_tables( bool $force = false ): string|\WP_Error {
+	public static function switch_to_tables( bool $force = false, bool $drop = false ): string|\WP_Error {
 		if ( ! function_exists( 'Sensei' ) || ! class_exists( '\Sensei\Internal\Installer\Schema' ) ) {
 			return new \WP_Error( 'sensei_unavailable', 'Sensei LMS is not active.' );
 		}
@@ -139,11 +182,21 @@ final class Sensei_Storage {
 		if ( $rows > 0 && ! $force ) {
 			return new \WP_Error( 'comment_progress_exists', sprintf( 'Sensei holds %d progress rows in comments. Run again with --force to migrate them into its tables first, as its settings screen does.', $rows ) );
 		}
+		$held  = self::table_progress_rows();
+		$reads = is_array( $settings ) && 'custom_tables' === ( $settings['experimental_progress_storage_repository'] ?? null );
+		if ( ! $drop && ( $held > 0 || ( $rows > 0 && $reads ) ) ) {
+			return new \WP_Error(
+				'tables_hold_progress',
+				sprintf( 'Sensei\'s progress tables hold %d rows%s; this switch would drop or empty them. Run again with --drop-tables to destroy them.', $held, $reads ? ' and Sensei is set to read them' : '' )
+			);
+		}
 
 		if ( 0 === $rows ) {
 			if ( ! self::create_tables() ) {
 				return new \WP_Error( 'tables_not_created', 'Sensei progress tables could not be created.' );
 			}
+			// Rows left from an earlier switch are stale: the migration recorded below says the tables hold everything.
+			self::empty_tables();
 			// Nothing to migrate: record the migration as Migration_Job_Scheduler does when it completes.
 			$now = microtime( true );
 			update_option( self::MIGRATION_STARTED, $now );
@@ -177,7 +230,6 @@ final class Sensei_Storage {
 	 * @return string|\WP_Error `migrating`.
 	 */
 	private static function start_migration(): string|\WP_Error {
-		self::settings( 'comments' );
 		Sensei()->init_migration_scheduler();
 		$scheduler = Sensei()->migration_scheduler ?? null;
 		if ( ! is_object( $scheduler ) || ! class_exists( '\Sensei\Internal\Installer\Eraser' ) ) {
@@ -189,7 +241,38 @@ final class Sensei_Storage {
 			return new \WP_Error( 'tables_not_created', 'Sensei progress tables could not be created.' );
 		}
 		$scheduler->schedule();
+		// The settings last, once the tables and the migration are in place.
+		self::settings( 'comments' );
 		return 'migrating';
+	}
+
+	/**
+	 * Rows in Sensei's progress tables (0 when they do not exist).
+	 *
+	 * @return integer
+	 */
+	public static function table_progress_rows(): int {
+		global $wpdb;
+		if ( ! self::tables_exist() ) {
+			return 0;
+		}
+		$total = 0;
+		foreach ( array( 'sensei_lms_progress', 'sensei_lms_quiz_submissions' ) as $table ) {
+			$total += (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $wpdb->prefix . $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		}
+		return $total;
+	}
+
+	/**
+	 * Delete every row of Sensei's progress tables.
+	 *
+	 * @return void
+	 */
+	private static function empty_tables(): void {
+		global $wpdb;
+		foreach ( self::TABLES as $table ) {
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i', $wpdb->prefix . $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		}
 	}
 
 	/**

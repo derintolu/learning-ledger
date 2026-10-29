@@ -319,7 +319,8 @@ class Package_Builder_Test extends WP_UnitTestCase {
 		$pkg = $this->package( $built->zip );
 		$this->assertSame( array(), Package_Validator::validate( $pkg, 'public' )->errors() );
 		$bytes = $this->all_bytes( $pkg );
-		$this->assertStringNotContainsString( 'RUBRIC-SECRET', $bytes );
+		// Spec 0.2: the rubric is not secret; the planted bug's explanation is.
+		$this->assertStringContainsString( 'RUBRIC-SECRET', $bytes );
 		$this->assertStringNotContainsString( 'EXPLANATION-SECRET', $bytes );
 		foreach ( $pkg->lesson_keys() as $key ) {
 			$this->assertFalse( Secrets::has_secrets( $pkg->lesson_json( $key ) ), $key );

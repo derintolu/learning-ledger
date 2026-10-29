@@ -42,6 +42,7 @@ final class Sensei_Integration {
 			Sensei_Applier::hooks();
 		}
 		add_action( 'sensei_course_status_updated', array( Sensei_Certificate_Provider::class, 'guard_duplicate' ), 8, 3 );
+		add_action( 'learning_ledger/learner_deleted', array( Sensei_Storage::class, 'delete_user_progress' ) ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\WP_CLI' ) ) {
 			\WP_CLI::add_command( 'learning-ledger sensei storage', Sensei_Storage_Command::class );
 		}

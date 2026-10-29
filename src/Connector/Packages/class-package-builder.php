@@ -48,6 +48,11 @@ final class Package_Builder {
 	 */
 	public const PACKAGE_MCP = '_lledger_package_mcp';
 
+	/**
+	 * Program meta: the build number of the first build after an import (see semver()).
+	 */
+	public const VERSION_BASE = '_lledger_version_base';
+
 	private const MAX_META_BYTES = 1048576;
 
 	/**
@@ -105,6 +110,10 @@ final class Package_Builder {
 		if ( $changed ) {
 			$this->programs->bump_version( $program_id, $etag );
 			$this->programs->set_structure( $program_id, Course_Structure_Parser::parse( $parts['xml'] ) );
+		}
+		if ( (int) get_post_meta( $program_id, self::VERSION_BASE, true ) <= 0 ) {
+			// The first build after an import: later content changes count from here.
+			update_post_meta( $program_id, self::VERSION_BASE, $version );
 		}
 		if ( null === $public ) {
 			return new Built_Package( $full, $etag, $version, 'full', $parts['warnings'] );
@@ -255,11 +264,10 @@ final class Package_Builder {
 		// An imported package's own version and language are kept; otherwise they are derived.
 		$language = (string) get_post_meta( $p->id, '_lledger_language', true );
 		$language = '' !== $language ? $language : strtolower( (string) get_bloginfo( 'language' ) );
-		$semver   = (string) get_post_meta( $p->id, '_lledger_package_version', true );
 		$course   = array(
 			'specVersion' => self::SPEC_VERSION,
 			'flavour'     => 'full' === $flavour ? 'authoring' : 'distribution',
-			'version'     => 1 === preg_match( '/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/', $semver ) ? $semver : '1.0.' . $version,
+			'version'     => self::semver( $p->id, $version ),
 			'language'    => '' !== $language ? $language : 'en',
 		);
 		$licence  = (string) get_post_meta( $p->id, '_lledger_licence', true );
@@ -303,6 +311,27 @@ final class Package_Builder {
 			$course['extensions'] = $all;
 		}
 		return $course;
+	}
+
+	/**
+	 * The course.json `version`: an imported package's semver as it came, its patch raised by one
+	 * for each content change made in WordPress since (each new build number past the first build
+	 * after the import, VERSION_BASE); `1.0.<build>` for a program never imported. CXM-PKG-030 asks
+	 * for a semver version; a raised patch keeps it one and orders after the imported one.
+	 *
+	 * @param integer $program_id Program id.
+	 * @param integer $version    This build's number.
+	 *
+	 * @return string
+	 */
+	private static function semver( int $program_id, int $version ): string {
+		$semver = (string) get_post_meta( $program_id, '_lledger_package_version', true );
+		if ( 1 !== preg_match( '/^(\d+)\.(\d+)\.(\d+)((?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/', $semver, $m ) ) {
+			return '1.0.' . $version;
+		}
+		$base = (int) get_post_meta( $program_id, self::VERSION_BASE, true );
+		$base = $base > 0 ? $base : $version;
+		return $m[1] . '.' . $m[2] . '.' . ( (int) $m[3] + max( 0, $version - $base ) ) . $m[4];
 	}
 
 	/**

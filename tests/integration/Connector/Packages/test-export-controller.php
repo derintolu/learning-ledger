@@ -342,7 +342,8 @@ class Export_Controller_Test extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'demo-public.zip', $res->get_headers()['Content-Disposition'] );
 		$pkg = $this->package( $res->get_data() );
 		$this->assertSame( array(), Package_Validator::validate( $pkg, 'public' )->errors() );
-		$this->assertStringNotContainsString( 'RUBRIC-SECRET', $pkg->file( 'cxm/lessons/lesson-one.json' ) );
+		// Spec 0.2: the rubric is not secret; the planted bug's explanation is.
+		$this->assertStringContainsString( 'RUBRIC-SECRET', $pkg->file( 'cxm/lessons/lesson-one.json' ) );
 		$this->assertStringNotContainsString( 'EXPLANATION-SECRET', $pkg->file( 'cxm/lessons/lesson-two.json' ) );
 	}
 

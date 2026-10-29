@@ -64,11 +64,21 @@ final class Service_Context {
 			return $cb();
 		}
 		$previous = get_current_user_id();
+		// Posts written meanwhile (imported courses and lessons) must not belong to the service user:
+		// deleting it without reassigning would delete them.
+		$author = static function ( $data ) use ( $service ) {
+			if ( is_array( $data ) && (int) ( $data['post_author'] ?? 0 ) === $service ) {
+				$data['post_author'] = 0;
+			}
+			return $data;
+		};
+		add_filter( 'wp_insert_post_data', $author, PHP_INT_MAX );
 		wp_set_current_user( $service );
 		try {
 			return $cb();
 		} finally {
 			wp_set_current_user( $previous );
+			remove_filter( 'wp_insert_post_data', $author, PHP_INT_MAX );
 		}
 	}
 

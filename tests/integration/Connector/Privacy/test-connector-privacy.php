@@ -292,8 +292,21 @@ class Connector_Privacy_Test extends WP_UnitTestCase {
 		$this->assertCount( 2, $erase );
 		$this->assertSame( self::API . 'actors/erase', $erase[0]['url'] );
 		$this->assertSame( 'POST', $erase[0]['args']['method'] );
-		$this->assertSame( array( 'actor' => $this->site_actor ), json_decode( $erase[0]['args']['body'], true ) );
-		$this->assertSame( array( 'actor' => $this->linked ), json_decode( $erase[1]['args']['body'], true ) );
+		$this->assertSame(
+			array(
+				'actor'        => $this->site_actor,
+				'revokeBadges' => true,
+			),
+			json_decode( $erase[0]['args']['body'], true ),
+			'the WordPress privacy eraser revokes claimed badges'
+		);
+		$this->assertSame(
+			array(
+				'actor'        => $this->linked,
+				'revokeBadges' => true,
+			),
+			json_decode( $erase[1]['args']['body'], true )
+		);
 	}
 
 	public function test_a_failed_lrs_erase_is_queued_and_reported() {

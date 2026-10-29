@@ -16,8 +16,6 @@ final class Secrets {
 	 * Lesson JSON pointers of secret fields (design 6.2).
 	 */
 	const FIELDS = array(
-		'/checkpoint/rubric',
-		'/checkpoint/checks',
 		'/bug/explanation',
 		'/bug/fixChecks',
 		'/referenceSolution',

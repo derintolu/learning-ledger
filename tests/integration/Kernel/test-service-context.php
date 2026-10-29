@@ -320,4 +320,26 @@ class Service_Context_Test extends WP_UnitTestCase {
 		global $wp_filter;
 		return isset( $wp_filter['user_has_cap'] ) && isset( $wp_filter['user_has_cap']->callbacks[ PHP_INT_MAX ] );
 	}
+
+	public function test_posts_written_as_the_service_user_belong_to_nobody() {
+		self::anonymous_host_filter();
+		$service = Service_Context::service_user();
+		$post    = Service_Context::run(
+			static fn() => wp_insert_post(
+				array(
+					'post_type'   => 'post',
+					'post_status' => 'publish',
+					'post_title'  => 'Imported',
+				)
+			)
+		);
+		$this->assertSame( '0', get_post_field( 'post_author', $post ), 'not the service user' );
+		$later = wp_insert_post(
+			array(
+				'post_title'  => 'Later',
+				'post_author' => $service,
+			)
+		);
+		$this->assertSame( (string) $service, get_post_field( 'post_author', $later ), 'the filter is gone after the run' );
+	}
 }

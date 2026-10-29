@@ -455,6 +455,24 @@ class Package_Importer_Test extends WP_UnitTestCase {
 		$this->assertFalse( has_filter( 'content_save_pre', 'wp_filter_post_kses' ), 'not turned on when it was off' );
 	}
 
+	public function test_kses_is_restored_when_a_trusted_import_throws() {
+		kses_init_filters();
+		$boom = static function () {
+			throw new RuntimeException( 'save failed' );
+		};
+		add_action( 'save_post', $boom );
+		try {
+			( new Package_Importer( new Importing_Fake_Adapter() ) )->import( $this->package(), 'fake', true );
+			$this->fail( 'the exception escapes the import' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'save failed', $e->getMessage() );
+		} finally {
+			remove_action( 'save_post', $boom );
+		}
+		$this->assertNotFalse( has_filter( 'content_save_pre', 'wp_filter_post_kses' ), 'kses is on again after the throw' );
+		kses_remove_filters();
+	}
+
 	public function test_fetcher_streams_https_url_to_a_temp_file() {
 		$zip = Package_Writer::write( ...$this->inputs() );
 		add_filter(

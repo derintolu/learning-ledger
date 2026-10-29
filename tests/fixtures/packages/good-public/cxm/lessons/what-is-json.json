@@ -28,6 +28,7 @@
     "key": "types-check",
     "kind": "free-text",
     "question": "Explain the difference between 8080 and \"8080\" in JSON.",
+    "rubric": "Full marks if the learner says the first is a number and the second a string.",
     "branches": [
       {
         "key": "got-it",

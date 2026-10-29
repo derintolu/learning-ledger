@@ -243,6 +243,8 @@ final class Package_Importer {
 		self::meta_or_delete( $id, '_lledger_langstring_lang', is_string( $langs[0] ?? null ) ? sanitize_text_field( $langs[0] ) : '' );
 		self::meta_or_delete( $id, '_lledger_language', is_string( $course_json['language'] ?? null ) ? sanitize_text_field( $course_json['language'] ) : '' );
 		self::meta_or_delete( $id, '_lledger_package_version', is_string( $course_json['version'] ?? null ) ? sanitize_text_field( $course_json['version'] ) : '' );
+		// The next build is the package's own version again; WordPress edits count from there.
+		delete_post_meta( $id, Package_Builder::VERSION_BASE );
 		self::meta_or_delete( $id, '_lledger_allow_practice', is_bool( $course_json['allowPractice'] ?? null ) ? ( $course_json['allowPractice'] ? '1' : '0' ) : '' );
 		self::meta_or_delete( $id, '_lledger_extensions', wp_slash( self::foreign_extensions( $this->objects( Package::COURSE_JSON ), Package_Builder::EXTENSION ) ) );
 		// The package's MCP URL is kept apart from the course server URL, which is live configuration

@@ -211,4 +211,34 @@ class Package_Round_Trip_Test extends WP_UnitTestCase {
 		$diffs = self::differences( $this->round_trip( false ) );
 		$this->assertNotSame( array(), preg_grep( '#/checks/\d+/pattern: #', $diffs ), 'kses rewrites regex patterns in an untrusted import' );
 	}
+
+	public function test_the_course_version_moves_with_wordpress_edits_and_returns_on_import() {
+		$report  = ( new Package_Importer() )->import( Package::from_zip( self::FIXTURE, new Limits() ), 'sensei', true );
+		$program = $report->program_id;
+		$version = static function () use ( $program ): string {
+			$path = (string) wp_tempnam( 'llrt' );
+			file_put_contents( $path, ( new Package_Builder() )->build( $program, 'full' )->zip ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- temp file.
+			$v = Package::from_zip( $path, new Limits() )->course_json()['version'];
+			wp_delete_file( $path );
+			return $v;
+		};
+		$this->assertSame( '0.1.0', $version(), 'the imported version, as it came' );
+		$this->assertSame( '0.1.0', $version(), 'no change, no new version' );
+
+		global $wpdb;
+		$lesson = (int) $wpdb->get_var( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_lledger_stable_key' AND meta_value = 'ln-publish'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		wp_update_post(
+			array(
+				'ID'         => $lesson,
+				'post_title' => 'Publishing, edited in WordPress',
+			)
+		);
+		$this->assertSame( '0.1.1', $version(), 'a WordPress edit raises the patch' );
+		update_post_meta( $lesson, '_lledger_minutes', 9 );
+		$this->assertSame( '0.1.2', $version() );
+		$this->assertSame( '0.1.2', $version() );
+
+		( new Package_Importer() )->import( Package::from_zip( self::FIXTURE, new Limits() ), 'sensei', true );
+		$this->assertSame( '0.1.0', $version(), 'a new import is the package version again' );
+	}
 }

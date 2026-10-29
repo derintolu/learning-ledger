@@ -66,6 +66,7 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 			remove_filter( 'sensei_feature_flag_tables_based_progress', '__return_true' );
 		}
 		Installer::install();
+		self::reload_sensei_storage();
 		global $wpdb, $wp_rest_server;
 		foreach ( array( 'conn_inbox', 'conn_events', 'conn_cursor', 'applied', 'identity_links', 'waivers', 'registrations' ) as $t ) {
 			$wpdb->query( 'DELETE FROM ' . Tables::name( $t ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
@@ -446,6 +447,11 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 	 */
 	private function sensei_reads_tables(): void {
 		$this->assertSame( 0, Sensei_Storage::comment_progress_rows() );
+		global $wpdb;
+		foreach ( Sensei_Storage::TABLES as $table ) {
+			// Rows another test committed (table DDL commits) are not this test's.
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i', $wpdb->prefix . $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		}
 		$result = Sensei_Storage::switch_to_tables();
 		$this->assertSame( 'tables', $result, is_wp_error( $result ) ? $result->get_error_message() : '' );
 		self::reload_sensei_storage();
@@ -514,5 +520,35 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		$hosted = $this->status_events( $keys, 'everything' );
 		$this->assertSame( $plain, $hosted, 'no extra in-progress events from a lookup the host emptied' );
 		$this->assertNotContains( 'course:complete', $hosted );
+	}
+
+	public function test_deleting_a_learner_removes_their_sensei_progress_under_a_host_that_empties_everything() {
+		global $wpdb;
+		$this->sensei_reads_tables();
+		$run    = $this->through_the_inbox( array( 'ln-posts-and-pages', self::LESSON ), 'everything' );
+		$user   = $run['user'];
+		$left   = static function () use ( $wpdb, $user ): array {
+			return array(
+				'comments' => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->comments} WHERE user_id = %d AND comment_type LIKE %s", $user, 'sensei\\_%' ) ), // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				'meta'     => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->commentmeta} m LEFT JOIN {$wpdb->comments} c ON c.comment_ID = m.comment_id WHERE c.comment_ID IS NULL" ), // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				'tables'   => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->prefix}sensei_lms_progress WHERE user_id = %d", $user ) ), // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			);
+		};
+		$before = $left();
+		$this->assertGreaterThan( 0, $before['comments'] );
+		$this->assertGreaterThan( 0, $before['tables'] );
+
+		$res = $this->signed( 'DELETE', 'learners/' . $user, array( 'revokeBadges' => 'false' ) );
+		$this->assertSame( 200, $res->get_status(), (string) wp_json_encode( $res->get_data() ) );
+		$this->assertFalse( get_userdata( $user ) );
+		$this->assertSame(
+			array(
+				'comments' => 0,
+				'meta'     => $before['meta'],
+				'tables'   => 0,
+			),
+			$left(),
+			'no Sensei activity comment, orphaned comment meta or progress row is left'
+		);
 	}
 }

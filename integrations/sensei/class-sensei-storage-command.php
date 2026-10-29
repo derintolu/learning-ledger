@@ -40,6 +40,9 @@ final class Sensei_Storage_Command {
 	 * [--force]
 	 * : Migrate the progress Sensei holds in comments into its tables first.
 	 *
+	 * [--drop-tables]
+	 * : Allow dropping or emptying Sensei's progress tables although they hold progress (destroys those rows).
+	 *
 	 * @param array<int,string>    $args       Positional args.
 	 * @param array<string,string> $assoc_args Flags.
 	 *
@@ -47,7 +50,7 @@ final class Sensei_Storage_Command {
 	 */
 	public function tables( array $args, array $assoc_args ): void {
 		unset( $args );
-		$result = Sensei_Storage::switch_to_tables( isset( $assoc_args['force'] ) );
+		$result = Sensei_Storage::switch_to_tables( isset( $assoc_args['force'] ), isset( $assoc_args['drop-tables'] ) );
 		if ( is_wp_error( $result ) ) {
 			\WP_CLI::error( $result->get_error_message() );
 		}
