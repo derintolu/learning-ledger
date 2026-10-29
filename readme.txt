@@ -4,7 +4,7 @@ Tags: xapi, lrs, cmi5, open badges, elearning
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.1.3
+Stable tag: 0.1.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -188,6 +188,9 @@ Bundled data files, unmodified:
 The blocks and editor fields in `build/` are compiled from `src-js/` in https://github.com/derintolu/learning-ledger. To build them yourself, run `npm ci && npm run build` in a checkout.
 
 == Changelog ==
+
+= 0.1.4 =
+* Fix: on hosts that filter anonymous post and user queries, LRS deliveries reach Sensei again: the inbox maps the actor to its learner, resolves the activity and checks quizzes with direct queries, and a Sensei course is completed when all its lessons are.
 
 = 0.1.3 =
 * Fix: package ZIPs carry a fixed archive comment, so they no longer end in NUL bytes that some hosts strip from responses, truncating the download.
