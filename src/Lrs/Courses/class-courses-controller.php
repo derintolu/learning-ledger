@@ -16,6 +16,7 @@ use LearningLedger\Package\Package;
 use LearningLedger\Package\Package_Validator;
 use LearningLedger\Package\Package_Writer;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Util\Temp_File;
 
 /**
  * `PUT /learning-ledger/v1/courses` (a course package ZIP or a plain cmi5.xml) and
@@ -93,7 +94,7 @@ final class Courses_Controller {
 		$tmp = null;
 		try {
 			if ( 'application/zip' === $type ) {
-				$tmp = wp_tempnam( 'lledger-course' );
+				$tmp = Temp_File::create( 'lledger-course' );
 				if ( '' === $tmp || false === file_put_contents( $tmp, $body ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- temp file read by ZipArchive.
 					throw new \RuntimeException( 'Could not write the uploaded package to a temporary file.' );
 				}

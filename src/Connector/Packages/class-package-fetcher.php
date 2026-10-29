@@ -9,6 +9,7 @@ namespace LearningLedger\Connector\Packages;
 
 use LearningLedger\Package\Limits;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Util\Temp_File;
 
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are never echoed; HTTP layers JSON-encode them.
 
@@ -34,7 +35,7 @@ final class Package_Fetcher {
 			throw new Invalid_Input( 'The package URL must be an https URL.', 'fetch_url' );
 		}
 
-		$path = wp_tempnam( 'llpkg' );
+		$path = Temp_File::create( 'llpkg' );
 		if ( ! $path ) {
 			throw new Invalid_Input( 'Could not create a temporary file.', 'fetch_failed' );
 		}

@@ -21,6 +21,7 @@ use LearningLedger\Package\Package_Writer;
 use LearningLedger\Package\Secrets;
 use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Json;
+use LearningLedger\Util\Temp_File;
 
 /**
  * Program, path courses and lessons in; a validated authoring or distribution ZIP out.
@@ -324,7 +325,7 @@ final class Package_Builder {
 	 * @throws Invalid_Input Code validation, carrying the validator's errors in the message.
 	 */
 	private static function validate( string $zip, string $flavour ): void {
-		$file = wp_tempnam( 'lledger-package' );
+		$file = Temp_File::create( 'lledger-package' );
 		try {
 			file_put_contents( $file, $zip ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- temp file.
 			$result = Package_Validator::validate( Package::from_zip( $file, new Limits() ), $flavour );
