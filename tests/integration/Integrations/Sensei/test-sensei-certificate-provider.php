@@ -299,4 +299,19 @@ class Sensei_Certificate_Provider_Test extends WP_UnitTestCase {
 		$this->background( 'not an image', 'png' );
 		$this->assert_render_failure_is_500_and_integration_stays_active( $user );
 	}
+
+	public function test_a_host_that_empties_post_queries_does_not_get_a_duplicate_certificate() {
+		global $wpdb;
+		add_action( 'sensei_course_status_updated', array( Sensei_Certificate_Provider::class, 'guard_duplicate' ), 8, 3 );
+		add_action( 'pre_get_posts', static fn( $q ) => $q->set( 'post__in', array( 0 ) ) );
+		$user   = self::factory()->user->create();
+		$course = $this->course;
+		$count  = static fn(): int => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} p JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = 'course_id' AND m.meta_value = %d WHERE p.post_type = 'certificate' AND p.post_author = %d", $course, $user ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+
+		Sensei_Utils::update_course_status( $user, $this->course, 'complete' );
+		$this->assertSame( 1, $count() );
+		Sensei_Utils::update_course_status( $user, $this->course, 'complete' );
+		$this->assertSame( 1, $count(), 'Certificates is skipped when the certificate exists' );
+		$this->assertSame( 9, has_action( 'sensei_course_status_updated', array( WooThemes_Sensei_Certificates::instance(), 'handle_course_completed' ) ), 'and is hooked again for the next event' );
+	}
 }

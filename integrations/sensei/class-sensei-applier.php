@@ -115,9 +115,11 @@ final class Sensei_Applier {
 				$this->mute_teacher_emails();
 				add_action( self::LESSON_END, array( $this, 'mute_teacher_emails' ), 9, 0 );
 				add_filter( 'sensei_course_get_lessons', array( self::class, 'course_lessons' ), PHP_INT_MAX, 2 );
+				add_filter( 'sensei_check_for_activity', array( self::class, 'activity' ), PHP_INT_MAX, 2 );
 				try {
 					return $this->apply_to_sensei( $r, $course );
 				} finally {
+					remove_filter( 'sensei_check_for_activity', array( self::class, 'activity' ), PHP_INT_MAX );
 					remove_filter( 'sensei_course_get_lessons', array( self::class, 'course_lessons' ), PHP_INT_MAX );
 					remove_action( self::LESSON_END, array( $this, 'mute_teacher_emails' ), 9 );
 					$this->restore_teacher_emails();
@@ -146,6 +148,51 @@ final class Sensei_Applier {
 			return $lessons;
 		}
 		return array_values( array_filter( array_map( 'get_post', Sensei_Adapter::course_lesson_ids( (int) $course_id, true ) ) ) );
+	}
+
+	/**
+	 * `sensei_check_for_activity`, only while a result is applied: when Sensei's comment lookup for
+	 * one learner's status on one post came back empty, the same lookup read directly.
+	 *
+	 * On a host that empties comment queries, Sensei's comment-based progress (or the comment mirror
+	 * of its table storage) would otherwise not find the status comment it already has, and every
+	 * save would take create(): it rewrites the comment to in-progress, resets its meta and fires
+	 * `sensei_*_status_updated` with in-progress before the real status.
+	 *
+	 * @param mixed $comments What get_comments() returned (a count, a list or one comment).
+	 * @param mixed $args     Sensei's lookup arguments.
+	 *
+	 * @return mixed
+	 */
+	public static function activity( mixed $comments, mixed $args = array() ): mixed {
+		global $wpdb;
+		if ( ! empty( $comments ) || ! is_array( $args ) || array() !== array_diff( array_keys( $args ), array( 'post_id', 'user_id', 'type', 'status', 'count' ) ) ) {
+			return $comments;
+		}
+		$post = (int) ( $args['post_id'] ?? 0 );
+		$user = (int) ( $args['user_id'] ?? 0 );
+		$type = is_string( $args['type'] ?? null ) ? $args['type'] : '';
+		if ( $post <= 0 || $user <= 0 || ! in_array( $type, Sensei_Storage::COMMENT_TYPES, true ) ) {
+			return $comments;
+		}
+		$status = is_string( $args['status'] ?? null ) ? $args['status'] : 'any';
+		$ids    = array_map(
+			'intval',
+			$wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->prepare(
+					"SELECT comment_ID FROM {$wpdb->comments} WHERE comment_post_ID = %d AND user_id = %d AND comment_type = %s AND ( %s = 'any' OR comment_approved = %s ) ORDER BY comment_date_gmt DESC, comment_ID DESC",
+					$post,
+					$user,
+					$type,
+					$status,
+					$status
+				)
+			)
+		);
+		if ( ! empty( $args['count'] ) ) {
+			return count( $ids );
+		}
+		return array_values( array_filter( array_map( 'get_comment', $ids ) ) );
 	}
 
 	/**

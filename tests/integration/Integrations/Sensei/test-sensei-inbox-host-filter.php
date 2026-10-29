@@ -445,8 +445,9 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 	 * Switch Sensei to its tables as the operator's WP-CLI command does, then start a new request.
 	 */
 	private function sensei_reads_tables(): void {
-		$result = Sensei_Storage::switch_to_tables( true );
-		$this->assertIsArray( $result, is_wp_error( $result ) ? $result->get_error_message() : '' );
+		$this->assertSame( 0, Sensei_Storage::comment_progress_rows() );
+		$result = Sensei_Storage::switch_to_tables();
+		$this->assertSame( 'tables', $result, is_wp_error( $result ) ? $result->get_error_message() : '' );
 		self::reload_sensei_storage();
 		$this->assertSame( 'tables', Sensei_Storage::status()['storage'] );
 		$this->assertTrue( Sensei_Storage::status()['tables'] );
@@ -477,29 +478,41 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		$this->assertTrue( $progress->get_data()['courses'][0]['course_completed'] );
 	}
 
-	public function test_switching_to_tables_refuses_while_comment_progress_exists() {
-		$user   = self::factory()->user->create();
-		$lesson = self::lesson_id( self::LESSON );
-		\Sensei_Utils::sensei_start_lesson( $lesson, $user, true );
-		$this->assertGreaterThan( 0, Sensei_Storage::comment_progress_rows() );
-		$refused = Sensei_Storage::switch_to_tables();
-		$this->assertInstanceOf( WP_Error::class, $refused );
-		$this->assertSame( 'comment_progress_exists', $refused->get_error_code() );
-		$settings = get_option( Sensei_Storage::SETTINGS, array() );
-		$this->assertEmpty( $settings['experimental_progress_storage'] ?? null, 'nothing switched' );
-
-		$this->assertIsArray( Sensei_Storage::switch_to_tables( true ) );
-		$settings = get_option( Sensei_Storage::SETTINGS );
-		$this->assertTrue( $settings['experimental_progress_storage'] );
-		$this->assertTrue( $settings['experimental_progress_storage_synchronization'] );
-		$this->assertSame( 'custom_tables', $settings['experimental_progress_storage_repository'] );
-	}
-
 	public function test_signed_status_reports_table_storage() {
 		$this->sensei_reads_tables();
 		wp_set_current_user( 0 );
 		$status = $this->signed( 'GET', 'status' )->get_data();
 		$this->assertSame( 'tables', $status['sensei_progress_storage'] );
 		$this->assertTrue( $status['sensei_progress_tables'] );
+		$this->assertSame( 'complete', $status['sensei_progress_migration'] );
+	}
+
+	/**
+	 * The lesson and course status events Sensei fires while a delivery is applied.
+	 */
+	private function status_events( array $keys, string $filter ): array {
+		$events = array();
+		foreach ( array( 'sensei_lesson_status_updated', 'sensei_course_status_updated' ) as $hook ) {
+			add_action(
+				$hook,
+				static function ( $status ) use ( &$events, $hook ) {
+					$events[] = str_replace( array( 'sensei_', '_status_updated' ), '', $hook ) . ':' . $status;
+				},
+				10,
+				1
+			);
+		}
+		$this->through_the_inbox( $keys, $filter );
+		return $events;
+	}
+
+	public function test_with_table_storage_the_comment_mirror_fires_the_same_status_events_under_a_host_that_empties_everything() {
+		$this->sensei_reads_tables();
+		$keys  = array( 'ln-posts-and-pages', 'ln-publish' );
+		$plain = $this->status_events( $keys, '' );
+		self::no_host_filter();
+		$hosted = $this->status_events( $keys, 'everything' );
+		$this->assertSame( $plain, $hosted, 'no extra in-progress events from a lookup the host emptied' );
+		$this->assertNotContains( 'course:complete', $hosted );
 	}
 }

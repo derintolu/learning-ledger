@@ -30,6 +30,46 @@ final class Sensei_Certificate_Provider implements Certificate_Provider {
 	const PLUGIN_CLASS = 'WooThemes_Sensei_Certificates';
 
 	/**
+	 * `sensei_course_status_updated`, before Sensei Certificates (priority 9): when the learner
+	 * already has a certificate for the course, keep Certificates from making another. Its own
+	 * duplicate check is a WP_Query that a host emptying post queries turns into "none".
+	 *
+	 * @param mixed $status    New status.
+	 * @param mixed $user_id   User ID.
+	 * @param mixed $course_id Course ID.
+	 *
+	 * @return void
+	 */
+	public static function guard_duplicate( mixed $status, mixed $user_id = 0, mixed $course_id = 0 ): void {
+		global $wpdb;
+		if ( 'complete' !== $status || ! class_exists( self::PLUGIN_CLASS ) || ! method_exists( self::PLUGIN_CLASS, 'instance' ) ) {
+			return;
+		}
+		$plugin  = call_user_func( array( self::PLUGIN_CLASS, 'instance' ) );
+		$handler = array( $plugin, 'handle_course_completed' );
+		if ( 9 !== has_action( 'sensei_course_status_updated', $handler ) ) {
+			return;
+		}
+		$existing = (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = 'course_id' AND m.meta_value = %d WHERE p.post_type = 'certificate' AND p.post_author = %d LIMIT 1",
+				(int) $course_id,
+				(int) $user_id
+			)
+		);
+		if ( $existing <= 0 ) {
+			return;
+		}
+		// Skip Certificates for this one event only.
+		remove_action( 'sensei_course_status_updated', $handler, 9 );
+		$restore = static function () use ( $handler, &$restore ): void {
+			remove_action( 'sensei_course_status_updated', $restore, 10 );
+			add_action( 'sensei_course_status_updated', $handler, 9, 3 );
+		};
+		add_action( 'sensei_course_status_updated', $restore, 10, 0 );
+	}
+
+	/**
 	 * Whether Sensei LMS Certificates is active and its rendering classes are loaded.
 	 *
 	 * @return boolean

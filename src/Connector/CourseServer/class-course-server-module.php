@@ -98,8 +98,9 @@ final class Course_Server_Module implements Module {
 		$payload['host_queries'] = Service_Context::host_queries();
 		$sensei                  = Sensei_Storage::status();
 		// Where Sensei reads lesson progress from (comments or tables), and whether its progress tables exist.
-		$payload['sensei_progress_storage'] = $sensei['storage'];
-		$payload['sensei_progress_tables']  = $sensei['tables'];
+		$payload['sensei_progress_storage']   = $sensei['storage'];
+		$payload['sensei_progress_tables']    = $sensei['tables'];
+		$payload['sensei_progress_migration'] = $sensei['migration'];
 		return new \WP_REST_Response( $payload, 200 );
 	}
 

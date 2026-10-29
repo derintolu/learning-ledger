@@ -130,6 +130,10 @@ To fix it, pass the header through to PHP:
 
 The plugin reads the header from `HTTP_AUTHORIZATION` and from `REDIRECT_HTTP_AUTHORIZATION`. It never edits `.htaccess` itself.
 
+= Sensei progress never shows on my host, although the LRS delivers it =
+
+Some hosts empty WordPress's comment queries, and Sensei LMS keeps lesson progress in comments. The signed course-server status shows this in `host_queries` and `sensei_progress_storage`. Sensei 4.26 can read progress from its own tables instead (High-Performance Progress Storage). On the connector site, run `wp learning-ledger sensei storage status`, then `wp learning-ledger sensei storage tables`. If Sensei already holds progress in comments, the command refuses; `--force` starts Sensei's own migration of that progress, and you run `tables` again once `status` shows `migration: complete`. The way back is `wp learning-ledger sensei storage comments`: Sensei reads comments again and keeps writing both.
+
 = Does the plugin phone home or track anything? =
 
 No. See "External services" below.
@@ -190,7 +194,8 @@ The blocks and editor fields in `build/` are compiled from `src-js/` in https://
 == Changelog ==
 
 = 0.1.6 =
-* New: `wp learning-ledger sensei storage tables` creates Sensei's progress tables and makes Sensei read progress from them (High-Performance Progress Storage), for hosts that empty comment queries; `wp learning-ledger sensei storage status` shows the storage.
+* New: `wp learning-ledger sensei storage tables` makes Sensei read progress from its own tables (High-Performance Progress Storage) for hosts that empty comment queries, taking the steps Sensei's settings screen takes (with `--force`, Sensei migrates existing comment progress first); `... storage comments` is the way back and `... storage status` shows the storage and migration.
+* Fix: while a result is applied, Sensei's status-comment lookups that a host emptied are read directly, and Sensei Certificates no longer issues a duplicate certificate on such a host.
 * New: the signed course-server status reports Sensei's progress storage as Sensei reads it, whether its progress tables exist, and which capability, granted to the service user in memory only, lets this host's queries through.
 
 = 0.1.5 =

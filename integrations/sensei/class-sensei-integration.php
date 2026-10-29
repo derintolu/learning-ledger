@@ -41,6 +41,7 @@ final class Sensei_Integration {
 		if ( class_exists( Sensei_Applier::class ) ) {
 			Sensei_Applier::hooks();
 		}
+		add_action( 'sensei_course_status_updated', array( Sensei_Certificate_Provider::class, 'guard_duplicate' ), 8, 3 );
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\WP_CLI' ) ) {
 			\WP_CLI::add_command( 'learning-ledger sensei storage', Sensei_Storage_Command::class );
 		}
