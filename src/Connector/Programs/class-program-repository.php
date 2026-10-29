@@ -66,21 +66,20 @@ final class Program_Repository {
 	 * @return integer|null
 	 */
 	public function find_by_key( string $key ): ?int {
+		global $wpdb;
 		if ( '' === $key ) {
 			return null;
 		}
-		$ids = get_posts(
-			array(
-				'post_type'      => self::POST_TYPE,
-				'post_status'    => 'any',
-				'fields'         => 'ids',
-				'posts_per_page' => 1,
-				'meta_key'       => '_lledger_stable_key', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
-				'meta_value'     => $key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
-				'no_found_rows'  => true,
+		// A direct query, not get_posts(): some hosts filter post queries on anonymous
+		// requests (pre_get_posts), which are what signed course-server requests are.
+		$id = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID WHERE m.meta_key = '_lledger_stable_key' AND m.meta_value = %s AND p.post_type = %s AND p.post_status NOT IN ('trash', 'auto-draft') ORDER BY p.ID ASC LIMIT 1",
+				$key,
+				self::POST_TYPE
 			)
 		);
-		return $ids ? (int) $ids[0] : null;
+		return null !== $id ? (int) $id : null;
 	}
 
 	/**

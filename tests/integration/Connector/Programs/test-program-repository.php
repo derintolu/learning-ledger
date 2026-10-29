@@ -86,6 +86,15 @@ class Program_Repository_Test extends WP_UnitTestCase {
 		$this->assertNull( $this->repo->for_lms_course( 1 ) );
 	}
 
+	public function test_find_by_key_ignores_a_host_that_empties_post_queries() {
+		$id = $this->make( 'hosted', 'https://a/hosted/' );
+		add_action( 'pre_get_posts', static fn( $q ) => $q->set( 'post__in', array( 0 ) ) );
+		$this->assertSame( array(), get_posts( array( 'post_type' => 'lledger_program' ) ) );
+		$this->assertSame( $id, $this->repo->find_by_key( 'hosted' ) );
+		wp_trash_post( $id );
+		$this->assertNull( $this->repo->find_by_key( 'hosted' ) );
+	}
+
 	public function test_for_activity_matches_longest_base() {
 		$short = $this->make( 'short', 'https://a/x/' );
 		$long  = $this->make( 'long', 'https://a/x/y/' );
