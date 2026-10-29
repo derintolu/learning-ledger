@@ -13,6 +13,7 @@ use LearningLedger\Connector\Pairing\Lrs_Client;
 use LearningLedger\Connector\Programs\Program_Repository;
 use LearningLedger\Queue\Job_Queue;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * A save of a program, or of one of its courses or lessons, queues one delayed `content_ping` job per
@@ -74,6 +75,19 @@ final class Content_Ping {
 	 * @throws \RuntimeException When the build fails or the course server does not accept the ping.
 	 */
 	public function run( array $payload ): void {
+		Service_Context::run( fn() => $this->ping( $payload ) );
+	}
+
+	/**
+	 * The job's work, in Service_Context.
+	 *
+	 * @param array $payload Job payload `{program}`.
+	 *
+	 * @return void
+	 *
+	 * @throws \RuntimeException When the build fails or the course server does not accept the ping.
+	 */
+	private function ping( array $payload ): void {
 		$id      = (int) ( $payload['program'] ?? 0 );
 		$program = ( new Program_Repository() )->get( $id );
 		if ( null === $program || '' === $program->course_server_url || '' === $program->stable_key ) {

@@ -25,6 +25,7 @@ use LearningLedger\Db\Tables;
 use LearningLedger\Queue\Job_Queue;
 use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Xapi\Agent_Identity;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * `learning-ledger/v1/course-server/learners…`: create, enrol, read progress and delete anonymous learners.
@@ -90,7 +91,7 @@ final class Learners_Controller {
 			'/course-server/learners',
 			array(
 				'methods'             => 'POST',
-				'callback'            => array( $this, 'create' ),
+				'callback'            => Service_Context::wrap( array( $this, 'create' ) ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -99,7 +100,7 @@ final class Learners_Controller {
 			'/course-server/learners/(?P<id>\d+)',
 			array(
 				'methods'             => 'DELETE',
-				'callback'            => array( $this, 'delete' ),
+				'callback'            => Service_Context::wrap( array( $this, 'delete' ) ),
 				'permission_callback' => '__return_true',
 				'args'                => $id,
 			)
@@ -109,7 +110,7 @@ final class Learners_Controller {
 			'/course-server/learners/(?P<id>\d+)/enrolments',
 			array(
 				'methods'             => 'POST',
-				'callback'            => array( $this, 'enrol' ),
+				'callback'            => Service_Context::wrap( array( $this, 'enrol' ) ),
 				'permission_callback' => '__return_true',
 				'args'                => $id,
 			)
@@ -119,7 +120,7 @@ final class Learners_Controller {
 			'/course-server/learners/(?P<id>\d+)/progress',
 			array(
 				'methods'             => 'GET',
-				'callback'            => array( $this, 'progress' ),
+				'callback'            => Service_Context::wrap( array( $this, 'progress' ) ),
 				'permission_callback' => '__return_true',
 				'args'                => $id,
 			)

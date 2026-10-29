@@ -10,6 +10,7 @@ namespace LearningLedger\Connector\Packages;
 use LearningLedger\Connector\Programs\Program_Module;
 use LearningLedger\Connector\Programs\Program_Repository;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * GET /learning-ledger/v1/programs/{id}/package?flavour=full|public.
@@ -106,7 +107,7 @@ final class Export_Controller {
 		$id      = (int) $request->get_param( 'id' );
 		$flavour = (string) $request->get_param( 'flavour' );
 		try {
-			$built = ( new Package_Builder() )->build( $id, '' === $flavour ? 'full' : $flavour );
+			$built = Service_Context::run( static fn() => ( new Package_Builder() )->build( $id, '' === $flavour ? 'full' : $flavour ) );
 		} catch ( Invalid_Input $e ) {
 			return self::error_response( $e );
 		}

@@ -11,6 +11,7 @@ use LearningLedger\Connector\Packages\Export_Controller;
 use LearningLedger\Connector\Packages\Import_Controller;
 use LearningLedger\Connector\Packages\Package_Builder;
 use LearningLedger\Util\Invalid_Input;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * `learning-ledger/v1/course-server/packages…`: the full-flavour package of a program, and an import by URL.
@@ -48,7 +49,7 @@ final class Packages_Route {
 			'/course-server/packages/(?P<program>[^/]+)',
 			array(
 				'methods'             => 'GET',
-				'callback'            => array( $this, 'get' ),
+				'callback'            => Service_Context::wrap( array( $this, 'get' ) ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -57,7 +58,7 @@ final class Packages_Route {
 			'/course-server/packages',
 			array(
 				'methods'             => 'POST',
-				'callback'            => array( $this, 'import' ),
+				'callback'            => Service_Context::wrap( array( $this, 'import' ) ),
 				'permission_callback' => '__return_true',
 				'args'                => array(
 					'url'     => array(

@@ -9,6 +9,7 @@ namespace LearningLedger\Connector\CourseServer;
 
 use LearningLedger\Kernel\Module;
 use LearningLedger\Kernel\Status_Route;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * Registers the `learning-ledger/v1/course-server/` routes. They accept only Ed25519-signed requests.
@@ -91,7 +92,11 @@ final class Course_Server_Module implements Module {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
-		return new \WP_REST_Response( Status_Route::payload( true ), 200 );
+		$payload = Status_Route::payload( true );
+		// What this host's query filters do, for course servers diagnosing a silent host.
+		$payload['host_queries']            = Service_Context::host_queries();
+		$payload['sensei_progress_storage'] = Service_Context::sensei_progress_storage();
+		return new \WP_REST_Response( $payload, 200 );
 	}
 
 	/**

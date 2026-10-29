@@ -11,6 +11,7 @@ use LearningLedger\Connector\Lms\Certificate_Provider;
 use LearningLedger\Connector\Lms\Integration_Loader;
 use LearningLedger\Connector\Lms\LMS_Adapter;
 use LearningLedger\Integrations\Sensei\Sensei_Certificate_Provider;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * `GET learning-ledger/v1/course-server/learners/{id}/certificates/{course}`: the learner's
@@ -66,7 +67,7 @@ final class Certificates_Route {
 			self::ROUTE,
 			array(
 				'methods'             => 'GET',
-				'callback'            => array( $this, 'certificate' ),
+				'callback'            => Service_Context::wrap( array( $this, 'certificate' ) ),
 				// Authenticated in the callback: signed requests only.
 				'permission_callback' => '__return_true',
 				'args'                => array(

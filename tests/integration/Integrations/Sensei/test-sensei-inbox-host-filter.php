@@ -9,6 +9,8 @@
 
 use LearningLedger\Cmi5\Au;
 use LearningLedger\Cmi5\Vocab;
+use LearningLedger\Connector\CourseServer\Course_Server_Module;
+use LearningLedger\Connector\CourseServer\Trusted_Keys;
 use LearningLedger\Connector\Identity\Identity_Map;
 use LearningLedger\Connector\Inbox\Inbox_Module;
 use LearningLedger\Connector\Inbox\Inbox_Repository;
@@ -20,9 +22,11 @@ use LearningLedger\Connector\Programs\Program_Module;
 use LearningLedger\Connector\Programs\Program_Repository;
 use LearningLedger\Crypto\Ed25519;
 use LearningLedger\Crypto\Notification_Signature;
+use LearningLedger\Crypto\Signed_Request;
 use LearningLedger\Db\Installer;
 use LearningLedger\Db\Tables;
 use LearningLedger\Integrations\Sensei\Sensei_Adapter;
+use LearningLedger\Kernel\Service_Context;
 use LearningLedger\Package\Limits;
 use LearningLedger\Package\Package;
 use LearningLedger\Queue\Shutdown_Runner;
@@ -46,6 +50,11 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 	private array $keys;
 
 	private int $program;
+
+	/** @var array{public:string,secret:string} */
+	private array $server_keys;
+
+	private ?string $request_uri = null;
 
 	public function set_up(): void {
 		parent::set_up();
@@ -71,6 +80,14 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		delete_option( 'lledger_integration_state' );
 		( new Integration_Loader() )->load();
 		( new Inbox_Module() )->register();
+		$this->request_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- restored verbatim in tear_down.
+		foreach ( array( 'trusted_keys', 'nonces', 'ratelimit' ) as $t ) {
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i', Tables::name( $t ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		}
+		$this->server_keys = Ed25519::keypair();
+		( new Trusted_Keys() )->add( 'course-server', base64_encode( $this->server_keys['public'] ), Trusted_Keys::ALL_CAPABILITIES, Trusted_Keys::DEFAULT_LIMITS );
+		( new Course_Server_Module() )->register();
+		Service_Context::reset();
 		$wp_rest_server = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		// Only outgoing HTTP is stubbed: the LRS, should anything call it.
 		add_filter( 'pre_http_request', static fn() => new WP_Error( 'http_blocked', 'No network in this test.' ) );
@@ -83,13 +100,73 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 	public function tear_down(): void {
 		global $wp_rest_server;
 		$wp_rest_server = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		if ( null === $this->request_uri ) {
+			unset( $_SERVER['REQUEST_URI'] );
+		} else {
+			$_SERVER['REQUEST_URI'] = $this->request_uri;
+		}
 		Clock::freeze( null );
+		Service_Context::reset();
 		parent::tear_down();
 	}
 
-	private static function host_filter(): void {
-		add_action( 'pre_get_posts', static fn( $q ) => $q->set( 'post__in', array( 0 ) ) );
-		add_action( 'pre_get_users', static fn( $q ) => $q->set( 'include', array( 0 ) ) );
+	/**
+	 * Simulate the host: 'always' empties post and user queries whoever asks; 'anonymous' empties
+	 * post, user and comment queries while nobody is logged in.
+	 */
+	private static function host_filter( string $mode ): void {
+		$anon = 'anonymous' === $mode;
+		add_action(
+			'pre_get_posts',
+			static function ( $q ) use ( $anon ) {
+				if ( ! $anon || ! is_user_logged_in() ) {
+					$q->set( 'post__in', array( 0 ) );
+				}
+			}
+		);
+		add_action(
+			'pre_get_users',
+			static function ( $q ) use ( $anon ) {
+				if ( ! $anon || ! is_user_logged_in() ) {
+					$q->set( 'include', array( 0 ) );
+				}
+			}
+		);
+		if ( $anon ) {
+			add_action(
+				'pre_get_comments',
+				static function ( $q ) {
+					if ( ! is_user_logged_in() ) {
+						$q->query_vars['comment__in'] = array( 0 );
+					}
+				}
+			);
+		}
+		Service_Context::reset();
+	}
+
+	/**
+	 * Take the simulated host filter off again.
+	 */
+	private static function no_host_filter(): void {
+		remove_all_actions( 'pre_get_posts' );
+		remove_all_actions( 'pre_get_users' );
+		remove_all_actions( 'pre_get_comments' );
+		Service_Context::reset();
+	}
+
+	/**
+	 * A signed course-server request, as the course server sends it.
+	 */
+	private function signed( string $method, string $route, array $query = array() ): WP_REST_Response {
+		$uri = '/wp-json/learning-ledger/v1/course-server/' . $route . ( $query ? '?' . http_build_query( $query, '', '&', PHP_QUERY_RFC3986 ) : '' );
+		$req = new WP_REST_Request( $method, '/learning-ledger/v1/course-server/' . $route );
+		$req->set_query_params( $query );
+		foreach ( Signed_Request::sign( 'course-server', $this->server_keys['secret'], $method, $uri, '', Clock::now()->getTimestamp() ) as $name => $value ) {
+			$req->set_header( $name, $value );
+		}
+		$_SERVER['REQUEST_URI'] = $uri;
+		return rest_get_server()->dispatch( $req );
 	}
 
 	/**
@@ -147,12 +224,12 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 	/**
 	 * Deliver statements for lessons of the learner path and run the shutdown job.
 	 *
-	 * @param string[] $keys     Lesson keys.
-	 * @param boolean  $filtered Whether the host empties post and user queries.
+	 * @param string[] $keys   Lesson keys.
+	 * @param string   $filter '' for none, 'always' or 'anonymous' (see host_filter()).
 	 *
 	 * @return array{user:int,course:int,lessons:int[]}
 	 */
-	private function through_the_inbox( array $keys, bool $filtered ): array {
+	private function through_the_inbox( array $keys, string $filter ): array {
 		$identity  = new Identity_Map();
 		$user      = $identity->create_anonymous_learner();
 		$structure = ( new Program_Repository() )->structure( $this->program );
@@ -160,12 +237,12 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		$course    = (int) get_post_meta( $lessons[0], '_lesson_course', true );
 		$this->assertTrue( ( new Sensei_Adapter() )->enrol( $user, $course ) );
 
-		if ( $filtered ) {
-			self::host_filter();
+		wp_set_current_user( 0 );
+		if ( '' !== $filter ) {
+			self::host_filter( $filter );
 			$this->assertSame( array(), get_posts( array( 'post_type' => 'lesson' ) ) );
 			$this->assertSame( array(), get_users() );
 		}
-		wp_set_current_user( 0 );
 
 		$registration = Uuid::v4();
 		$statements   = array();
@@ -192,17 +269,17 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		);
 	}
 
-	private function one_completion( bool $filtered ): void {
+	private function one_completion( string $filter ): void {
 		$au = ( new Program_Repository() )->structure( $this->program )->au_by_key( self::LESSON );
 		$this->assertSame( 'Completed', $au->move_on(), 'a lesson without a checkpoint' );
-		$run = $this->through_the_inbox( array( self::LESSON ), $filtered );
+		$run = $this->through_the_inbox( array( self::LESSON ), $filter );
 		$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $run['lessons'][0], $run['user'] ), 'Sensei has the lesson complete for the mapped learner' );
 		$this->assertFalse( (bool) \Sensei_Utils::user_completed_course( $run['course'], $run['user'] ), 'one lesson of six does not complete the course' );
 	}
 
-	private function whole_path( bool $filtered ): void {
+	private function whole_path( string $filter ): void {
 		$keys = array( 'ln-what-is-wordpress', 'ln-posts-and-pages', 'ln-blocks', 'ln-navigation-and-site-editor', 'ln-ai-in-wordpress', 'ln-publish' );
-		$run  = $this->through_the_inbox( $keys, $filtered );
+		$run  = $this->through_the_inbox( $keys, $filter );
 		foreach ( $run['lessons'] as $lesson ) {
 			$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $lesson, $run['user'] ), (string) $lesson );
 		}
@@ -210,18 +287,82 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 	}
 
 	public function test_a_delivered_completion_reaches_sensei() {
-		$this->one_completion( false );
+		$this->one_completion( '' );
 	}
 
 	public function test_a_delivered_completion_reaches_sensei_under_a_host_that_empties_post_and_user_queries() {
-		$this->one_completion( true );
+		$this->one_completion( 'always' );
 	}
 
 	public function test_a_delivered_path_completes_the_sensei_course() {
-		$this->whole_path( false );
+		$this->whole_path( '' );
 	}
 
 	public function test_a_delivered_path_completes_the_sensei_course_under_a_host_that_empties_post_and_user_queries() {
-		$this->whole_path( true );
+		$this->whole_path( 'always' );
+	}
+
+	/**
+	 * The inbox job and the signed progress route, with and without a host that empties post,
+	 * user and comment queries for anonymous requests (Sensei keeps progress in comments).
+	 *
+	 * @param string $filter '' or 'anonymous'.
+	 */
+	private function progress_route_reports( string $filter ): void {
+		$run      = $this->through_the_inbox( array( self::LESSON ), $filter );
+		$progress = $this->signed( 'GET', 'learners/' . $run['user'] . '/progress', array( 'course' => (string) $run['course'] ) );
+		$this->assertSame( 200, $progress->get_status(), (string) wp_json_encode( $progress->get_data() ) );
+		$this->assertSame( array( $run['lessons'][0] ), $progress->get_data()['courses'][0]['completed'] );
+		$this->assertSame( 0, get_current_user_id(), 'the route left no user behind' );
+
+		self::no_host_filter();
+		$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $run['lessons'][0], $run['user'] ), 'Sensei has the lesson complete' );
+		$this->assertFalse( (bool) \Sensei_Utils::user_completed_course( $run['course'], $run['user'] ) );
+	}
+
+	public function test_the_progress_route_reports_a_delivered_completion() {
+		$this->progress_route_reports( '' );
+	}
+
+	public function test_the_progress_route_reports_a_delivered_completion_under_a_host_that_empties_anonymous_post_user_and_comment_queries() {
+		$this->progress_route_reports( 'anonymous' );
+	}
+
+	public function test_signed_status_reports_what_the_host_filters() {
+		self::factory()->comment->create( array( 'comment_post_ID' => $this->program ) );
+		wp_set_current_user( 0 );
+		$plain = $this->signed( 'GET', 'status' )->get_data();
+		$this->assertSame(
+			array(
+				'posts'    => array(
+					'anonymous'    => true,
+					'service_user' => true,
+				),
+				'users'    => array(
+					'anonymous'    => true,
+					'service_user' => true,
+				),
+				'comments' => array(
+					'anonymous'    => true,
+					'service_user' => true,
+				),
+			),
+			$plain['host_queries']
+		);
+		$this->assertContains( $plain['sensei_progress_storage'], array( 'comments', 'tables' ) );
+
+		self::host_filter( 'anonymous' );
+		$filtered = $this->signed( 'GET', 'status' )->get_data();
+		foreach ( array( 'posts', 'users', 'comments' ) as $kind ) {
+			$this->assertSame(
+				array(
+					'anonymous'    => false,
+					'service_user' => true,
+				),
+				$filtered['host_queries'][ $kind ],
+				$kind
+			);
+		}
+		$this->assertSame( 0, get_current_user_id() );
 	}
 }

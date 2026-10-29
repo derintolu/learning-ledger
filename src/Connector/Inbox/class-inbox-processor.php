@@ -23,6 +23,7 @@ use LearningLedger\Connector\Programs\Program;
 use LearningLedger\Connector\Programs\Program_Iris;
 use LearningLedger\Connector\Programs\Program_Repository;
 use LearningLedger\Util\Uuid;
+use LearningLedger\Kernel\Service_Context;
 
 /**
  * Identity match, then moveOn evaluation per registration, then apply.
@@ -104,7 +105,7 @@ final class Inbox_Processor {
 			return 0;
 		}
 		try {
-			return $this->run_pending( $limit );
+			return Service_Context::run( fn(): int => $this->run_pending( $limit ) );
 		} finally {
 			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		}
@@ -130,7 +131,7 @@ final class Inbox_Processor {
 			return 0;
 		}
 		try {
-			return $this->run_rows( $this->inbox->pending_for_registration( $registration, $limit ) );
+			return Service_Context::run( fn(): int => $this->run_rows( $this->inbox->pending_for_registration( $registration, $limit ) ) );
 		} finally {
 			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		}
