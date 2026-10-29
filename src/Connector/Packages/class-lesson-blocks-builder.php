@@ -33,7 +33,12 @@ final class Lesson_Blocks_Builder {
 			if ( isset( $beat['question'] ) ) {
 				$attrs['question'] = (string) $beat['question'];
 			}
-			$blocks[] = Markdown_To_Blocks::block( 'learning-ledger/beat', $attrs, Markdown_To_Blocks::convert( (string) ( $beat['content'] ?? '' ) ) );
+			$content = (string) ( $beat['content'] ?? '' );
+			// Blocks cannot hold the Markdown's final line break, so the beat remembers it.
+			if ( str_ends_with( $content, "\n" ) ) {
+				$attrs['trailingNewline'] = true;
+			}
+			$blocks[] = Markdown_To_Blocks::block( 'learning-ledger/beat', $attrs, Markdown_To_Blocks::convert( $content ) );
 		}
 
 		$checkpoint = $lesson_json['checkpoint'] ?? null;

@@ -110,6 +110,7 @@ final class Packages_Route {
 		if ( is_wp_error( $auth ) ) {
 			return Signed_Request_Auth::to_response( $auth );
 		}
-		return ( new Import_Controller() )->handle( $r );
+		// A signed course server holding import_packages is a trusted import path.
+		return ( new Import_Controller() )->handle( $r, true );
 	}
 }

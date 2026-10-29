@@ -193,6 +193,10 @@ final class Block_To_Markdown {
 	 * @return string
 	 */
 	private static function code_text( string $html ): string {
+		// Only what is inside the pre element: the block's own line breaks around it are not code.
+		if ( 1 === preg_match( '#<pre\b[^>]*>(.*)</pre>#is', $html, $m ) ) {
+			$html = $m[1];
+		}
 		$html = preg_replace( '#<br\s*/?>#i', "\n", $html );
 		$text = strip_tags( (string) $html ); // phpcs:ignore WordPress.WP.AlternativeFunctions.strip_tags_strip_tags -- Pure class, no WordPress available; the output is Markdown text, not HTML.
 		$text = html_entity_decode( $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' );

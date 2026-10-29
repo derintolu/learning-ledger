@@ -50,6 +50,20 @@ final class Package_Importer {
 	private Import_Writer $writer;
 
 	/**
+	 * Whether this import is from a trusted path, whose writes skip kses.
+	 *
+	 * @var boolean
+	 */
+	private bool $trusted = false;
+
+	/**
+	 * The package being imported.
+	 *
+	 * @var Package|null
+	 */
+	private ?Package $package = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param LMS_Adapter|null        $adapter Adapter override; null looks the adapter up by id.
@@ -64,12 +78,43 @@ final class Package_Importer {
 	/**
 	 * Imports a package.
 	 *
+	 * A trusted import (WP-CLI, a signed course server, a user with unfiltered_html) writes the
+	 * package as it is: kses would rewrite regex patterns, code and markup in lesson blocks.
+	 * Every other import keeps kses.
+	 *
+	 * @param Package $p          Package.
+	 * @param string  $adapter_id LMS integration id.
+	 * @param boolean $trusted    Whether the caller is a trusted import path.
+	 *
+	 * @return Import_Report
+	 */
+	public function import( Package $p, string $adapter_id = 'sensei', bool $trusted = false ): Import_Report {
+		$kses = $trusted && false !== has_filter( 'content_save_pre', 'wp_filter_post_kses' );
+		if ( $kses ) {
+			kses_remove_filters();
+		}
+		$this->trusted = $trusted;
+		$this->package = $p;
+		try {
+			return $this->run( $p, $adapter_id );
+		} finally {
+			$this->trusted = false;
+			$this->package = null;
+			if ( $kses ) {
+				kses_init_filters();
+			}
+		}
+	}
+
+	/**
+	 * Validates and writes a package.
+	 *
 	 * @param Package $p          Package.
 	 * @param string  $adapter_id LMS integration id.
 	 *
 	 * @return Import_Report
 	 */
-	public function import( Package $p, string $adapter_id = 'sensei' ): Import_Report {
+	private function run( Package $p, string $adapter_id ): Import_Report {
 		try {
 			$course_json = $p->is_cxm() ? ( $p->course_json() ?? array() ) : array();
 		} catch ( Invalid_Input $e ) {
@@ -94,7 +139,7 @@ final class Package_Importer {
 
 		$plan = self::plan( $structure );
 
-		$program_id = $this->program( $key, $structure, $course_json, $plan['placement'] );
+		$program_id = $this->program( $key, $structure, $course_json, $plan['placement'], $p->cmi5_xml() );
 		if ( 0 === $program_id ) {
 			return Import_Report::failed( array( Import_Writer::error( 'program_write', '', 'The program could not be saved.' ) ) );
 		}
@@ -171,26 +216,61 @@ final class Package_Importer {
 	 * @param Course_Structure $structure   Structure.
 	 * @param array            $course_json Course JSON.
 	 * @param string|null      $placement   Placement AU key.
+	 * @param string           $xml         The cmi5.xml text.
 	 *
 	 * @return integer Post id, 0 on failure.
 	 */
-	private function program( string $key, Course_Structure $structure, array $course_json, ?string $placement ): int {
+	private function program( string $key, Course_Structure $structure, array $course_json, ?string $placement, string $xml ): int {
 		$id = $this->writer->program( $key, Import_Writer::pick( $structure->title(), $key ) );
 		if ( 0 === $id ) {
 			return 0;
 		}
 
+		// What the exporter writes back as it came: the course description, the language, the
+		// author's version, allowPractice and other namespaces' extensions.
+		$description = sanitize_textarea_field( Import_Writer::pick( (array) ( $structure->to_array()['description'] ?? array() ), '' ) );
+		if ( get_post_field( 'post_excerpt', $id, 'raw' ) !== $description ) {
+			wp_update_post(
+				wp_slash(
+					array(
+						'ID'           => $id,
+						'post_excerpt' => $description,
+					)
+				)
+			);
+		}
+		$langs = array_keys( $structure->title() );
+		self::meta_or_delete( $id, '_lledger_langstring_lang', is_string( $langs[0] ?? null ) ? sanitize_text_field( $langs[0] ) : '' );
+		self::meta_or_delete( $id, '_lledger_language', is_string( $course_json['language'] ?? null ) ? sanitize_text_field( $course_json['language'] ) : '' );
+		self::meta_or_delete( $id, '_lledger_package_version', is_string( $course_json['version'] ?? null ) ? sanitize_text_field( $course_json['version'] ) : '' );
+		self::meta_or_delete( $id, '_lledger_allow_practice', is_bool( $course_json['allowPractice'] ?? null ) ? ( $course_json['allowPractice'] ? '1' : '0' ) : '' );
+		self::meta_or_delete( $id, '_lledger_extensions', wp_slash( self::foreign_extensions( $this->objects( Package::COURSE_JSON ), Package_Builder::EXTENSION ) ) );
+		// Where the course server lives is deployment setup: the package fills it in only when the
+		// program has none, so an operator's setting is never overwritten.
+		$mcp = self::mcp_url( $xml );
+		if ( '' !== $mcp && '' === (string) get_post_meta( $id, '_lledger_course_server_url', true ) ) {
+			update_post_meta( $id, '_lledger_course_server_url', $mcp );
+		}
+		// Likewise the AU URL template, taken from the one every AU url of the package follows.
+		$template = self::url_template( $structure );
+		if ( '' !== $template && '' === (string) get_post_meta( $id, '_lledger_au_url_template', true ) ) {
+			update_post_meta( $id, '_lledger_au_url_template', $template );
+		}
+
 		update_post_meta( $id, '_lledger_course_iri', $structure->course_id() );
 		update_post_meta( $id, '_lledger_iri_base', self::iri_base( $structure ) );
 		update_post_meta( $id, '_lledger_rules', sanitize_textarea_field( implode( "\n", array_map( 'strval', (array) ( $course_json['rules'] ?? array() ) ) ) ) );
+		$placement_au = null === $placement ? null : $structure->au_by_key( $placement );
 		update_post_meta(
 			$id,
 			'_lledger_placement',
 			wp_slash(
 				(string) wp_json_encode(
 					array(
-						'au_key' => $placement,
-						'guide'  => (object) ( $course_json['placement'] ?? array() ),
+						'au_key'      => $placement,
+						'guide'       => (object) ( $course_json['placement'] ?? array() ),
+						'title'       => null === $placement_au ? '' : sanitize_text_field( Import_Writer::pick( $placement_au->title(), '' ) ),
+						'description' => null === $placement_au ? '' : sanitize_textarea_field( Import_Writer::pick( $placement_au->description(), '' ) ),
 					)
 				)
 			)
@@ -206,6 +286,107 @@ final class Package_Importer {
 			delete_post_meta( $id, '_lledger_licence' );
 		}
 		return $id;
+	}
+
+	/**
+	 * A JSON file of the package decoded with objects kept as objects, null when absent or invalid.
+	 *
+	 * @param string $name File name in the package.
+	 *
+	 * @return object|null
+	 */
+	private function objects( string $name ): ?object {
+		if ( null === $this->package || '' === $name ) {
+			return null;
+		}
+		try {
+			$value = json_decode( $this->package->file( $name ), false, 64, JSON_THROW_ON_ERROR );
+		} catch ( \Throwable $e ) {
+			return null;
+		}
+		return is_object( $value ) ? $value : null;
+	}
+
+	/**
+	 * The `extensions` of a document without the plugin's own key, as exact JSON ('' for none).
+	 *
+	 * @param object|null $doc Document decoded with objects.
+	 * @param string      $own The plugin's own extension key.
+	 *
+	 * @return string
+	 */
+	private static function foreign_extensions( ?object $doc, string $own ): string {
+		if ( null === $doc || ! isset( $doc->extensions ) || ! is_object( $doc->extensions ) ) {
+			return '';
+		}
+		$extensions = clone $doc->extensions;
+		unset( $extensions->{$own} );
+		return array() === get_object_vars( $extensions ) ? '' : Json::encode_exact( $extensions );
+	}
+
+	/**
+	 * Sets a post meta value, or deletes it when the value is empty.
+	 *
+	 * @param integer $id    Post id.
+	 * @param string  $key   Meta key.
+	 * @param string  $value Value, slashed as update_post_meta() expects.
+	 *
+	 * @return void
+	 */
+	private static function meta_or_delete( int $id, string $key, string $value ): void {
+		if ( '' === $value ) {
+			delete_post_meta( $id, $key );
+		} else {
+			update_post_meta( $id, $key, $value );
+		}
+	}
+
+	/**
+	 * The `mcp` attribute of `<cxm:course>`, '' when there is none or it is not an http(s) URL.
+	 *
+	 * @param string $xml The cmi5.xml text.
+	 *
+	 * @return string
+	 */
+	private static function mcp_url( string $xml ): string {
+		$dom      = new \DOMDocument();
+		$previous = libxml_use_internal_errors( true );
+		$loaded   = $dom->loadXML( $xml, LIBXML_NONET );
+		libxml_clear_errors();
+		libxml_use_internal_errors( $previous );
+		if ( ! $loaded ) {
+			return '';
+		}
+		foreach ( $dom->getElementsByTagNameNS( Cmi5_Xml_Builder::NS_CXM, 'course' ) as $el ) {
+			$url = $el instanceof \DOMElement ? $el->getAttribute( 'mcp' ) : '';
+			return Program_Module::sanitize_url( $url );
+		}
+		return '';
+	}
+
+	/**
+	 * The `{key}` URL template every AU url of the package follows, '' when they follow none.
+	 *
+	 * @param Course_Structure $structure Structure.
+	 *
+	 * @return string
+	 */
+	private static function url_template( Course_Structure $structure ): string {
+		$template = '';
+		foreach ( $structure->aus() as $au ) {
+			$key = rawurlencode( self::key_of( $au ) );
+			$url = $au->url();
+			$at  = '' === $key ? false : strrpos( $url, $key );
+			if ( false === $at ) {
+				return '';
+			}
+			$mine = substr( $url, 0, $at ) . '{key}' . substr( $url, $at + strlen( $key ) );
+			if ( '' !== $template && $mine !== $template ) {
+				return '';
+			}
+			$template = $mine;
+		}
+		return Program_Module::sanitize_au_url_template( $template );
 	}
 
 	/**
@@ -267,8 +448,10 @@ final class Package_Importer {
 		$tagline     = sanitize_text_field( (string) ( $path['tagline'] ?? '' ) );
 		$description = Import_Writer::pick( Import_Writer::description_of( $block ), '' );
 		$content     = Import_Writer::paragraph( $description );
-		$spec        = new Course_Spec( $course['key'], $title, $content, 'publish', $meta );
-		$hash        = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $tagline, $content, $meta ) ) );
+		// The block description is exported from the tagline (the course excerpt) unless it differs.
+		$meta[ Package_Builder::BLOCK_DESCRIPTION ] = $description !== $tagline ? sanitize_textarea_field( $description ) : '';
+		$spec                                       = new Course_Spec( $course['key'], $title, $content, 'publish', $meta );
+		$hash                                       = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $title, $tagline, $content, $meta ) ) );
 
 		return $this->writer->write_item(
 			$program_id,
@@ -317,8 +500,11 @@ final class Package_Importer {
 	private function write_lesson( LMS_Adapter $adapter, int $program_id, array &$hashes, int $course_id, string $key, int $order, Au $au, Package $p, array $course_json, array &$created, array &$updated ): void {
 		$lesson  = $this->lesson_json( $p, $au );
 		$content = null === $lesson ? Import_Writer::paragraph( Import_Writer::pick( $au->description(), '' ) ) : Lesson_Blocks_Builder::build( $lesson );
-		$content = wp_kses_post( $content );
+		// kses also filters block attributes, where it would rewrite regex patterns and code.
+		$content = $this->trusted ? $content : wp_kses_post( $content );
 		$title   = sanitize_text_field( Import_Writer::pick( $au->title(), $key ) );
+		$excerpt = sanitize_textarea_field( Import_Writer::pick( $au->description(), '' ) );
+		$excerpt = $excerpt !== $title ? $excerpt : '';
 
 		$meta = array();
 		if ( null !== $lesson ) {
@@ -335,11 +521,39 @@ final class Package_Importer {
 			if ( is_string( $licence ) && '' !== $licence ) {
 				$meta['_lledger_licence'] = sanitize_text_field( $licence );
 			}
+			// Read as objects, so an empty object stays {} and these come back exactly as they were.
+			$raw       = $this->objects( (string) $au->lesson_src() );
+			$reference = null === $raw ? null : ( get_object_vars( $raw )['referenceSolution'] ?? null );
+			$meta[ Lesson_Json_Builder::REFERENCE_META ]  = is_object( $reference ) ? Json::encode_exact( $reference ) : '';
+			$meta[ Lesson_Json_Builder::EXTENSIONS_META ] = self::foreign_extensions( $raw, Lesson_Json_Builder::EXTENSION );
 		}
 
 		$spec = new Lesson_Spec( $key, $title, $content, $order, 'publish', $meta );
-		$hash = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $course_id, $title, $content, $order, $meta ) ) );
-		$this->writer->write_item( $program_id, $hashes, 'lesson:' . $key, $hash, $created, $updated, fn(): int => $adapter->upsert_lesson( $course_id, $spec ) );
+		$hash = hash( 'sha256', (string) wp_json_encode( array( $adapter->id(), $course_id, $title, $content, $order, $meta, $excerpt ) ) );
+		$this->writer->write_item(
+			$program_id,
+			$hashes,
+			'lesson:' . $key,
+			$hash,
+			$created,
+			$updated,
+			static function () use ( $adapter, $course_id, $spec, $excerpt ): int {
+				$id = $adapter->upsert_lesson( $course_id, $spec );
+				// The AU description is the lesson excerpt, which Package_Builder exports (the title when empty).
+				$types = (array) apply_filters( 'learning_ledger/lesson_post_types', array() ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Slash-namespaced hook name is the plugin convention.
+				if ( $id > 0 && in_array( get_post_type( $id ), $types, true ) && get_post_field( 'post_excerpt', $id, 'raw' ) !== $excerpt ) {
+					wp_update_post(
+						wp_slash(
+							array(
+								'ID'           => $id,
+								'post_excerpt' => $excerpt,
+							)
+						)
+					);
+				}
+				return $id;
+			}
+		);
 	}
 
 	/**

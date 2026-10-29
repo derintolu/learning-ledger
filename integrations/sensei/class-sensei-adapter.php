@@ -147,7 +147,7 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 			$order   = (int) get_post_meta( $lesson_id, '_order_' . $course_id, true );
 			$nodes[] = new Lesson_Node(
 				$lesson_id,
-				get_the_title( $lesson_id ),
+				(string) get_post_field( 'post_title', $lesson_id, 'raw' ),
 				$this->stable_key( $lesson_id ),
 				$order > 0 ? $order : $position + 1,
 				$this->has_pass_required_quiz( $lesson_id )

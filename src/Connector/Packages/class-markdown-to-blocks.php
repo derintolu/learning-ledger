@@ -121,7 +121,11 @@ final class Markdown_To_Blocks {
 			return self::list_block( $node );
 		}
 		if ( $node instanceof FencedCode || $node instanceof IndentedCode ) {
-			return self::block( 'core/code', array(), '<pre class="wp-block-code"><code>' . self::esc( rtrim( $node->getLiteral(), "\n" ) ) . '</code></pre>' );
+			// The fence's language is kept as a language-* class, which Block_To_Markdown reads back.
+			$info  = $node instanceof FencedCode ? (string) ( $node->getInfoWords()[0] ?? '' ) : '';
+			$lang  = 1 === preg_match( '/^[A-Za-z0-9_+#-]+$/', $info ) ? $info : '';
+			$class = '' === $lang ? 'wp-block-code' : 'wp-block-code language-' . $lang;
+			return self::block( 'core/code', '' === $lang ? array() : array( 'className' => 'language-' . $lang ), '<pre class="' . $class . '"><code>' . self::esc( rtrim( $node->getLiteral(), "\n" ) ) . '</code></pre>' );
 		}
 		if ( $node instanceof BlockQuote ) {
 			$inner = implode( "\n\n", self::blocks( $node ) );

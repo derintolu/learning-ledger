@@ -74,10 +74,13 @@ final class Import_Controller {
 	 * Import from a URL or an uploaded ZIP.
 	 *
 	 * @param \WP_REST_Request $request Request.
+	 * @param boolean|null     $trusted Whether the caller is a trusted import path; null means
+	 *                                  the current user can post unfiltered HTML.
 	 *
 	 * @return \WP_REST_Response
 	 */
-	public function handle( \WP_REST_Request $request ): \WP_REST_Response {
+	public function handle( \WP_REST_Request $request, ?bool $trusted = null ): \WP_REST_Response {
+		$trusted = $trusted ?? current_user_can( 'unfiltered_html' );
 		$limits  = new Limits();
 		$adapter = (string) $request->get_param( 'adapter' );
 		$adapter = '' === $adapter ? 'sensei' : $adapter;
@@ -100,7 +103,7 @@ final class Import_Controller {
 				$path = Package_Fetcher::fetch( esc_url_raw( $url ), $limits );
 				$own  = true;
 			}
-			$report = ( new Package_Importer() )->import( Package::from_zip( $path, $limits ), $adapter );
+			$report = ( new Package_Importer() )->import( Package::from_zip( $path, $limits ), $adapter, $trusted );
 		} catch ( Invalid_Input $e ) {
 			$report = Import_Report::failed(
 				array(

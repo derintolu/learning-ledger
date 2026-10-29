@@ -34,7 +34,9 @@ final class Cmi5_Xml_Builder {
 	 * @return string
 	 */
 	public static function build( Program $p, array $paths, array $lesson_meta ): string {
-		$lang = (string) get_bloginfo( 'language' );
+		// An imported package's langstring language, else the site's.
+		$lang = (string) get_post_meta( $p->id, '_lledger_langstring_lang', true );
+		$lang = '' !== $lang ? $lang : (string) get_bloginfo( 'language' );
 		$lang = '' !== $lang ? $lang : 'en';
 		$dom  = new \DOMDocument( '1.0', 'UTF-8' );
 
@@ -55,7 +57,7 @@ final class Cmi5_Xml_Builder {
 		$course->appendChild( self::text_el( $ctx, 'description', '' !== $desc ? $desc : $title ) );
 		$ext = $dom->createElementNS( self::NS_CXM, 'cxm:course' );
 		$ext->setAttribute( 'src', 'cxm/course.json' );
-		$ext->setAttribute( 'specVersion', '1.0' );
+		$ext->setAttribute( 'specVersion', Package_Builder::SPEC_VERSION );
 		if ( '' !== $p->course_server_url ) {
 			$ext->setAttribute( 'mcp', $p->course_server_url );
 		}
@@ -64,13 +66,15 @@ final class Cmi5_Xml_Builder {
 
 		$placement_key = self::placement_key( $p );
 		if ( null !== $placement_key ) {
-			$au = self::au_el(
+			$placement_title = is_string( $p->placement['title'] ?? null ) ? $p->placement['title'] : '';
+			$placement_desc  = is_string( $p->placement['description'] ?? null ) ? $p->placement['description'] : '';
+			$au              = self::au_el(
 				$ctx,
 				Program_Iris::placement_iri( $p ),
 				$placement_key,
 				'NotApplicable',
-				__( 'Placement', 'learning-ledger' ),
-				__( 'Find your starting point.', 'learning-ledger' ),
+				'' !== $placement_title ? $placement_title : __( 'Placement', 'learning-ledger' ),
+				'' !== $placement_desc ? $placement_desc : __( 'Find your starting point.', 'learning-ledger' ),
 				$p,
 				false
 			);
@@ -83,7 +87,8 @@ final class Cmi5_Xml_Builder {
 			$block              = self::el( $dom, 'block' );
 			$block->setAttribute( 'id', Program_Iris::block_iri( $p, $key ) );
 			$block->setAttributeNS( self::NS_CXM, 'cxm:key', $key );
-			$path_desc = (string) get_post_field( 'post_excerpt', $tree->course_id );
+			$path_desc = (string) get_post_meta( $tree->course_id, Package_Builder::BLOCK_DESCRIPTION, true );
+			$path_desc = '' !== $path_desc ? $path_desc : (string) get_post_field( 'post_excerpt', $tree->course_id );
 			$block->appendChild( self::text_el( $ctx, 'title', $tree->title ) );
 			$block->appendChild( self::text_el( $ctx, 'description', '' !== $path_desc ? $path_desc : $tree->title ) );
 			foreach ( $tree->lessons as $lesson ) {

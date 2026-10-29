@@ -33,6 +33,16 @@ final class Package_Builder {
 	 */
 	public const EXTENSION = 'https://github.com/derintolu/learning-ledger/extensions/course';
 
+	/**
+	 * The course-xapi-mcp version the packages follow (`specVersion`).
+	 */
+	public const SPEC_VERSION = '0.2';
+
+	/**
+	 * Path course meta: the block description, when the package's differs from the tagline.
+	 */
+	public const BLOCK_DESCRIPTION = '_lledger_block_description';
+
 	private const MAX_META_BYTES = 1048576;
 
 	/**
@@ -237,11 +247,14 @@ final class Package_Builder {
 	 * @return array
 	 */
 	private function course_json( Program $p, array $parts, string $flavour, int $version ): array {
-		$language = strtolower( (string) get_bloginfo( 'language' ) );
+		// An imported package's own version and language are kept; otherwise they are derived.
+		$language = (string) get_post_meta( $p->id, '_lledger_language', true );
+		$language = '' !== $language ? $language : strtolower( (string) get_bloginfo( 'language' ) );
+		$semver   = (string) get_post_meta( $p->id, '_lledger_package_version', true );
 		$course   = array(
-			'specVersion' => '1.0',
+			'specVersion' => self::SPEC_VERSION,
 			'flavour'     => 'full' === $flavour ? 'authoring' : 'distribution',
-			'version'     => '1.0.' . $version,
+			'version'     => 1 === preg_match( '/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/', $semver ) ? $semver : '1.0.' . $version,
 			'language'    => '' !== $language ? $language : 'en',
 		);
 		$licence  = (string) get_post_meta( $p->id, '_lledger_licence', true );
@@ -254,7 +267,11 @@ final class Package_Builder {
 		}
 		$course['placement'] = $this->placement( $p );
 		$course['custody']   = $p->custody;
-		$course['paths']     = $parts['paths'];
+		$practice            = (string) get_post_meta( $p->id, '_lledger_allow_practice', true );
+		if ( '' !== $practice ) {
+			$course['allowPractice'] = '1' === $practice;
+		}
+		$course['paths'] = $parts['paths'];
 		if ( $p->badges ) {
 			$course['badges'] = $p->badges;
 		}
@@ -272,8 +289,13 @@ final class Package_Builder {
 				}
 			}
 		}
+		// Other namespaces' extensions from an imported package, kept verbatim.
+		$all = Lesson_Json_Builder::foreign_extensions( $p->id, self::EXTENSION );
 		if ( $extensions ) {
-			$course['extensions'] = array( self::EXTENSION => array( 'paths' => $extensions ) );
+			$all[ self::EXTENSION ] = array( 'paths' => $extensions );
+		}
+		if ( $all ) {
+			$course['extensions'] = $all;
 		}
 		return $course;
 	}

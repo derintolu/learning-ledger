@@ -9,7 +9,8 @@
 	"attributes": {
 		"id": { "type": "string", "default": "" },
 		"goal": { "type": "string", "default": "" },
-		"question": { "type": "string", "default": "" }
+		"question": { "type": "string", "default": "" },
+		"trailingNewline": { "type": "boolean", "default": false }
 	},
 	"supports": { "html": false },
 	"editorScript": "file:./index.js",

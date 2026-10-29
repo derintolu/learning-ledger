@@ -38,7 +38,8 @@ final class Package_Command {
 		try {
 			$limits = new Limits();
 			$path   = Package_Fetcher::fetch( (string) ( $args[0] ?? '' ), $limits );
-			$report = ( new Package_Importer() )->import( Package::from_zip( $path, $limits ), $adapter );
+			// WP-CLI is a trusted import path: it runs as the site operator, often as user 0.
+			$report = ( new Package_Importer() )->import( Package::from_zip( $path, $limits ), $adapter, true );
 		} catch ( Invalid_Input $e ) {
 			$report = null;
 		} finally {

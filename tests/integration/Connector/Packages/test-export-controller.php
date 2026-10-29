@@ -393,8 +393,8 @@ class Export_Controller_Test extends WP_UnitTestCase {
 	 * Compared: every lesson (beats, checkpoint with rubric, planted bug, minutes, sources, starter files,
 	 * extensions), the whole course document (license, custody, rules, placement guide, paths with tagline
 	 * and placement hints, path previews, landing pages and final files) and the course structure.
-	 * Only a lesson's `referenceSolution` is not carried through an import: nothing in the LMS stores it.
-	 * The AU URL template and course server URL are set by the operator after an import.
+	 * A lesson's `referenceSolution` is carried too. An empty program takes its AU URL template and
+	 * course server URL from the package.
 	 */
 	public function test_round_trip_export_equals_import() {
 		update_post_meta( $this->program, '_lledger_licence', 'CC-BY-4.0' );
@@ -422,24 +422,23 @@ class Export_Controller_Test extends WP_UnitTestCase {
 		$program = ( new Program_Repository() )->find_by_key( 'demo' );
 		$this->assertNotNull( $program );
 
-		// Where the course server lives is deployment setup, not package content: an import leaves it empty.
-		$this->assertSame( '', ( new Program_Repository() )->get( $program )->au_url_template );
-		update_post_meta( $program, '_lledger_au_url_template', 'https://demo.example.org/cmi5/launch?au={key}' );
-		update_post_meta( $program, '_lledger_course_server_url', 'https://demo.example.org/mcp' );
+		// Where the course server lives is deployment setup, which an empty program takes from the package.
+		$this->assertSame( 'https://demo.example.org/cmi5/launch?au={key}', ( new Program_Repository() )->get( $program )->au_url_template );
+		$this->assertSame( 'https://demo.example.org/mcp', ( new Program_Repository() )->get( $program )->course_server_url );
 
 		$exported = $this->get( $program );
 		$this->assertSame( 200, $exported->get_status(), wp_json_encode( $exported->get_data() ) );
 		$second = $this->package( $exported->get_data() );
 		$this->assertSame( array(), Package_Validator::validate( $second, 'full' )->errors() );
 
-		// Lessons: identical, apart from the reference solution.
+		// Lessons: identical, the reference solution included.
 		$this->assertSame( $first->lesson_keys(), $second->lesson_keys() );
 		$this->assertArrayHasKey( 'referenceSolution', $lesson_one );
 		$this->assertSame( array( 'config.json' => '{}' ), $first->lesson_json( 'lesson-one' )['starterFiles'] );
 		foreach ( $first->lesson_keys() as $key ) {
-			$this->assertSame( $first->lesson_json( $key ), $second->lesson_json( $key ), $key );
-			$this->assertArrayNotHasKey( 'referenceSolution', $second->lesson_json( $key ) );
+			$this->assertSame( $lessons[ $key ], $second->lesson_json( $key ), $key );
 		}
+		$this->assertSame( $lesson_one['referenceSolution'], $second->lesson_json( 'lesson-one' )['referenceSolution'] );
 
 		// Course document: identical.
 		$a = $first->course_json();

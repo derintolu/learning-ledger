@@ -289,7 +289,7 @@ class Package_Builder_Test extends WP_UnitTestCase {
 
 		$course = $pkg->course_json();
 		$this->assertSame( 'authoring', $course['flavour'] );
-		$this->assertSame( '1.0', $course['specVersion'] );
+		$this->assertSame( '0.2', $course['specVersion'] );
 		$this->assertSame( 'server-kept', $course['custody'] );
 		$this->assertSame( array( 'Be brief.', 'Ask before telling.' ), $course['rules'] );
 		$this->assertSame( 2, $course['placement']['maxQuestions'] );
@@ -367,7 +367,7 @@ class Package_Builder_Test extends WP_UnitTestCase {
 		}
 		$blocks = array_map( static fn( $b ) => $b->id(), $structure->blocks() );
 		$this->assertSame( array( self::BASE . 'paths/path-a', self::BASE . 'paths/path-b' ), array_values( $blocks ) );
-		$this->assertStringContainsString( 'specVersion="1.0"', $pkg->cmi5_xml() );
+		$this->assertStringContainsString( 'specVersion="0.2"', $pkg->cmi5_xml() );
 		$this->assertStringContainsString( 'mcp="https://demo.example.org/mcp"', $pkg->cmi5_xml() );
 		$this->assertStringContainsString( 'src="cxm/course.json#/paths/path-a"', $pkg->cmi5_xml() );
 	}

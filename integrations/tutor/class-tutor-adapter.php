@@ -223,7 +223,7 @@ final class Tutor_Adapter implements LMS_Adapter {
 		$nodes = array();
 		foreach ( $this->lesson_ids( $course_id ) as $position => $lesson_id ) {
 			// A Tutor quiz is course content of its own, never part of a lesson.
-			$nodes[] = new Lesson_Node( $lesson_id, get_the_title( $lesson_id ), $this->stable_key( $lesson_id ), $position + 1, false );
+			$nodes[] = new Lesson_Node( $lesson_id, (string) get_post_field( 'post_title', $lesson_id, 'raw' ), $this->stable_key( $lesson_id ), $position + 1, false );
 		}
 		return new Course_Tree( $course_id, $course->post_title, $this->stable_key( $course_id ), $nodes );
 	}

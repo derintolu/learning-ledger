@@ -417,6 +417,44 @@ class Package_Importer_Test extends WP_UnitTestCase {
 		$this->assertSame( $content, wp_kses_post( $content ) );
 	}
 
+	/**
+	 * Whether kses was on at each post save during a callable.
+	 */
+	private static function kses_during( callable $run ): array {
+		$seen = array();
+		$spy  = static function () use ( &$seen ): void {
+			$seen[] = false !== has_filter( 'content_save_pre', 'wp_filter_post_kses' );
+		};
+		add_action( 'save_post', $spy );
+		try {
+			$run();
+		} finally {
+			remove_action( 'save_post', $spy );
+		}
+		return array_values( array_unique( $seen ) );
+	}
+
+	public function test_only_a_trusted_import_suspends_kses_and_it_is_restored() {
+		// Each import starts from no program, so every item is written.
+		$fresh = function ( bool $trusted ): void {
+			$program = $this->repo->find_by_key( 'json-basics' );
+			if ( null !== $program ) {
+				wp_delete_post( $program, true );
+			}
+			( new Package_Importer( new Importing_Fake_Adapter() ) )->import( $this->package(), 'fake', $trusted );
+		};
+		kses_init_filters();
+		try {
+			$this->assertSame( array( true ), self::kses_during( fn() => $fresh( false ) ) );
+			$this->assertSame( array( false ), self::kses_during( fn() => $fresh( true ) ) );
+			$this->assertNotFalse( has_filter( 'content_save_pre', 'wp_filter_post_kses' ), 'restored after a trusted import' );
+		} finally {
+			kses_remove_filters();
+		}
+		$this->assertSame( array( false ), self::kses_during( fn() => $fresh( true ) ) );
+		$this->assertFalse( has_filter( 'content_save_pre', 'wp_filter_post_kses' ), 'not turned on when it was off' );
+	}
+
 	public function test_fetcher_streams_https_url_to_a_temp_file() {
 		$zip = Package_Writer::write( ...$this->inputs() );
 		add_filter(
@@ -557,7 +595,27 @@ class Package_Importer_Test extends WP_UnitTestCase {
 		};
 
 		add_filter( 'pre_http_request', $serve( Package_Writer::write( ...$this->inputs() ) ), 10, 2 );
-		$ok = $send( 'https://example.org/p.zip' );
+		kses_init_filters();
+		$ok = null;
+		try {
+			// An administrator can post unfiltered HTML, so the import is trusted; a connector manager without it is not.
+			$this->assertSame(
+				array( false ),
+				self::kses_during(
+					static function () use ( $send, &$ok ) {
+						$ok = $send( 'https://example.org/p.zip' );
+					}
+				)
+			);
+			$manager = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+			get_user_by( 'id', $manager )->add_cap( Program_Module::CAP );
+			wp_set_current_user( $manager );
+			wp_delete_post( (int) $ok->get_data()['program_id'], true );
+			$this->assertSame( array( true ), self::kses_during( static fn() => $send( 'https://example.org/p.zip' ) ) );
+			wp_set_current_user( $admin );
+		} finally {
+			kses_remove_filters();
+		}
 		$this->assertSame( 200, $ok->get_status() );
 		$this->assertGreaterThan( 0, $ok->get_data()['program_id'] );
 		$this->assertContains( 'course:json', $ok->get_data()['created'] );

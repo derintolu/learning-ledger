@@ -205,7 +205,7 @@ final class Lifterlms_Adapter implements LMS_Adapter {
 			$lesson  = llms_get_post( $lesson_id );
 			$nodes[] = new Lesson_Node(
 				$lesson_id,
-				get_the_title( $lesson_id ),
+				(string) get_post_field( 'post_title', $lesson_id, 'raw' ),
 				$this->stable_key( $lesson_id ),
 				$position + 1,
 				$lesson instanceof \LLMS_Lesson && self::has_pass_required_quiz( $lesson )

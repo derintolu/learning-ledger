@@ -86,6 +86,11 @@ class Block_To_Markdown_Test extends \PHPUnit\Framework\TestCase {
 		$this->assertSame( "````js\na ``` b\n````", $this->md( array( $code ) ) );
 	}
 
+	public function test_code_ignores_the_line_breaks_around_its_pre() {
+		$code = $this->block( 'core/code', "\n" . '<pre class="wp-block-code language-php"><code>echo 1;</code></pre>' . "\n", array( 'className' => 'language-php' ) );
+		$this->assertSame( "```php\necho 1;\n```", $this->md( array( $code ) ) );
+	}
+
 	public function test_preformatted_becomes_a_fence() {
 		$pre = $this->block( 'core/preformatted', '<pre class="wp-block-preformatted">line one<br>line two</pre>' );
 		$this->assertSame( "```\nline one\nline two\n```", $this->md( array( $pre ) ) );

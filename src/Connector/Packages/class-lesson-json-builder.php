@@ -20,6 +20,16 @@ final class Lesson_Json_Builder {
 	 */
 	public const EXTENSION = 'https://github.com/derintolu/learning-ledger/extensions/lesson';
 
+	/**
+	 * Lesson meta: the lesson's `referenceSolution` (a secret field), as JSON.
+	 */
+	public const REFERENCE_META = '_lledger_reference_solution';
+
+	/**
+	 * Lesson meta: other namespaces' lesson extensions from an imported package, as JSON.
+	 */
+	public const EXTENSIONS_META = '_lledger_extensions';
+
 	private const MAX_META_BYTES = 1048576;
 
 	/**
@@ -63,9 +73,14 @@ final class Lesson_Json_Builder {
 		if ( null !== $found['checkpoint'] ) {
 			$json['checkpoint'] = $found['checkpoint']['json'];
 		}
+		$reference = self::meta_object( $lesson->ID, self::REFERENCE_META );
+		if ( null !== $reference ) {
+			$json['referenceSolution'] = $reference;
+		}
 
-		$extension = array();
-		$licence   = (string) get_post_meta( $lesson->ID, '_lledger_licence', true );
+		$extensions = self::foreign_extensions( $lesson->ID, self::EXTENSION );
+		$extension  = array();
+		$licence    = (string) get_post_meta( $lesson->ID, '_lledger_licence', true );
 		if ( '' !== $licence ) {
 			$extension['license'] = $licence;
 		}
@@ -73,7 +88,10 @@ final class Lesson_Json_Builder {
 			$extension['fallbackOptions'] = $found['checkpoint']['fallback'];
 		}
 		if ( $extension ) {
-			$json['extensions'] = array( self::EXTENSION => $extension );
+			$extensions[ self::EXTENSION ] = $extension;
+		}
+		if ( $extensions ) {
+			$json['extensions'] = $extensions;
 		}
 
 		return array(
@@ -153,7 +171,7 @@ final class Lesson_Json_Builder {
 		$beat = array(
 			'key'     => $key,
 			'goal'    => (string) ( $attrs['goal'] ?? '' ),
-			'content' => $md['markdown'],
+			'content' => $md['markdown'] . ( true === ( $attrs['trailingNewline'] ?? false ) ? "\n" : '' ),
 		);
 		if ( '' !== (string) ( $attrs['question'] ?? '' ) ) {
 			$beat['question'] = (string) $attrs['question'];
@@ -293,6 +311,43 @@ final class Lesson_Json_Builder {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * Other namespaces' extensions stored on a post by the importer, by key; each value keeps its
+	 * objects as objects, so it is written back exactly.
+	 *
+	 * @param integer $post_id Post id.
+	 * @param string  $own     The plugin's own extension key, left out.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public static function foreign_extensions( int $post_id, string $own ): array {
+		$stored = self::meta_object( $post_id, self::EXTENSIONS_META );
+		$out    = null === $stored ? array() : get_object_vars( $stored );
+		unset( $out[ $own ] );
+		return $out;
+	}
+
+	/**
+	 * A JSON object stored in post meta, decoded with objects kept as objects; null when absent or malformed.
+	 *
+	 * @param integer $post_id Post id.
+	 * @param string  $key     Meta key.
+	 *
+	 * @return object|null
+	 */
+	private static function meta_object( int $post_id, string $key ): ?object {
+		$raw = (string) get_post_meta( $post_id, $key, true );
+		if ( '' === $raw || strlen( $raw ) > self::MAX_META_BYTES ) {
+			return null;
+		}
+		try {
+			$value = json_decode( $raw, false, 64, JSON_THROW_ON_ERROR );
+		} catch ( \JsonException $e ) {
+			return null;
+		}
+		return is_object( $value ) ? $value : null;
 	}
 
 	/**

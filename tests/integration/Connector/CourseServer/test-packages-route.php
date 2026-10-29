@@ -269,15 +269,30 @@ class Packages_Route_Test extends WP_UnitTestCase {
 			2
 		);
 
-		$res = $this->send(
-			'POST',
-			'packages',
-			array(),
-			array(
-				'url'     => 'https://example.org/p.zip',
-				'adapter' => 'fake',
-			)
-		);
+		// A signed course server is a trusted import path: kses is off for its writes, then on again.
+		wp_set_current_user( 0 );
+		kses_init_filters();
+		$seen = array();
+		$spy  = static function () use ( &$seen ): void {
+			$seen[] = false !== has_filter( 'content_save_pre', 'wp_filter_post_kses' );
+		};
+		add_action( 'save_post', $spy );
+		try {
+			$res = $this->send(
+				'POST',
+				'packages',
+				array(),
+				array(
+					'url'     => 'https://example.org/p.zip',
+					'adapter' => 'fake',
+				)
+			);
+			$this->assertNotFalse( has_filter( 'content_save_pre', 'wp_filter_post_kses' ) );
+		} finally {
+			remove_action( 'save_post', $spy );
+			kses_remove_filters();
+		}
+		$this->assertSame( array( false ), array_values( array_unique( $seen ) ) );
 		$this->assertSame( 200, $res->get_status(), wp_json_encode( $res->get_data() ) );
 		$this->assertGreaterThan( 0, $res->get_data()['program_id'] );
 		$this->assertContains( 'course:json', $res->get_data()['created'] );
