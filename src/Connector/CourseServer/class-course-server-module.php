@@ -9,6 +9,7 @@ namespace LearningLedger\Connector\CourseServer;
 
 use LearningLedger\Kernel\Module;
 use LearningLedger\Kernel\Status_Route;
+use LearningLedger\Integrations\Sensei\Sensei_Storage;
 use LearningLedger\Kernel\Service_Context;
 
 /**
@@ -94,8 +95,11 @@ final class Course_Server_Module implements Module {
 		}
 		$payload = Status_Route::payload( true );
 		// What this host's query filters do, for course servers diagnosing a silent host.
-		$payload['host_queries']            = Service_Context::host_queries();
-		$payload['sensei_progress_storage'] = Service_Context::sensei_progress_storage();
+		$payload['host_queries'] = Service_Context::host_queries();
+		$sensei                  = Sensei_Storage::status();
+		// Where Sensei reads lesson progress from (comments or tables), and whether its progress tables exist.
+		$payload['sensei_progress_storage'] = $sensei['storage'];
+		$payload['sensei_progress_tables']  = $sensei['tables'];
 		return new \WP_REST_Response( $payload, 200 );
 	}
 

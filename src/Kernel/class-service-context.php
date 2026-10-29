@@ -31,6 +31,11 @@ final class Service_Context {
 	public const LOGIN_PREFIX = 'learning-ledger-service-';
 
 	/**
+	 * Capabilities the diagnostics grant the service user in memory, one probe each.
+	 */
+	public const PROBE_CAPABILITIES = array( 'read', 'edit_posts', 'manage_options' );
+
+	/**
 	 * Whether anonymous post and comment queries find a row that exists, this request's probe
 	 * (null for a query with nothing to probe).
 	 *
@@ -95,7 +100,7 @@ final class Service_Context {
 	 * For the signed status: whether post, user and comment queries find a row that exists,
 	 * with no current user and with the service user. Null where there is no row or the probe failed.
 	 *
-	 * @return array<string,array{anonymous:?bool,service_user:?bool}>
+	 * @return array<string,array{anonymous:?bool,service_user:?bool,with_capability:array<string,?bool>}>
 	 */
 	public static function host_queries(): array {
 		// Never creates the service user: without a usable one, its column is null.
@@ -107,28 +112,43 @@ final class Service_Context {
 			'users'    => array( self::class, 'users_visible' ),
 			'comments' => array( self::class, 'comments_visible' ),
 		) as $name => $probe ) {
+			$with = array();
+			foreach ( self::PROBE_CAPABILITIES as $cap ) {
+				$with[ $cap ] = $service > 0 ? self::with_capability( $service, $cap, $probe ) : null;
+			}
 			$out[ $name ] = array(
-				'anonymous'    => self::as_user( 0, $probe ),
-				'service_user' => $service > 0 ? self::as_user( $service, $probe ) : null,
+				'anonymous'       => self::as_user( 0, $probe ),
+				'service_user'    => $service > 0 ? self::as_user( $service, $probe ) : null,
+				'with_capability' => $with,
 			);
 		}
 		return $out;
 	}
 
 	/**
-	 * Sensei's lesson progress storage: `comments` or `tables`, null without Sensei.
+	 * A probe as the service user while it holds one capability, granted in memory only by a
+	 * `user_has_cap` filter added and removed around the probe; nothing is stored.
 	 *
-	 * @return string|null
+	 * @param integer  $service Service user id.
+	 * @param string   $cap     Capability.
+	 * @param callable $probe   Probe.
+	 *
+	 * @return boolean|null
 	 */
-	public static function sensei_progress_storage(): ?string {
-		$settings = '\Sensei\Internal\Services\Progress_Storage_Settings';
-		try {
-			if ( ! class_exists( $settings ) || ! method_exists( $settings, 'is_tables_repository' ) ) {
-				return null;
+	private static function with_capability( int $service, string $cap, callable $probe ): ?bool {
+		$grant = static function ( $allcaps, $caps, $args, $user ) use ( $service, $cap ) {
+			unset( $caps, $args );
+			if ( $user instanceof \WP_User && $service === (int) $user->ID ) {
+				$allcaps         = is_array( $allcaps ) ? $allcaps : array();
+				$allcaps[ $cap ] = true;
 			}
-			return $settings::is_tables_repository() ? 'tables' : 'comments';
-		} catch ( \Throwable $e ) {
-			return null;
+			return $allcaps;
+		};
+		add_filter( 'user_has_cap', $grant, PHP_INT_MAX, 4 );
+		try {
+			return self::as_user( $service, $probe );
+		} finally {
+			remove_filter( 'user_has_cap', $grant, PHP_INT_MAX );
 		}
 	}
 

@@ -41,6 +41,9 @@ final class Sensei_Integration {
 		if ( class_exists( Sensei_Applier::class ) ) {
 			Sensei_Applier::hooks();
 		}
+		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\WP_CLI' ) ) {
+			\WP_CLI::add_command( 'learning-ledger sensei storage', Sensei_Storage_Command::class );
+		}
 	}
 
 	/**

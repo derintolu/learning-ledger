@@ -26,6 +26,7 @@ use LearningLedger\Crypto\Signed_Request;
 use LearningLedger\Db\Installer;
 use LearningLedger\Db\Tables;
 use LearningLedger\Integrations\Sensei\Sensei_Adapter;
+use LearningLedger\Integrations\Sensei\Sensei_Storage;
 use LearningLedger\Kernel\Service_Context;
 use LearningLedger\Package\Limits;
 use LearningLedger\Package\Package;
@@ -58,6 +59,12 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
+		// Sensei's progress tables, before any test data: creating a table commits the open transaction.
+		if ( ! Sensei_Storage::tables_exist() ) {
+			add_filter( 'sensei_feature_flag_tables_based_progress', '__return_true' );
+			( new \Sensei\Internal\Installer\Schema( Sensei()->feature_flags ) )->create_tables();
+			remove_filter( 'sensei_feature_flag_tables_based_progress', '__return_true' );
+		}
 		Installer::install();
 		global $wpdb, $wp_rest_server;
 		foreach ( array( 'conn_inbox', 'conn_events', 'conn_cursor', 'applied', 'identity_links', 'waivers', 'registrations' ) as $t ) {
@@ -108,14 +115,30 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		Clock::freeze( null );
 		Service_Context::reset();
 		parent::tear_down();
+		// The settings option is rolled back now; Sensei reads it again, as the next request would.
+		self::reload_sensei_storage();
 	}
 
 	/**
 	 * Simulate the host: 'always' empties post and user queries whoever asks; 'anonymous' empties
-	 * post, user and comment queries while nobody is logged in.
+	 * post, user and comment queries while nobody is logged in; 'everything' empties post, user
+	 * and comment queries whoever asks (what Space A reported in 0.1.5).
 	 */
 	private static function host_filter( string $mode ): void {
 		$anon = 'anonymous' === $mode;
+		if ( 'everything' === $mode ) {
+			// Post, user and comment queries are emptied for every request, logged in or not.
+			add_action( 'pre_get_posts', static fn( $q ) => $q->set( 'post__in', array( 0 ) ) );
+			add_action( 'pre_get_users', static fn( $q ) => $q->set( 'include', array( 0 ) ) );
+			add_action(
+				'pre_get_comments',
+				static function ( $q ) {
+					$q->query_vars['comment__in'] = array( 0 );
+				}
+			);
+			Service_Context::reset();
+			return;
+		}
 		add_action(
 			'pre_get_posts',
 			static function ( $q ) use ( $anon ) {
@@ -143,6 +166,20 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 			);
 		}
 		Service_Context::reset();
+	}
+
+	/**
+	 * Make Sensei read its storage settings again and rebuild its progress repositories, as it
+	 * does at the start of every request.
+	 */
+	private static function reload_sensei_storage(): void {
+		Sensei()->settings->get_settings();
+		$config                                  = \Sensei\Internal\Services\Progress_Storage_Configuration::resolve( Sensei()->settings->settings );
+		Sensei()->progress_storage_configuration = $config;
+		Sensei()->course_progress_repository     = ( new \Sensei\Internal\Student_Progress\Course_Progress\Repositories\Course_Progress_Repository_Factory( $config ) )->create();
+		Sensei()->lesson_progress_repository     = ( new \Sensei\Internal\Student_Progress\Lesson_Progress\Repositories\Lesson_Progress_Repository_Factory( $config ) )->create();
+		Sensei()->quiz_progress_repository       = ( new \Sensei\Internal\Student_Progress\Quiz_Progress\Repositories\Quiz_Progress_Repository_Factory( $config ) )->create();
+		\Sensei\Internal\Services\Progress_Storage_Settings::reset_cache_enabled();
 	}
 
 	/**
@@ -357,6 +394,18 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 		$this->assertFalse( get_option( Service_Context::OPTION ) );
 		Service_Context::service_user();
 		$plain = $this->signed( 'GET', 'status' )->get_data();
+		$caps  = static fn( array $q ): array => array_map( static fn( $k ) => array_diff_key( $k, array( 'with_capability' => 0 ) ), $q );
+		foreach ( $plain['host_queries'] as $kind => $q ) {
+			$this->assertSame(
+				array(
+					'read'           => true,
+					'edit_posts'     => true,
+					'manage_options' => true,
+				),
+				$q['with_capability'],
+				$kind
+			);
+		}
 		$this->assertSame(
 			array(
 				'posts'    => array(
@@ -372,9 +421,10 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 					'service_user' => true,
 				),
 			),
-			$plain['host_queries']
+			$caps( $plain['host_queries'] )
 		);
-		$this->assertContains( $plain['sensei_progress_storage'], array( 'comments', 'tables' ) );
+		$this->assertSame( 'comments', $plain['sensei_progress_storage'] );
+		$this->assertIsBool( $plain['sensei_progress_tables'] );
 
 		self::host_filter( 'anonymous' );
 		$filtered = $this->signed( 'GET', 'status' )->get_data();
@@ -384,10 +434,72 @@ class Sensei_Inbox_Host_Filter_Test extends WP_UnitTestCase {
 					'anonymous'    => false,
 					'service_user' => true,
 				),
-				$filtered['host_queries'][ $kind ],
+				$caps( $filtered['host_queries'] )[ $kind ],
 				$kind
 			);
 		}
 		$this->assertSame( 0, get_current_user_id() );
+	}
+
+	/**
+	 * Switch Sensei to its tables as the operator's WP-CLI command does, then start a new request.
+	 */
+	private function sensei_reads_tables(): void {
+		$result = Sensei_Storage::switch_to_tables( true );
+		$this->assertIsArray( $result, is_wp_error( $result ) ? $result->get_error_message() : '' );
+		self::reload_sensei_storage();
+		$this->assertSame( 'tables', Sensei_Storage::status()['storage'] );
+		$this->assertTrue( Sensei_Storage::status()['tables'] );
+	}
+
+	public function test_with_comment_storage_a_host_that_empties_every_comment_query_hides_progress() {
+		$run      = $this->through_the_inbox( array( self::LESSON ), 'everything' );
+		$progress = $this->signed( 'GET', 'learners/' . $run['user'] . '/progress', array( 'course' => (string) $run['course'] ) );
+		$this->assertSame( array(), $progress->get_data()['courses'][0]['completed'], 'Sensei reads progress through comment queries' );
+	}
+
+	public function test_with_table_storage_a_delivered_completion_is_reported_under_a_host_that_empties_everything() {
+		$this->sensei_reads_tables();
+		$run      = $this->through_the_inbox( array( self::LESSON ), 'everything' );
+		$progress = $this->signed( 'GET', 'learners/' . $run['user'] . '/progress', array( 'course' => (string) $run['course'] ) );
+		$this->assertSame( 200, $progress->get_status() );
+		$this->assertSame( array( $run['lessons'][0] ), $progress->get_data()['courses'][0]['completed'] );
+		$this->assertFalse( $progress->get_data()['courses'][0]['course_completed'] );
+		$this->assertTrue( (bool) \Sensei_Utils::user_completed_lesson( $run['lessons'][0], $run['user'] ), 'Sensei reads it from its tables' );
+	}
+
+	public function test_with_table_storage_a_delivered_path_completes_the_course_under_a_host_that_empties_everything() {
+		$this->sensei_reads_tables();
+		$keys     = array( 'ln-what-is-wordpress', 'ln-posts-and-pages', 'ln-blocks', 'ln-navigation-and-site-editor', 'ln-ai-in-wordpress', 'ln-publish' );
+		$run      = $this->through_the_inbox( $keys, 'everything' );
+		$progress = $this->signed( 'GET', 'learners/' . $run['user'] . '/progress', array( 'course' => (string) $run['course'] ) );
+		$this->assertEqualsCanonicalizing( $run['lessons'], $progress->get_data()['courses'][0]['completed'] );
+		$this->assertTrue( $progress->get_data()['courses'][0]['course_completed'] );
+	}
+
+	public function test_switching_to_tables_refuses_while_comment_progress_exists() {
+		$user   = self::factory()->user->create();
+		$lesson = self::lesson_id( self::LESSON );
+		\Sensei_Utils::sensei_start_lesson( $lesson, $user, true );
+		$this->assertGreaterThan( 0, Sensei_Storage::comment_progress_rows() );
+		$refused = Sensei_Storage::switch_to_tables();
+		$this->assertInstanceOf( WP_Error::class, $refused );
+		$this->assertSame( 'comment_progress_exists', $refused->get_error_code() );
+		$settings = get_option( Sensei_Storage::SETTINGS, array() );
+		$this->assertEmpty( $settings['experimental_progress_storage'] ?? null, 'nothing switched' );
+
+		$this->assertIsArray( Sensei_Storage::switch_to_tables( true ) );
+		$settings = get_option( Sensei_Storage::SETTINGS );
+		$this->assertTrue( $settings['experimental_progress_storage'] );
+		$this->assertTrue( $settings['experimental_progress_storage_synchronization'] );
+		$this->assertSame( 'custom_tables', $settings['experimental_progress_storage_repository'] );
+	}
+
+	public function test_signed_status_reports_table_storage() {
+		$this->sensei_reads_tables();
+		wp_set_current_user( 0 );
+		$status = $this->signed( 'GET', 'status' )->get_data();
+		$this->assertSame( 'tables', $status['sensei_progress_storage'] );
+		$this->assertTrue( $status['sensei_progress_tables'] );
 	}
 }

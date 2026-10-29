@@ -227,8 +227,13 @@ class Service_Context_Test extends WP_UnitTestCase {
 		$this->assertFalse( get_option( Service_Context::OPTION ), 'the status probe never creates it' );
 		Service_Context::service_user();
 		$all = array(
-			'anonymous'    => true,
-			'service_user' => true,
+			'anonymous'       => true,
+			'service_user'    => true,
+			'with_capability' => array(
+				'read'           => true,
+				'edit_posts'     => true,
+				'manage_options' => true,
+			),
 		);
 		$this->assertSame(
 			array(
@@ -241,8 +246,13 @@ class Service_Context_Test extends WP_UnitTestCase {
 
 		self::anonymous_host_filter();
 		$filtered = array(
-			'anonymous'    => false,
-			'service_user' => true,
+			'anonymous'       => false,
+			'service_user'    => true,
+			'with_capability' => array(
+				'read'           => true,
+				'edit_posts'     => true,
+				'manage_options' => true,
+			),
 		);
 		$this->assertSame(
 			array(
@@ -260,5 +270,54 @@ class Service_Context_Test extends WP_UnitTestCase {
 		$wpdb->query( "DELETE FROM {$wpdb->comments}" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		$this->assertNull( Service_Context::host_queries()['comments']['anonymous'] );
 		$this->assertNull( Service_Context::comments_visible() );
+	}
+
+	public function test_capability_probes_show_what_a_host_keys_on() {
+		self::factory()->comment->create( array( 'comment_post_ID' => self::factory()->post->create() ) );
+		$service = Service_Context::service_user();
+		// A host that empties queries unless the current user can edit posts.
+		foreach ( array( 'pre_get_posts' => 'post__in', 'pre_get_users' => 'include' ) as $hook => $var ) { // phpcs:ignore WordPress.Arrays.ArrayDeclarationSpacing.AssociativeArrayFound
+			add_action(
+				$hook,
+				static function ( $q ) use ( $var ) {
+					if ( ! current_user_can( 'edit_posts' ) ) {
+						$q->set( $var, array( 0 ) );
+					}
+				}
+			);
+		}
+		add_action(
+			'pre_get_comments',
+			static function ( $q ) {
+				if ( ! current_user_can( 'edit_posts' ) ) {
+					$q->query_vars['comment__in'] = array( 0 );
+				}
+			}
+		);
+		$expected = array(
+			'anonymous'       => false,
+			'service_user'    => false,
+			'with_capability' => array(
+				'read'           => false,
+				'edit_posts'     => true,
+				'manage_options' => false,
+			),
+		);
+		$this->assertSame(
+			array(
+				'posts'    => $expected,
+				'users'    => $expected,
+				'comments' => $expected,
+			),
+			Service_Context::host_queries()
+		);
+		$this->assertFalse( user_can( $service, 'edit_posts' ), 'the capability was in memory only' );
+		$this->assertSame( array(), get_userdata( $service )->caps );
+		$this->assertFalse( has_filter( 'user_has_cap' ) && self::grants_left(), 'no grant filter is left behind' );
+	}
+
+	private static function grants_left(): bool {
+		global $wp_filter;
+		return isset( $wp_filter['user_has_cap'] ) && isset( $wp_filter['user_has_cap']->callbacks[ PHP_INT_MAX ] );
 	}
 }
