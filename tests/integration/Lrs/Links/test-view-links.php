@@ -145,6 +145,66 @@ class View_Links_Test extends WP_UnitTestCase {
 		return $body;
 	}
 
+	/**
+	 * Serve a record page request through the REST twin and return its body.
+	 */
+	private function rest( Record_Page $page, string $token, array $query = array() ): string {
+		$r = new WP_REST_Request( 'GET', '/learning-ledger/v1/page/record/' . $token );
+		$r->set_url_params( array( 'token' => $token ) );
+		$r->set_query_params( $query );
+		ob_start();
+		try {
+			$page->serve_rest( $r );
+			$this->fail( 'Expected the response to finish' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'finished', $e->getMessage() );
+		} finally {
+			$body = (string) ob_get_clean();
+		}
+		return $body;
+	}
+
+	public function test_rest_twin_answers_as_the_page_does() {
+		$statements = array();
+		for ( $i = 0; $i < 101; $i++ ) {
+			$statements[] = self::statement( self::agent( 'alice' ), 'Lesson ' . $i );
+		}
+		self::store( $statements );
+		$token = $this->mint( self::agent( 'alice' ) );
+		$this->later( 5 );
+		$first = $this->serve( $this->page(), $token );
+		$this->assertSame( 1, preg_match( '/href="([^"]*[?&](?:amp;|#038;)?more=[^"]*)"/', $first, $m ) );
+		parse_str( (string) wp_parse_url( html_entity_decode( $m[1] ), PHP_URL_QUERY ), $query );
+
+		$cases    = array(
+			array( $token, '', '' ),
+			array( $token, '', $query['more'] ),
+			array( $token, 'ndjson', '' ),
+			array( $token, 'json', '' ),
+			array( str_repeat( 'A', 43 ), '', '' ),
+		);
+		$statuses = array();
+		foreach ( $cases as [ $t, $download, $more ] ) {
+			$pretty = $this->page();
+			$body   = $this->serve( $pretty, $t, $download, $more );
+			$twin   = $this->page();
+			$tbody  = $this->rest(
+				$twin,
+				$t,
+				array_filter(
+					array(
+						'download' => $download,
+						'more'     => $more,
+					)
+				)
+			);
+			$this->assertSame( array( $pretty->status, $pretty->sent, $body ), array( $twin->status, $twin->sent, $tbody ), $t . ' ' . $download . ' ' . $more );
+			$statuses[] = $twin->status;
+		}
+		$this->assertSame( array( 200, 200, 200, 200, 410 ), $statuses );
+		$this->assertStringContainsString( esc_url( home_url( '/records/' . $token ) . '?download=ndjson' ), $this->rest( $this->page(), $token ) );
+	}
+
 	private function later( int $seconds ): void {
 		Clock::freeze( $this->t0->modify( '+' . $seconds . ' seconds' ) );
 	}

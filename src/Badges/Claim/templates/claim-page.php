@@ -91,7 +91,7 @@ $lledger_title  = $lledger_titles[ $lledger_state ] ?? $lledger_titles['gone'];
 			<p class="error" role="alert"><?php echo esc_html( (string) $lledger_view['error'] ); ?></p>
 		<?php endif; ?>
 		<form method="post" action="<?php echo esc_url( (string) $lledger_view['action'] ); ?>">
-			<?php wp_nonce_field( (string) $lledger_view['nonce_action'], '_wpnonce', false ); ?>
+			<?php wp_nonce_field( (string) $lledger_view['nonce_action'], 'lledger_nonce', false ); ?>
 			<input type="hidden" name="lledger_token" value="<?php echo esc_attr( (string) $lledger_view['token'] ); ?>">
 			<label for="lledger-email"><?php esc_html_e( 'Email address', 'learning-ledger' ); ?></label>
 			<input type="email" id="lledger-email" name="lledger_email" value="<?php echo esc_attr( (string) $lledger_view['email'] ); ?>" required autocomplete="email" maxlength="254">

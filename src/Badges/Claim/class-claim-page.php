@@ -11,6 +11,7 @@ use LearningLedger\Badges\Issuer\Issuer_Profile;
 use LearningLedger\Badges\Pipeline\Badge_Repository;
 use LearningLedger\Crypto\Hmac;
 use LearningLedger\Crypto\Tokens;
+use LearningLedger\Kernel\Page_Route;
 use LearningLedger\Lrs\Links\Link_Repository;
 use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
@@ -23,7 +24,8 @@ use LearningLedger\Util\Invalid_Input;
  * Claim_Handler::claim() and shows the result: the JSON and PNG downloads behind a
  * short-lived signed parameter (Task 62 serves them) and, when shared, the public link to
  * copy. An unknown, used or expired token gets a 410. Every response is `no-store`,
- * `noindex` and `no-referrer`.
+ * `noindex` and `no-referrer`. `GET|POST /learning-ledger/v1/page/claim/<token>` is its REST
+ * twin; the form still posts to the pretty URL.
  *
  * Not final so tests can capture the status and headers.
  */
@@ -50,12 +52,13 @@ class Claim_Page {
 	const DOWNLOAD_PURPOSE = 'badge-download';
 
 	/**
-	 * Form field names.
+	 * Form field names. The nonce is not `_wpnonce`: on a REST request WordPress checks a
+	 * `_wpnonce` parameter as a REST cookie nonce and refuses the request.
 	 */
 	const FIELD_TOKEN = 'lledger_token';
 	const FIELD_EMAIL = 'lledger_email';
 	const FIELD_SHARE = 'lledger_share';
-	const FIELD_NONCE = '_wpnonce';
+	const FIELD_NONCE = 'lledger_nonce';
 
 	/**
 	 * Headers on every response.
@@ -175,19 +178,47 @@ class Claim_Page {
 			return;
 		}
 		$method = isset( $_SERVER['REQUEST_METHOD'] ) && is_string( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_key( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : 'GET';
-		$fields = array();
-		if ( 'POST' === $method ) {
-			// phpcs:disable WordPress.Security.NonceVerification.Missing -- the nonce is verified in serve().
-			$fields = array(
-				'token' => isset( $_POST[ self::FIELD_TOKEN ] ) && is_string( $_POST[ self::FIELD_TOKEN ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::FIELD_TOKEN ] ) ) : '',
-				'nonce' => isset( $_POST[ self::FIELD_NONCE ] ) && is_string( $_POST[ self::FIELD_NONCE ] ) ? sanitize_text_field( wp_unslash( $_POST[ self::FIELD_NONCE ] ) ) : '',
-				// Not sanitize_text_field(): Claim_Handler trims, lowercases and checks it with is_email(), then only hashes it; the form escapes it when showing it again.
-				'email' => isset( $_POST[ self::FIELD_EMAIL ] ) && is_string( $_POST[ self::FIELD_EMAIL ] ) ? wp_unslash( $_POST[ self::FIELD_EMAIL ] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-				'share' => isset( $_POST[ self::FIELD_SHARE ] ) && '1' === $_POST[ self::FIELD_SHARE ],
-			);
-			// phpcs:enable WordPress.Security.NonceVerification.Missing
-		}
-		$this->serve( $token, $method, $fields );
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- the nonce is verified in serve(); posted() sanitizes each field.
+		$this->serve( $token, $method, 'POST' === $method ? self::posted( wp_unslash( $_POST ) ) : array() );
+	}
+
+	/**
+	 * `GET|POST page/claim/<token>`: the REST twin of the rewrite.
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return void
+	 */
+	public function serve_rest( \WP_REST_Request $r ): void {
+		Page_Route::start();
+		$method = strtoupper( $r->get_method() );
+		$this->serve( (string) $r['token'], $method, 'POST' === $method ? self::posted( $r->get_body_params() ) : array() );
+	}
+
+	/**
+	 * Register the REST twin (on `rest_api_init`).
+	 *
+	 * @return void
+	 */
+	public function register_route(): void {
+		Page_Route::register( 'claim/(?P<token>[A-Za-z0-9_-]{43})', 'GET, POST', array( $this, 'serve_rest' ) );
+	}
+
+	/**
+	 * The form fields of a POST.
+	 *
+	 * @param array $post Unslashed POST fields.
+	 *
+	 * @return array{token:string,nonce:string,email:string,share:bool}
+	 */
+	public static function posted( array $post ): array {
+		return array(
+			'token' => isset( $post[ self::FIELD_TOKEN ] ) && is_string( $post[ self::FIELD_TOKEN ] ) ? sanitize_text_field( $post[ self::FIELD_TOKEN ] ) : '',
+			'nonce' => isset( $post[ self::FIELD_NONCE ] ) && is_string( $post[ self::FIELD_NONCE ] ) ? sanitize_text_field( $post[ self::FIELD_NONCE ] ) : '',
+			// Not sanitize_text_field(): Claim_Handler trims, lowercases and checks it with is_email(), then only hashes it; the form escapes it when showing it again.
+			'email' => isset( $post[ self::FIELD_EMAIL ] ) && is_string( $post[ self::FIELD_EMAIL ] ) ? $post[ self::FIELD_EMAIL ] : '',
+			'share' => isset( $post[ self::FIELD_SHARE ] ) && '1' === $post[ self::FIELD_SHARE ],
+		);
 	}
 
 	/**

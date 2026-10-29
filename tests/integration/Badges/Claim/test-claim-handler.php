@@ -613,6 +613,101 @@ class Claim_Handler_Test extends WP_UnitTestCase {
 		return $body;
 	}
 
+	/**
+	 * Serve one request through the REST twin and return the body.
+	 *
+	 * @param Claim_Page $page   Page.
+	 * @param string     $token  Token in the route.
+	 * @param string     $method Method.
+	 * @param array      $post   Form fields, as the browser posts them.
+	 *
+	 * @return string
+	 */
+	private function rest( Claim_Page $page, string $token, string $method = 'GET', array $post = array() ): string {
+		$r = new WP_REST_Request( $method, '/learning-ledger/v1/page/claim/' . $token );
+		$r->set_url_params( array( 'token' => $token ) );
+		$r->set_body_params( $post );
+		ob_start();
+		try {
+			$page->serve_rest( $r );
+			$this->fail( 'Expected the response to finish' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'finished', $e->getMessage() );
+		} finally {
+			$body = (string) ob_get_clean();
+		}
+		return $body;
+	}
+
+	/**
+	 * Status, headers and body with the per-response CSP script nonce blanked.
+	 *
+	 * @param Claim_Page $page Page after a request.
+	 * @param string     $body Body.
+	 *
+	 * @return array
+	 */
+	private static function response_of( Claim_Page $page, string $body ): array {
+		$blank = static fn( string $s ): string => (string) preg_replace( '/nonce-[A-Za-z0-9_-]+|nonce="[A-Za-z0-9_-]+"/', 'nonce', $s );
+		return array( $page->status, array_map( $blank, $page->sent ), $blank( $body ) );
+	}
+
+	/**
+	 * The fields of $this->fields() as form names and values.
+	 *
+	 * @param array $fields Fields.
+	 *
+	 * @return array
+	 */
+	private static function form_post( array $fields ): array {
+		return array(
+			Claim_Page::FIELD_TOKEN => $fields['token'],
+			Claim_Page::FIELD_NONCE => $fields['nonce'],
+			Claim_Page::FIELD_EMAIL => $fields['email'],
+		) + ( $fields['share'] ? array( Claim_Page::FIELD_SHARE => '1' ) : array() );
+	}
+
+	public function test_rest_twin_answers_as_the_page_does() {
+		$token    = $this->mint();
+		$cases    = array(
+			array( $token, 'GET', array() ),
+			array( $token, 'POST', $this->fields( $token, array( 'nonce' => 'bad' ) ) ),
+			array( $token, 'POST', $this->fields( $token, array( 'email' => 'not-an-email' ) ) ),
+			array( str_repeat( 'A', 43 ), 'GET', array() ),
+		);
+		$statuses = array();
+		foreach ( $cases as [ $path_token, $method, $fields ] ) {
+			$pretty = $this->page();
+			$body   = $this->serve( $pretty, $path_token, $method, $fields );
+			$twin   = $this->page();
+			$tbody  = $this->rest( $twin, $path_token, $method, $fields ? self::form_post( $fields ) : array() );
+			$this->assertSame( self::response_of( $pretty, $body ), self::response_of( $twin, $tbody ), $method . ' ' . $path_token );
+			$statuses[] = $twin->status;
+		}
+		$this->assertSame( array( 200, 403, 400, 410 ), $statuses );
+		$this->assertSame( Badge_Repository::PENDING, ( new Badge_Repository() )->get( $this->badge_id )['status'] );
+	}
+
+	public function test_rest_twin_post_claims_and_its_form_posts_to_the_pretty_url() {
+		$token = $this->mint();
+		$form  = $this->rest( $this->page(), $token );
+		$this->assertStringContainsString( 'action="' . esc_url( Claim_Page::url( $token ) ) . '"', $form );
+
+		$page = $this->page();
+		$body = $this->rest( $page, $token, 'POST', self::form_post( $this->fields( $token, array( 'share' => true ) ) ) );
+		$this->assertSame( 200, $page->status, $body );
+		$this->assert_private_headers( $page );
+		$badge = ( new Badge_Repository() )->get( $this->badge_id );
+		$this->assertSame( Badge_Repository::ISSUED, $badge['status'] );
+		$this->assertTrue( $badge['shared'] );
+		$this->assertStringContainsString( esc_url( home_url( '/badges/' . $this->badge_id . '.json' ) ), $body );
+
+		$again = $this->page();
+		$this->rest( $again, $token, 'POST', self::form_post( $this->fields( $token ) ) );
+		$this->assertSame( 410, $again->status );
+		$this->assertCount( 1, $this->issued );
+	}
+
 	private function fields( string $token, array $overrides = array() ): array {
 		return $overrides + array(
 			'token' => $token,
@@ -644,7 +739,7 @@ class Claim_Handler_Test extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '/<input[^>]+type="email"[^>]+name="lledger_email"/', $body );
 		$this->assertMatchesRegularExpression( '/<input[^>]+type="checkbox"[^>]+name="lledger_share"/', $body );
 		$this->assertMatchesRegularExpression( '/<input[^>]+name="lledger_token"[^>]+value="' . preg_quote( $token, '/' ) . '"/', $body );
-		$this->assertMatchesRegularExpression( '/name="_wpnonce" value="' . preg_quote( wp_create_nonce( Claim_Page::nonce_action( $token ) ), '/' ) . '"/', $body );
+		$this->assertMatchesRegularExpression( '/name="lledger_nonce" value="' . preg_quote( wp_create_nonce( Claim_Page::nonce_action( $token ) ), '/' ) . '"/', $body );
 		$this->assertStringNotContainsString( self::NAME, $body );
 		$this->assertNotNull( ( new Link_Repository() )->resolve( $token, 'claim' ) );
 	}

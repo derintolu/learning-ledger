@@ -8,10 +8,11 @@
 namespace LearningLedger\Badges\Issuer;
 
 use LearningLedger\Kernel\Module;
+use LearningLedger\Kernel\Page_Route;
 
 /**
- * Serves did.json at `/.well-known/did.json` and `/issuer/did.json`, and the issuer
- * Profile at `GET /learning-ledger/v1/issuer`.
+ * Serves did.json at `/.well-known/did.json` and `/issuer/did.json` (and its REST twin
+ * `GET /learning-ledger/v1/page/did`), and the issuer Profile at `GET /learning-ledger/v1/issuer`.
  */
 class Issuer_Module implements Module {
 
@@ -78,6 +79,25 @@ class Issuer_Module implements Module {
 		if ( '' === (string) get_query_var( self::QUERY_VAR ) ) {
 			return;
 		}
+		$this->serve_did();
+	}
+
+	/**
+	 * `GET page/did`: the REST twin of the did.json rewrites.
+	 *
+	 * @return void
+	 */
+	public function serve_did_rest(): void {
+		Page_Route::start();
+		$this->serve_did();
+	}
+
+	/**
+	 * Send did.json and end the request.
+	 *
+	 * @return void
+	 */
+	public function serve_did(): void {
 		try {
 			$body = wp_json_encode( Did_Document::document(), JSON_UNESCAPED_SLASHES );
 		} catch ( \RuntimeException $e ) {
@@ -94,7 +114,7 @@ class Issuer_Module implements Module {
 	}
 
 	/**
-	 * Register the issuer profile route.
+	 * Register the issuer profile route and the did.json twin.
 	 *
 	 * @return void
 	 */
@@ -108,6 +128,7 @@ class Issuer_Module implements Module {
 				'permission_callback' => '__return_true',
 			)
 		);
+		Page_Route::register( 'did', 'GET', array( $this, 'serve_did_rest' ) );
 	}
 
 	/**

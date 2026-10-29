@@ -11,6 +11,7 @@ use LearningLedger\Badges\Claim\Claim_Page;
 use LearningLedger\Badges\Issuer\Issuer_Profile;
 use LearningLedger\Badges\Pipeline\Badge_Repository;
 use LearningLedger\Crypto\Hmac;
+use LearningLedger\Kernel\Page_Route;
 use LearningLedger\Util\Clock;
 use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Util\Json;
@@ -24,7 +25,8 @@ use LearningLedger\Util\Uuid;
  * for the signed `exp` and `sig` parameters the claim result page adds (Claim_Page::download_url(),
  * valid until `exp`, at most 15 minutes ahead). The page shows the achievement, the issuer
  * and the issue date, never the recipient; the downloads carry the credential, whose only
- * recipient identity is the salted hash.
+ * recipient identity is the salted hash. `GET /learning-ledger/v1/page/badge/<uuid>` and
+ * `.../page/badge/<uuid>.json|.png` are their REST twins.
  *
  * Not final so tests can capture the status and headers.
  */
@@ -116,6 +118,37 @@ class Badge_Page {
 		$sig = isset( $_GET['sig'] ) && is_string( $_GET['sig'] ) ? sanitize_text_field( wp_unslash( $_GET['sig'] ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$this->serve( $id, is_string( $format ) ? $format : '', $exp, $sig );
+	}
+
+	/**
+	 * `GET page/badge/<uuid>` and `GET page/badge/<uuid>.<format>`: the REST twins of the rewrites.
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return \WP_REST_Response The 404, when serve() did not end the request.
+	 */
+	public function serve_rest( \WP_REST_Request $r ): \WP_REST_Response {
+		Page_Route::start();
+		$exp = $r->get_param( 'exp' );
+		$sig = $r->get_param( 'sig' );
+		$this->serve(
+			(string) $r['id'],
+			is_string( $r['format'] ) ? $r['format'] : '',
+			is_string( $exp ) ? sanitize_text_field( $exp ) : '',
+			is_string( $sig ) ? sanitize_text_field( $sig ) : ''
+		);
+		return Page_Route::not_found();
+	}
+
+	/**
+	 * Register the REST twins (on `rest_api_init`).
+	 *
+	 * @return void
+	 */
+	public function register_routes(): void {
+		$uuid = '(?P<id>[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})';
+		Page_Route::register( 'badge/' . $uuid, 'GET', array( $this, 'serve_rest' ) );
+		Page_Route::register( 'badge/' . $uuid . '\.(?P<format>json|png)', 'GET', array( $this, 'serve_rest' ) );
 	}
 
 	/**

@@ -178,6 +178,32 @@ class Did_Document_Test extends WP_UnitTestCase {
 		$this->assertSame( '', ob_get_clean() );
 	}
 
+	public function test_did_rest_twin_serves_what_the_rewrite_serves() {
+		Key_Store::generate();
+		$module = $this->recording_module();
+		$module->register();
+		$module->add_rewrites();
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->go_to( home_url( '/.well-known/did.json' ) );
+		$pretty = $this->serve( $module );
+		$sent   = array( $module->status, $module->sent );
+
+		$module->status = 0;
+		$module->sent   = array();
+		ob_start();
+		try {
+			$module->serve_did_rest();
+			$this->fail( 'Expected the response to finish' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'finished', $e->getMessage() );
+		} finally {
+			$twin = ob_get_clean();
+		}
+		$this->assertSame( $pretty, $twin );
+		$this->assertSame( $sent, array( $module->status, $module->sent ) );
+		$this->assertSame( 200, $module->status );
+	}
+
 	public function test_did_json_unencodable_document_is_500() {
 		Key_Store::generate();
 		$module = $this->recording_module();

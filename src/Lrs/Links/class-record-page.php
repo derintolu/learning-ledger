@@ -8,6 +8,7 @@
 namespace LearningLedger\Lrs\Links;
 
 use LearningLedger\Db\Tables;
+use LearningLedger\Kernel\Page_Route;
 use LearningLedger\Lrs\Auth\Bindings;
 use LearningLedger\Lrs\Auth\Client;
 use LearningLedger\Lrs\Auth\Principal;
@@ -31,6 +32,7 @@ use LearningLedger\Xapi\Formatter;
  * as escaped JSON in a `<pre>`; `?download=ndjson` and `?download=json` give the whole record as
  * the NDJSON exporter writes it. The link works any number of times until it expires; an expired
  * or unknown token gets a 410 page. Every response is `no-store`, `noindex` and `no-referrer`.
+ * `GET /learning-ledger/v1/page/record/<token>` is its REST twin; its links stay pretty.
  *
  * Not final so tests can capture the status and headers.
  */
@@ -142,6 +144,29 @@ class Record_Page {
 		$more     = isset( $_GET['more'] ) && is_string( $_GET['more'] ) ? sanitize_text_field( wp_unslash( $_GET['more'] ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$this->serve( $token, $download, $more );
+	}
+
+	/**
+	 * `GET page/record/<token>`: the REST twin of the rewrite.
+	 *
+	 * @param \WP_REST_Request $r Request.
+	 *
+	 * @return void
+	 */
+	public function serve_rest( \WP_REST_Request $r ): void {
+		Page_Route::start();
+		$download = $r->get_param( 'download' );
+		$more     = $r->get_param( 'more' );
+		$this->serve( (string) $r['token'], is_string( $download ) ? sanitize_key( $download ) : '', is_string( $more ) ? sanitize_text_field( $more ) : '' );
+	}
+
+	/**
+	 * Register the REST twin (on `rest_api_init`).
+	 *
+	 * @return void
+	 */
+	public function register_route(): void {
+		Page_Route::register( 'record/(?P<token>[A-Za-z0-9_-]{43})', 'GET', array( $this, 'serve_rest' ) );
 	}
 
 	/**

@@ -165,6 +165,75 @@ class Badge_Page_Test extends WP_UnitTestCase {
 		$this->assertSame( '', $body );
 	}
 
+	/**
+	 * Serve one request through the REST twin.
+	 *
+	 * @param Badge_Page $page   Page.
+	 * @param string     $id     Badge id in the route.
+	 * @param string     $format '', 'json' or 'png'.
+	 * @param array      $query  Query parameters.
+	 *
+	 * @return array{0:string,1:WP_REST_Response|null} Body, and the response when the page left the 404 to the twin.
+	 */
+	private function rest( Badge_Page $page, string $id, string $format = '', array $query = array() ): array {
+		$r = new WP_REST_Request( 'GET', '/learning-ledger/v1/page/badge/' . $id . ( '' === $format ? '' : '.' . $format ) );
+		$r->set_url_params( array( 'id' => $id ) + ( '' === $format ? array() : array( 'format' => $format ) ) );
+		$r->set_query_params( $query );
+		$response = null;
+		ob_start();
+		try {
+			$response = $page->serve_rest( $r );
+			if ( ! $page->missing ) {
+				$this->fail( 'Expected the response to finish' );
+			}
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'finished', $e->getMessage() );
+		} finally {
+			$body = (string) ob_get_clean();
+		}
+		return array( $body, $response );
+	}
+
+	public function test_rest_twins_answer_as_the_pages_do() {
+		[ $shared ]    = $this->issued( true );
+		[ $unshared ]  = $this->issued( false );
+		[ $exp, $sig ] = self::signed( $unshared, $this->t0->getTimestamp() + 600 );
+		$cases         = array(
+			array( $shared, '', '', '' ),
+			array( $shared, 'json', '', '' ),
+			array( $shared, 'png', '', '' ),
+			array( $unshared, 'json', $exp, $sig ),
+			array( $unshared, '', '', '' ),
+			array( $unshared, 'json', $exp, 'bad' ),
+			array( Uuid::v4(), '', '', '' ),
+		);
+		$statuses      = array();
+		foreach ( $cases as [ $id, $format, $e, $g ] ) {
+			$pretty               = $this->page();
+			$body                 = $this->serve( $pretty, $id, $format, $e, $g );
+			$twin                 = $this->page();
+			[ $tbody, $response ] = $this->rest(
+				$twin,
+				$id,
+				$format,
+				'' === $e ? array() : array(
+					'exp' => $e,
+					'sig' => $g,
+				)
+			);
+			$label                = $id . '.' . $format;
+			$blank                = static fn( $v ) => is_string( $v ) ? (string) preg_replace( '/nonce-[A-Za-z0-9_-]+|nonce="[A-Za-z0-9_-]+"/', 'nonce', $v ) : $v;
+			$this->assertSame( array_map( $blank, array( $pretty->status, $pretty->missing, $body ) + array( 3 => array_map( $blank, $pretty->sent ) ) ), array_map( $blank, array( $twin->status, $twin->missing, $tbody ) + array( 3 => array_map( $blank, $twin->sent ) ) ), $label );
+			if ( $twin->missing ) {
+				$this->assertSame( 404, $response->get_status(), $label );
+				$this->assertSame( 'text/html; charset=utf-8', $response->get_headers()['Content-Type'] );
+				$this->assertStringContainsString( '<title>Not found</title>', $response->get_data() );
+			}
+			$statuses[] = $twin->status;
+		}
+		$this->assertSame( array( 200, 200, 200, 200, 404, 404, 404 ), $statuses );
+	}
+
 	public function test_unshared_badge_page_and_downloads_are_404() {
 		[ $id ] = $this->issued( false );
 		foreach ( array( '', 'json', 'png' ) as $format ) {

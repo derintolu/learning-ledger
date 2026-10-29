@@ -22,6 +22,7 @@ final class Claim_Module implements Module {
 	public function register(): void {
 		$page = new Claim_Page();
 		add_action( 'rest_api_init', array( new Claim_Links_Controller(), 'routes' ) );
+		add_action( 'rest_api_init', array( $page, 'register_route' ) );
 		add_action( 'init', array( $page, 'add_rewrite' ) );
 		add_filter( 'query_vars', array( $page, 'query_vars' ) );
 		add_action( 'template_redirect', array( $page, 'maybe_serve' ), 0 );
