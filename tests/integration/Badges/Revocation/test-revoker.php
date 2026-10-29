@@ -22,6 +22,7 @@ use LearningLedger\Lrs\Auth\Principal;
 use LearningLedger\Lrs\Auth\Scopes;
 use LearningLedger\Lrs\Links\Link_Repository;
 use LearningLedger\Lrs\Privacy\Actor_Eraser;
+use LearningLedger\Lrs\Privacy\Erase_Module;
 use LearningLedger\Lrs\Statements\Statement_Store;
 use LearningLedger\Tests\Client_Factory;
 use LearningLedger\Util\Clock;
@@ -375,6 +376,74 @@ class Revoker_Test extends WP_UnitTestCase {
 		$this->assertTrue( self::list_verifies( $badge['status_list_id'] ) );
 		$this->assertSame( Badge_Repository::ISSUED, ( new Badge_Repository() )->get( $other )['status'] );
 		$this->assertSame( 1, self::badge_rows( 'learner-2' ) );
+	}
+
+	private function post_erase( array $body ): WP_REST_Response {
+		global $wp_rest_server;
+		( new Erase_Module() )->register();
+		$wp_rest_server = new WP_REST_Server(); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		do_action( 'rest_api_init', $wp_rest_server );
+		$c = Client_Factory::create( array( Scopes::ACTORS_ERASE ), array( 'bindings' => array( 'actor_home_page' => self::HOME ) ) );
+		$r = new WP_REST_Request( 'POST', '/learning-ledger/v1/actors/erase' );
+		$r->set_header( 'Authorization', 'Basic ' . base64_encode( $c['id'] . ':' . $c['secret'] ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		$r->set_header( 'Content-Type', 'application/json' );
+		$r->set_body( wp_json_encode( $body ) );
+		$res            = rest_get_server()->dispatch( $r );
+		$wp_rest_server = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		return $res;
+	}
+
+	public function test_erasing_without_revoking_badges_keeps_issued_ones_valid_and_revokes_the_rest() {
+		( new Revocation_Module() )->register();
+		$issued  = $this->issued( 'https://example.org/badges/one' );
+		$pending = $this->pending( 'https://example.org/badges/two' );
+		$held    = $this->pending( 'https://example.org/badges/three', 'learner-1', null, Badge_Repository::HELD );
+		$badge   = ( new Badge_Repository() )->get( $issued );
+
+		$res = $this->post_erase(
+			array(
+				'actor'        => self::actor( 'learner-1' ),
+				'revokeBadges' => false,
+			)
+		);
+
+		$this->assertSame( 200, $res->get_status() );
+		$this->assertEqualsCanonicalizing( array( 'urn:uuid:' . $pending, 'urn:uuid:' . $held ), array_column( $this->revoked, 0 ) );
+		$this->assertNull( ( new Badge_Repository() )->get( $pending ) );
+		$this->assertNull( ( new Badge_Repository() )->get( $held ) );
+		$kept = ( new Badge_Repository() )->get( $issued );
+		$this->assertSame( Badge_Repository::ISSUED, $kept['status'] );
+		$this->assertSame( $badge['credential'], $kept['credential'] );
+		$this->assertSame( 1, self::badge_rows( 'learner-1' ) );
+		$this->assertNotContains( $badge['status_index'], self::set_bits( $badge['status_list_id'] ) );
+	}
+
+	public function test_erasing_with_revoke_badges_true_or_omitted_revokes_issued_badges() {
+		( new Revocation_Module() )->register();
+		$first = $this->issued( 'https://example.org/badges/one' );
+		$badge = ( new Badge_Repository() )->get( $first );
+
+		$res = $this->post_erase(
+			array(
+				'actor'        => self::actor( 'learner-1' ),
+				'revokeBadges' => true,
+			)
+		);
+
+		$this->assertSame( 200, $res->get_status() );
+		$this->assertSame( array( 'urn:uuid:' . $first ), array_column( $this->revoked, 0 ) );
+		$this->assertSame( 0, self::badge_rows( 'learner-1' ) );
+		$this->assertContains( $badge['status_index'], self::set_bits( $badge['status_list_id'] ) );
+
+		$this->revoked = array();
+		$second        = $this->issued( 'https://example.org/badges/two', 'learner-2', $this->satisfied( 'learner-2' ) );
+		$badge         = ( new Badge_Repository() )->get( $second );
+
+		$this->assertSame( 200, $this->post_erase( array( 'actor' => self::actor( 'learner-2' ) ) )->get_status() );
+
+		$this->assertSame( array( 'urn:uuid:' . $second ), array_column( $this->revoked, 0 ) );
+		$this->assertSame( 0, self::badge_rows( 'learner-2' ) );
+		$this->assertContains( $badge['status_index'], self::set_bits( $badge['status_list_id'] ) );
 	}
 
 	public function test_erasure_keeps_a_badge_whose_revocation_failed_and_a_second_erase_finishes_it() {

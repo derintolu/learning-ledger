@@ -123,14 +123,21 @@ final class Revoker {
 	 *
 	 * A badge that could not be revoked keeps its row, so that it can still be revoked: its
 	 * shared copies would otherwise verify for ever. Erasing the actor again retries it.
+	 * Without $revoke_badges, issued (claimed) badges stay valid and keep their rows; badges
+	 * never claimed are still revoked and deleted.
 	 *
-	 * @param string $actor_hash Raw SHA-1 actor hash.
+	 * @param string  $actor_hash    Raw SHA-1 actor hash.
+	 * @param array   $counts        Erasure counts (unused).
+	 * @param boolean $revoke_badges Whether issued badges are revoked too.
 	 *
 	 * @return void
 	 */
-	public function on_actor_erased( string $actor_hash ): void {
+	public function on_actor_erased( string $actor_hash, array $counts = array(), bool $revoke_badges = true ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed -- the action passes the counts before the flag.
 		foreach ( $this->badges->for_actor( $actor_hash ) as $badge ) {
 			if ( Badge_Repository::REVOKED === $badge['status'] ) {
+				continue;
+			}
+			if ( ! $revoke_badges && Badge_Repository::ISSUED === $badge['status'] ) {
 				continue;
 			}
 			try {

@@ -357,6 +357,47 @@ class Actor_Eraser_Test extends WP_UnitTestCase {
 		$this->assertSame( 400, $this->post_erase( $c, 'not an object' )->get_status() );
 	}
 
+	public function test_route_passes_revoke_badges_to_the_action_defaulting_to_true() {
+		$seen = array();
+		add_action(
+			'learning_ledger/actor_erased',
+			static function ( string $hash, array $counts, bool $revoke_badges ) use ( &$seen ) {
+				$seen[] = $revoke_badges;
+			},
+			10,
+			3
+		);
+		$c = Client_Factory::create( array( Scopes::ACTORS_ERASE ), array( 'bindings' => array( 'actor_home_page' => 'https://site.example' ) ) );
+
+		foreach ( array( array(), array( 'revokeBadges' => true ), array( 'revokeBadges' => false ) ) as $extra ) {
+			$this->assertSame( 200, $this->post_erase( $c, array( 'actor' => self::agent( 'erased' ) ) + $extra )->get_status() );
+		}
+		( new Actor_Eraser() )->erase( Agent_Identity::from_array( self::agent( 'erased' ) ), 'user:1' );
+
+		$this->assertSame( array( true, true, false, true ), $seen );
+	}
+
+	public function test_route_non_boolean_revoke_badges_400_and_nothing_erased() {
+		$a = Agent_Identity::from_array( self::agent( 'erased' ) );
+		self::store( array( self::statement( self::agent( 'erased' ) ) ) );
+		$c = Client_Factory::create( array( Scopes::ACTORS_ERASE ), array( 'bindings' => array( 'actor_home_page' => 'https://site.example' ) ) );
+
+		foreach ( array( 'false', 0, null ) as $value ) {
+			$res = $this->post_erase(
+				$c,
+				array(
+					'actor'        => self::agent( 'erased' ),
+					'revokeBadges' => $value,
+				)
+			);
+			$this->assertSame( 400, $res->get_status() );
+			$this->assertSame( 'lledger_invalid', $res->get_data()['code'] );
+			$this->assertSame( 'revokeBadges', $res->get_data()['data']['field'] );
+		}
+		$this->assertSame( 1, self::rows( 'statements', 'actor_hash = UNHEX(%s)', array( bin2hex( $a->hash() ) ) ) );
+		$this->assertSame( 0, self::rows( 'audit', 'event = %s', array( 'actor_erased' ) ) );
+	}
+
 	/**
 	 * Make the first query starting with a prefix fail, as a lock-wait timeout would.
 	 *

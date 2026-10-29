@@ -14,8 +14,9 @@ use LearningLedger\Util\Invalid_Input;
 use LearningLedger\Xapi\Agent_Identity;
 
 /**
- * `POST /learning-ledger/v1/actors/erase` `{actor}`: Basic auth, scope `actors/erase`, the actor
- * within the client's actor bindings. Answers 200 with the erasure counts.
+ * `POST /learning-ledger/v1/actors/erase` `{actor, revokeBadges?}`: Basic auth, scope
+ * `actors/erase`, the actor within the client's actor bindings. `revokeBadges` (default true)
+ * false leaves the actor's issued badges valid. Answers 200 with the erasure counts.
  */
 final class Erase_Controller {
 
@@ -79,12 +80,16 @@ final class Erase_Controller {
 		} catch ( Invalid_Input $e ) {
 			return self::error( 'lledger_invalid', $e->getMessage(), 400, 'actor' );
 		}
+		$revoke_badges = array_key_exists( 'revokeBadges', $body ) ? $body['revokeBadges'] : true;
+		if ( ! is_bool( $revoke_badges ) ) {
+			return self::error( 'lledger_invalid', __( 'revokeBadges must be a boolean.', 'learning-ledger' ), 400, 'revokeBadges' );
+		}
 		if ( ! $p->bindings()->allows_actor( $actor ) ) {
 			return self::error( 'lledger_forbidden', __( 'The actor is outside the client bindings.', 'learning-ledger' ), 403, 'actor' );
 		}
 
 		try {
-			$counts = $this->eraser->erase( $actor, 'client:' . $p->client_id() );
+			$counts = $this->eraser->erase( $actor, 'client:' . $p->client_id(), $revoke_badges );
 		} catch ( \Throwable $e ) {
 			return self::error( 'lledger_storage', __( 'The actor could not be erased.', 'learning-ledger' ), 500 );
 		}

@@ -23,7 +23,7 @@ final class Revocation_Module implements Module {
 	public function register(): void {
 		$revoker = new Revoker();
 		add_action( 'learning_ledger/statement_voided', array( $revoker, 'on_statement_voided' ) );
-		add_action( 'learning_ledger/actor_erased', array( $revoker, 'on_actor_erased' ) );
+		add_action( 'learning_ledger/actor_erased', array( $revoker, 'on_actor_erased' ), 10, 3 );
 		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\WP_CLI' ) ) {
 			$command = new Revoke_Command( $revoker );
 			\WP_CLI::add_command( 'learning-ledger badges revoke', array( $command, 'revoke' ) );

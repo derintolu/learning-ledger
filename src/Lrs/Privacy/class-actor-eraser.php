@@ -72,13 +72,14 @@ final class Actor_Eraser {
 	/**
 	 * Erase an actor. Erasing an actor again finds nothing and returns zero counts.
 	 *
-	 * @param Agent_Identity $a  Actor.
-	 * @param string         $by Who asked, for the audit row, e.g. `client:<id>` or `user:<id>`.
+	 * @param Agent_Identity $a             Actor.
+	 * @param string         $by            Who asked, for the audit row, e.g. `client:<id>` or `user:<id>`.
+	 * @param boolean        $revoke_badges Whether the actor's issued badges are revoked too, passed to `learning_ledger/actor_erased`.
 	 *
 	 * @return array{statements:int,refs:int,documents:int,agents:int,tokens:int,links:int}
 	 * @throws \Throwable Whatever failed, after rolling back.
 	 */
-	public function erase( Agent_Identity $a, string $by ): array {
+	public function erase( Agent_Identity $a, string $by, bool $revoke_badges = true ): array {
 		global $wpdb;
 		$hash = $a->hash();
 
@@ -117,7 +118,7 @@ final class Actor_Eraser {
 
 		Audit_Log::record( 'actor_erased', $counts, $by );
 		try {
-			do_action( 'learning_ledger/actor_erased', $hash, $counts ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
+			do_action( 'learning_ledger/actor_erased', $hash, $counts, $revoke_badges ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- Plugin hook names use the `learning_ledger/` prefix.
 		} catch ( \Throwable $e ) {
 			// The erasure is committed; a failing listener must not turn it into an error for the caller.
 			error_log( 'Learning Ledger: actor_erased listener failed: ' . get_class( $e ) . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Operators need the cause.
