@@ -221,17 +221,14 @@ final class Program_Repository {
 	 * @return int[]
 	 */
 	public function all_ids(): array {
+		global $wpdb;
+		// A direct query, not get_posts(), for the reason find_by_key() gives.
 		return array_map(
 			'intval',
-			get_posts(
-				array(
-					'post_type'      => self::POST_TYPE,
-					'post_status'    => array( 'publish', 'draft', 'pending', 'private', 'future' ),
-					'fields'         => 'ids',
-					'posts_per_page' => -1,
-					'orderby'        => 'ID',
-					'order'          => 'ASC',
-					'no_found_rows'  => true,
+			$wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->prepare(
+					"SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status IN ('publish', 'draft', 'pending', 'private', 'future') ORDER BY ID ASC",
+					self::POST_TYPE
 				)
 			)
 		);

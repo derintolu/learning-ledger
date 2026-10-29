@@ -27,6 +27,10 @@ use LearningLedger\Connector\Programs\Program_Repository;
 /**
  * Talks to Sensei only through its public PHP API, its post types and its
  * documented post meta. Never Sensei's tables, comments or Sensei\Internal.
+ *
+ * Lessons, quizzes and stable keys are read from the posts and postmeta tables with $wpdb,
+ * not WP_Query: some hosts filter post queries on anonymous requests (pre_get_posts), which
+ * is what signed course-server requests are. The reads mirror Sensei 4.26.4's own queries.
  */
 final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 
@@ -146,7 +150,7 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 				get_the_title( $lesson_id ),
 				$this->stable_key( $lesson_id ),
 				$order > 0 ? $order : $position + 1,
-				(bool) Sensei()->lesson->lesson_has_quiz_with_questions_and_pass_required( $lesson_id )
+				$this->has_pass_required_quiz( $lesson_id )
 			);
 		}
 		return new Course_Tree( $course_id, $course->post_title, $this->stable_key( $course_id ), $nodes );
@@ -423,10 +427,92 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 	 * @return int[]
 	 */
 	private function lesson_ids( int $course_id ): array {
+		global $wpdb;
 		if ( $course_id <= 0 ) {
 			return array();
 		}
-		return array_values( array_map( 'intval', (array) Sensei()->course->course_lessons( $course_id, 'any', 'ids' ) ) );
+		// Sensei_Course::course_lessons( $course_id, 'any', 'ids' ): lessons whose `_lesson_course`
+		// is the course, by date, then stably by `_order_<course>` (unset or 0 sorts last).
+		$excluded = self::excluded_statuses();
+		$ids      = array_map(
+			'intval',
+			$wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->prepare(
+					'SELECT DISTINCT p.ID, p.post_date FROM %i p INNER JOIN %i m ON m.post_id = p.ID AND m.meta_key = %s AND m.meta_value = %s'
+					. ' WHERE p.post_type = %s AND p.post_status NOT IN (' . implode( ',', array_fill( 0, count( $excluded ), '%s' ) ) . ') ORDER BY p.post_date ASC, p.ID ASC', // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- placeholders only.
+					array_merge( array( $wpdb->posts, $wpdb->postmeta, '_lesson_course', (string) $course_id, 'lesson' ), $excluded )
+				)
+			)
+		);
+		if ( count( $ids ) > 1 ) {
+			update_postmeta_cache( $ids );
+			$order = array();
+			foreach ( $ids as $id ) {
+				$order[ $id ] = (int) get_post_meta( $id, '_order_' . $course_id, true );
+				$order[ $id ] = $order[ $id ] ? $order[ $id ] : 100000;
+			}
+			usort( $ids, static fn( int $a, int $b ): int => $order[ $a ] <=> $order[ $b ] );
+		}
+		$lessons = apply_filters( 'sensei_course_get_lessons', array_values( array_filter( array_map( 'get_post', $ids ) ) ), $course_id ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Sensei's own filter, as course_lessons() applies it.
+		return array_values( array_map( static fn( $lesson ): int => (int) $lesson->ID, (array) $lessons ) );
+	}
+
+	/**
+	 * Whether the lesson has a quiz with questions that must be passed, as
+	 * Sensei_Lesson::lesson_has_quiz_with_questions_and_pass_required() answers it.
+	 *
+	 * @param integer $lesson_id Lesson ID.
+	 *
+	 * @return boolean
+	 */
+	private function has_pass_required_quiz( int $lesson_id ): bool {
+		$quiz = $this->lesson_quiz( $lesson_id );
+		if ( 0 === $quiz || ! (bool) get_post_meta( $lesson_id, '_quiz_has_questions', true ) ) {
+			return false;
+		}
+		return (bool) get_post_meta( $quiz, '_pass_required', true );
+	}
+
+	/**
+	 * The lesson's quiz, as Sensei_Lesson::lesson_quizzes( $lesson_id, 'any', 'ids' ) finds it: the
+	 * quiz whose parent is the lesson (by title, descending), else the quiz in `_lesson_quiz`.
+	 *
+	 * @param integer $lesson_id Lesson ID.
+	 *
+	 * @return integer Quiz ID, 0 when none.
+	 */
+	private function lesson_quiz( int $lesson_id ): int {
+		global $wpdb;
+		$excluded = self::excluded_statuses();
+		$quiz     = (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				'SELECT ID FROM %i WHERE post_type = %s AND post_parent = %d AND post_status NOT IN (' . implode( ',', array_fill( 0, count( $excluded ), '%s' ) ) . ') ORDER BY post_title DESC, ID DESC LIMIT 1', // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- placeholders only.
+				array_merge( array( $wpdb->posts, 'quiz', $lesson_id ), $excluded )
+			)
+		);
+		if ( $quiz > 0 ) {
+			return $quiz;
+		}
+		$meta = (int) get_post_meta( $lesson_id, '_lesson_quiz', true );
+		if ( $meta <= 0 ) {
+			return 0;
+		}
+		return (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->prepare(
+				'SELECT ID FROM %i WHERE ID = %d AND post_type = %s AND post_status NOT IN (' . implode( ',', array_fill( 0, count( $excluded ), '%s' ) ) . ')', // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- placeholders only.
+				array_merge( array( $wpdb->posts, $meta, 'quiz' ), $excluded )
+			)
+		);
+	}
+
+	/**
+	 * Statuses WP_Query's `post_status => 'any'` leaves out (trash, auto-draft, ...).
+	 *
+	 * @return string[]
+	 */
+	private static function excluded_statuses(): array {
+		$statuses = array_values( get_post_stati( array( 'exclude_from_search' => true ) ) );
+		return $statuses ? $statuses : array( 'trash' );
 	}
 
 	/**
@@ -440,34 +526,25 @@ final class Sensei_Adapter implements LMS_Adapter, Certificate_Provider {
 	 * @return integer|null
 	 */
 	private function find_by_key( string $post_type, string $key, array $courses = array(), bool $unique = false ): ?int {
+		global $wpdb;
 		if ( '' === $key ) {
 			return null;
 		}
-		$args = array(
-			'post_type'      => $post_type,
-			'post_status'    => 'any',
-			'fields'         => 'ids',
-			'posts_per_page' => $unique ? 2 : 1,
-			'orderby'        => 'ID',
-			'order'          => 'ASC',
-			'no_found_rows'  => true,
-			'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
-				array(
-					'key'   => self::STABLE_KEY,
-					'value' => $key,
-				),
-			),
-		);
+		$excluded = self::excluded_statuses();
+		$sql      = 'SELECT DISTINCT p.ID FROM %i p INNER JOIN %i k ON k.post_id = p.ID AND k.meta_key = %s AND k.meta_value = %s';
+		$args     = array( $wpdb->posts, $wpdb->postmeta, self::STABLE_KEY, $key );
+		$where    = '';
 		if ( $courses && 'course' === $post_type ) {
-			$args['post__in'] = array_map( 'intval', $courses );
+			$where .= ' AND p.ID IN (' . implode( ',', array_fill( 0, count( $courses ), '%d' ) ) . ')';
 		} elseif ( $courses ) {
-			$args['meta_query'][] = array(
-				'key'     => '_lesson_course',
-				'value'   => array_map( 'strval', $courses ),
-				'compare' => 'IN',
-			);
+			$sql   .= ' INNER JOIN %i c ON c.post_id = p.ID AND c.meta_key = %s AND c.meta_value IN (' . implode( ',', array_fill( 0, count( $courses ), '%s' ) ) . ')';
+			$args[] = $wpdb->postmeta;
+			$args[] = '_lesson_course';
+			$args   = array_merge( $args, array_map( 'strval', $courses ) );
 		}
-		$ids = get_posts( $args );
+		$sql .= ' WHERE p.post_type = %s AND p.post_status NOT IN (' . implode( ',', array_fill( 0, count( $excluded ), '%s' ) ) . ')' . $where . ' ORDER BY p.ID ASC LIMIT %d';
+		$args = array_merge( $args, array( $post_type ), $excluded, $courses && 'course' === $post_type ? array_map( 'intval', $courses ) : array(), array( $unique ? 2 : 1 ) );
+		$ids  = $wpdb->get_col( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- $sql holds placeholders only.
 		if ( ! $ids || ( $unique && count( $ids ) > 1 ) ) {
 			return null;
 		}

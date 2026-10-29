@@ -95,6 +95,39 @@ class Program_Repository_Test extends WP_UnitTestCase {
 		$this->assertNull( $this->repo->find_by_key( 'hosted' ) );
 	}
 
+	public function test_all_ids_ignore_a_host_that_empties_post_queries() {
+		$a     = $this->make( 'a', 'https://a/a/', array( '_lledger_courses' => array( 5 ) ) );
+		$b     = $this->make( 'b', 'https://a/b/' );
+		$draft = $this->make( 'draft', 'https://a/d/' );
+		wp_update_post(
+			array(
+				'ID'          => $draft,
+				'post_status' => 'draft',
+			)
+		);
+		wp_trash_post( $this->make( 'gone', 'https://a/g/' ) );
+		$expected = array_map(
+			'intval',
+			get_posts(
+				array(
+					'post_type'      => 'lledger_program',
+					'post_status'    => array( 'publish', 'draft', 'pending', 'private', 'future' ),
+					'fields'         => 'ids',
+					'posts_per_page' => -1,
+					'orderby'        => 'ID',
+					'order'          => 'ASC',
+				)
+			)
+		);
+		$this->assertSame( array( $a, $b, $draft ), $expected );
+		$this->assertSame( $expected, $this->repo->all_ids() );
+
+		add_action( 'pre_get_posts', static fn( $q ) => $q->set( 'post__in', array( 0 ) ) );
+		$this->assertSame( $expected, $this->repo->all_ids() );
+		$this->assertSame( $a, $this->repo->for_lms_course( 5 ) );
+		$this->assertSame( $b, $this->repo->for_activity( 'https://a/b/lessons/k/au' ) );
+	}
+
 	public function test_for_activity_matches_longest_base() {
 		$short = $this->make( 'short', 'https://a/x/' );
 		$long  = $this->make( 'long', 'https://a/x/y/' );
