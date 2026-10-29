@@ -4,7 +4,7 @@ Tags: xapi, lrs, cmi5, open badges, elearning
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.1.5
+Stable tag: 0.1.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -188,6 +188,10 @@ Bundled data files, unmodified:
 The blocks and editor fields in `build/` are compiled from `src-js/` in https://github.com/derintolu/learning-ledger. To build them yourself, run `npm ci && npm run build` in a checkout.
 
 == Changelog ==
+
+= 0.1.6 =
+* New: `wp learning-ledger sensei storage tables` creates Sensei's progress tables and makes Sensei read progress from them (High-Performance Progress Storage), for hosts that empty comment queries; `wp learning-ledger sensei storage status` shows the storage.
+* New: the signed course-server status reports Sensei's progress storage as Sensei reads it, whether its progress tables exist, and which capability, granted to the service user in memory only, lets this host's queries through.
 
 = 0.1.5 =
 * New: the signed course-server status reports whether this host's post, user and comment queries work without a logged-in user, and Sensei's progress storage.
