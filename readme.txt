@@ -4,7 +4,7 @@ Tags: xapi, lrs, cmi5, open badges, elearning
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.1.1
+Stable tag: 0.1.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -188,6 +188,10 @@ Bundled data files, unmodified:
 The blocks and editor fields in `build/` are compiled from `src-js/` in https://github.com/derintolu/learning-ledger. To build them yourself, run `npm ci && npm run build` in a checkout.
 
 == Changelog ==
+
+= 0.1.2 =
+* Fix: on hosts that filter anonymous post queries, Sensei course lessons, lesson quizzes, stable-key lookups and the program list are read directly, so course-server package exports keep their lessons and imports update existing posts.
+* New: REST twins of the front-end pages under `learning-ledger/v1/page/` (`did`, `claim/<token>`, `badge/<uuid>`, `badge/<uuid>.json` and `.png`, `record/<token>`) for hosts that pass only REST requests to WordPress. The claim form's nonce field is now `lledger_nonce`.
 
 = 0.1.1 =
 * Fix: package export, import and the LRS course import no longer fail with a critical error on REST requests (wp_tempnam() is loaded before use).

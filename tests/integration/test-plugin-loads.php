@@ -7,7 +7,7 @@
 
 class Plugin_Loads_Test extends WP_UnitTestCase {
 	public function test_plugin_constants() {
-		$this->assertSame( '0.1.1', LEARNING_LEDGER_VERSION );
+		$this->assertSame( '0.1.2', LEARNING_LEDGER_VERSION );
 		$this->assertTrue( function_exists( 'LearningLedger\autoload_candidates' ) );
 	}
 }
